@@ -103,7 +103,7 @@
   --radius: 0.625rem;
   /* Cool tint (light): a faint cold blue (hue 240) in the greys, kept subtle so
      the surfaces still read as near-white, not sickly. Lightness unchanged. */
-  --background: oklch(0.995 0.002 240);
+  --background: oklch(0.995 0 0);
   --foreground: oklch(0.145 0.004 240);
   --card: oklch(0.995 0.002 240);
   --card-foreground: oklch(0.145 0.004 240);
@@ -152,7 +152,9 @@
   /* Cool tint: neutral greys carry a slight cold blue (hue 240) instead of being
      dead neutral. Lightness is unchanged from the neutral palette so contrast and
      readability stay exactly the same; only the hue shifts toward cold. */
-  --background: oklch(0.145 0.004 240);
+  /* Login screen and main content background: a touch lighter and fully neutral
+     (no blue), on request. Sidebar and cards keep their own tone. */
+  --background: oklch(0.17 0 0);
   --foreground: oklch(0.985 0.003 240);
   --card: oklch(0.205 0.005 240);
   --card-foreground: oklch(0.985 0.003 240);
