@@ -90,20 +90,19 @@
 }
 
 /* Animationsgeschwindigkeit aus den Einstellungen: stufenloser Regler ueber
-   --anim-scale. Greift nur wenn vom Normalwert abweichend (data-anim-scaled).
-   Elemente mit data-no-anim-scale (Spinner, der Regler selbst) bleiben aussen vor. */
+   --anim-scale, wirkt nur auf CSS-Transitions (Hover, Auf-/Zuklappen, Farbwechsel).
+   Greift nur wenn vom Normalwert abweichend (data-anim-scaled). Elemente mit
+   data-no-anim-scale (Spinner, der Regler selbst) bleiben aussen vor.
+
+   Keyframe-Animationen (Einblenden, Puls, Shimmer, xterm-Cursor-Blink) werden
+   bewusst NICHT mehr skaliert. Ihre Dauer pauschal auf eine feste Basis zu
+   zwingen hat lange Animationen zappeln lassen und brauchte einen Gegen-Hack
+   fuers Terminal. Ohne die animation-duration-Ueberschreibung laufen sie in
+   ihrer gedachten Geschwindigkeit. */
 html[data-anim-scaled] *:not([data-no-anim-scale]),
 html[data-anim-scaled] *:not([data-no-anim-scale])::before,
 html[data-anim-scaled] *:not([data-no-anim-scale])::after {
-  animation-duration: calc(160ms * var(--anim-scale, 1)) !important;
   transition-duration: calc(160ms * var(--anim-scale, 1)) !important;
-}
-
-/* Das Terminal von der Animations-Skalierung ausnehmen, sonst rast der
-   xterm-Cursor-Blink, weil die globale Regel oben seine Animationsdauer kapert. */
-html[data-anim-scaled] .xterm,
-html[data-anim-scaled] .xterm * {
-  animation-duration: 1s !important;
 }
 
 /* Radix legt das Positionierungs-Transform auf diesen Wrapper. Den niemals
