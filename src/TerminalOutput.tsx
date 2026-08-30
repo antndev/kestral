@@ -20,6 +20,8 @@ export function LiveTerminalOutput({ output }: { output: string }) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // Start from a clean node so a re-mount never opens xterm over stale DOM.
+    el.replaceChildren();
     const term = new XTerm({
       convertEol: true,
       disableStdin: true,
@@ -35,12 +37,19 @@ export function LiveTerminalOutput({ output }: { output: string }) {
     term.open(el);
     // Crisp GPU text, matching the interactive terminal; falls back to the DOM
     // renderer if WebGL is unavailable.
+    let webgl: WebglAddon | undefined;
     try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
+      webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        try {
+          webgl?.dispose();
+        } catch {
+          /* already gone */
+        }
+      });
       term.loadAddon(webgl);
     } catch {
-      /* no WebGL; DOM renderer stays */
+      webgl = undefined; /* no WebGL; DOM renderer stays */
     }
     try {
       fit.fit();
@@ -63,8 +72,22 @@ export function LiveTerminalOutput({ output }: { output: string }) {
     ro.observe(el);
     return () => {
       ro.disconnect();
-      term.dispose();
+      // Drop the ref first so a stream update firing during teardown bails out.
       termRef.current = null;
+      // Dispose the WebGL addon before the terminal, each guarded: collapsing the
+      // log tears these down synchronously and xterm can throw a benign
+      // `_isDisposed` on the dispose race. Swallow it so it never reaches React's
+      // error boundary.
+      try {
+        webgl?.dispose();
+      } catch {
+        /* WebGL already lost */
+      }
+      try {
+        term.dispose();
+      } catch {
+        /* benign _isDisposed race */
+      }
     };
     // Created once; live updates are handled by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -74,13 +97,17 @@ export function LiveTerminalOutput({ output }: { output: string }) {
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
-    if (output.length < written.current) {
-      term.clear();
-      written.current = 0;
-    }
-    if (output.length > written.current) {
-      term.write(output.slice(written.current));
-      written.current = output.length;
+    try {
+      if (output.length < written.current) {
+        term.clear();
+        written.current = 0;
+      }
+      if (output.length > written.current) {
+        term.write(output.slice(written.current));
+        written.current = output.length;
+      }
+    } catch {
+      /* terminal disposed mid-update; ignore */
     }
   }, [output]);
 
