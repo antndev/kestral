@@ -76,8 +76,9 @@ npm run build
   is ever granted access.
 - **AI is gated.** Off by default. Each host has separate command and file policies
   (`locked` / `confirm` / `free`). Changing a host's address, port or user resets its
-  AI policy to `locked`. AI file transfer is confined to `~/.kestral/ai-transfers`;
-  paths outside it are refused.
+  AI policy to `locked`. AI file transfer can name any local path (absolute or
+  `~/`-relative); a protected path on either the local or remote side is refused and
+  trips the kill switch.
 - **Host keys.** Trust-on-first-use with the SHA256 fingerprint logged; a changed key
   is refused with a distinct error. Note: entries currently live in the OpenSSH
   `~/.ssh/known_hosts`, not yet in the app's own encrypted store (`KESTRAL_DATA_DIR`

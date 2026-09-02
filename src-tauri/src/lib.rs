@@ -172,7 +172,6 @@ pub fn run() {
                     base_dir.join("snippets.json"),
                     vault.clone(),
                 )),
-                transfers_dir: base_dir.join("ai-transfers"),
             };
 
             let token_path = base_dir.join("mcp_token");

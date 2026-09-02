@@ -48,10 +48,10 @@ Use `upload` instead of writing files through shell heredocs. It avoids quoting
 problems entirely and it is logged as a file transfer. If you need a tool that has
 no shortcut above, run `tools` to see what exists and then use `call`.
 
-For `upload` and `download` the LOCAL path is relative to Kestral's own transfer
-folder (`~/.kestral/ai-transfers`); absolute paths and anything outside that folder
-are refused on purpose. To upload a file, write it into that folder first, then pass
-just its name. Downloads land in the same folder.
+For `upload` and `download` the LOCAL path is any path on this machine, absolute or
+`~/`-relative. Name the file and location directly, no staging folder. The one
+exception is a protected path (see below, e.g. `.ssh/authorized_keys`): naming it on
+either side is refused and stops AI access.
 
 ## How to work
 

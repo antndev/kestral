@@ -36,9 +36,9 @@ HELP = """kestral — control your servers through the running Kestral app
 File transfer uses the per-host FILE policy, which is separate from the command
 policy. A host may allow commands and still refuse file access.
 
-For upload/download the LOCAL path is relative to Kestral's transfer folder
-(~/.kestral/ai-transfers); absolute paths and anything outside it are refused.
-Write a file into that folder first, then upload it by name. Downloads land there.
+For upload/download the LOCAL path is any path on this machine, absolute or
+~/-relative; name it directly. Protected paths (e.g. .ssh/authorized_keys) are the
+exception: naming one is refused and stops AI access.
 """
 
 def die(msg, code=1):
