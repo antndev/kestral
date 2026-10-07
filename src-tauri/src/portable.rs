@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::error::{AppError, Result};
-use crate::model::{AuthMethod, Host, Snippet};
+use crate::model::{AuthMethod, Host, Identity, Snippet};
 use crate::state::Services;
 use crate::vault::{SecretKind, SecretStore};
 
@@ -28,6 +28,12 @@ struct Bundle {
     secrets: Vec<ExportedSecret>,
     hosts: Vec<Host>,
     snippets: Vec<Snippet>,
+    #[serde(default)]
+    identities: Vec<Identity>,
+    #[serde(default)]
+    collections: crate::collections::Collections,
+    #[serde(default)]
+    known_hosts: String,
 }
 
 #[derive(Serialize)]
@@ -38,6 +44,8 @@ pub struct ImportReport {
     pub secrets_skipped: usize,
     pub snippets_added: usize,
     pub snippets_skipped: usize,
+    pub identities_added: usize,
+    pub identities_skipped: usize,
 }
 
 fn b64() -> base64::engine::general_purpose::GeneralPurpose {
@@ -67,6 +75,9 @@ pub fn export(services: &Services, password: &str) -> Result<Vec<u8>> {
         secrets,
         hosts: services.hosts.list(),
         snippets: services.snippets.list(),
+        identities: services.identities.list()?,
+        collections: services.collections.read()?,
+        known_hosts: String::from_utf8_lossy(&crate::known_hosts::export_content()?).into_owned(),
     };
 
     let plaintext = Zeroizing::new(serde_json::to_vec(&bundle)?);
@@ -139,9 +150,24 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
         })
         .collect();
 
+    let identities: Vec<Identity> = bundle
+        .identities
+        .iter()
+        .cloned()
+        .map(|mut i| {
+            i.auth = remap_auth(i.auth, &remap);
+            i
+        })
+        .collect();
+
     services.vault.put_secrets(to_add)?;
+    let (identities_added, identities_skipped) = services.identities.import(identities)?;
     let (hosts_added, hosts_skipped) = services.hosts.import(hosts)?;
     let (snippets_added, snippets_skipped) = services.snippets.import(bundle.snippets.clone())?;
+    services.collections.import(bundle.collections.clone())?;
+    if !bundle.known_hosts.is_empty() {
+        crate::known_hosts::import_content(bundle.known_hosts.as_bytes())?;
+    }
 
     Ok(ImportReport {
         hosts_added,
@@ -150,6 +176,8 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
         secrets_skipped,
         snippets_added,
         snippets_skipped,
+        identities_added,
+        identities_skipped,
     })
 }
 
@@ -197,6 +225,7 @@ fn remap_auth(auth: AuthMethod, remap: &HashMap<String, String>) -> AuthMethod {
         AuthMethod::Password { secret_id } => AuthMethod::Password { secret_id: swap(secret_id) },
         AuthMethod::Key { secret_id } => AuthMethod::Key { secret_id: swap(secret_id) },
         AuthMethod::Agent => AuthMethod::Agent,
+        AuthMethod::Identity { identity_id } => AuthMethod::Identity { identity_id },
     }
 }
 
@@ -238,6 +267,13 @@ mod tests {
         };
         assert_ne!(new_id, "admin@server");
         assert!(used.contains(&new_id));
+    }
+
+    #[test]
+    fn legacy_bundle_collections_still_load() {
+        let json = r#"{"version":1,"secrets":[],"hosts":[],"snippets":[],"collections":{"groups":["Production"],"snippet_folders":["Docker"],"pinned":["a"],"recent":[{"host_id":"a","at":"2026-10-01T10:00:00Z"}]}}"#;
+        let bundle: Bundle = serde_json::from_str(json).unwrap();
+        assert_eq!(bundle.collections.snippet_folders, vec!["Docker"]);
     }
 
     #[test]

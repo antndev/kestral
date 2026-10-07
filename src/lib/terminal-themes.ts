@@ -5,7 +5,7 @@ export type TermThemeId = string;
 
 export const TERMINAL_THEMES: Record<string, TermTheme> = {
   "kestral-dark": {
-    name: "Kestral Dark",
+    name: "Kestral",
     theme: {
       background: "#1e1e1e",
       foreground: "#d4d4d4",
@@ -26,6 +26,32 @@ export const TERMINAL_THEMES: Record<string, TermTheme> = {
       brightYellow: "#ff9e64",
       brightBlue: "#9ab8ff",
       brightMagenta: "#c7a9ff",
+      brightCyan: "#a4daff",
+      brightWhite: "#ffffff",
+    },
+  },
+  production: {
+    name: "Red for production",
+    theme: {
+      background: "#241214",
+      foreground: "#f1dada",
+      cursor: "#ff8a8a",
+      cursorAccent: "#241214",
+      selectionBackground: "#5c2a2f",
+      black: "#241214",
+      red: "#ff6b6b",
+      green: "#9ece6a",
+      yellow: "#e0af68",
+      blue: "#8ab4f8",
+      magenta: "#d79ae6",
+      cyan: "#7dcfff",
+      white: "#e8d4d4",
+      brightBlack: "#8a6266",
+      brightRed: "#ff8f8f",
+      brightGreen: "#b9f27c",
+      brightYellow: "#ffb86c",
+      brightBlue: "#a7c7ff",
+      brightMagenta: "#e5b3f2",
       brightCyan: "#a4daff",
       brightWhite: "#ffffff",
     },
@@ -218,4 +244,77 @@ export function terminalTheme(id: TermThemeId, colors: boolean): ITheme {
     brightCyan: fg,
     brightWhite: fg,
   };
+}
+
+export type Tone = "dark" | "light";
+export function toneOf(el: Element | null): Tone {
+  return el?.closest(".t-dark, .t-light")?.classList.contains("t-light") ? "light" : "dark";
+}
+
+function monochrome(t: ITheme): ITheme {
+  const fg = t.foreground;
+  return {
+    ...t,
+    black: fg,
+    red: fg,
+    green: fg,
+    yellow: fg,
+    blue: fg,
+    magenta: fg,
+    cyan: fg,
+    white: fg,
+    brightRed: fg,
+    brightGreen: fg,
+    brightYellow: fg,
+    brightBlue: fg,
+    brightMagenta: fg,
+    brightCyan: fg,
+    brightWhite: fg,
+  };
+}
+
+/**
+ * The xterm theme actually used for a scheme. The default scheme follows the app's
+ * terminal tokens (dark or light) read from the themed ancestor of `el`, so the
+ * terminal matches its pane headers; other schemes keep their own palette.
+ */
+export function resolveTerminalTheme(id: string, colors: boolean, el: Element | null): ITheme {
+  let theme = termThemeOf(id).theme;
+  if (id === DEFAULT_TERM_THEME && el) {
+    const cs = getComputedStyle(el);
+    const tok = (name: string, fallback: string | undefined) => cs.getPropertyValue(name).trim() || fallback;
+    const bg = tok("--term-bg", theme.background);
+    const fg = tok("--term-text", theme.foreground);
+    const dim = tok("--term-dim", theme.brightBlack);
+    if (toneOf(el) === "light") {
+      const magenta = "#8a3fa6";
+      const cyan = "#14798a";
+      theme = {
+        background: bg,
+        foreground: fg,
+        cursor: fg,
+        cursorAccent: bg,
+        selectionBackground: tok("--accent-tint", "#e6ecfa"),
+        black: fg,
+        red: tok("--err", "#b3261e"),
+        green: tok("--ok", "#2e7d4f"),
+        yellow: tok("--warn", "#b35c00"),
+        blue: tok("--accent", "#2b59c3"),
+        magenta,
+        cyan,
+        white: dim,
+        brightBlack: dim,
+        brightRed: tok("--err", "#b3261e"),
+        brightGreen: tok("--ok", "#2e7d4f"),
+        brightYellow: tok("--warn", "#b35c00"),
+        brightBlue: tok("--link", "#2b59c3"),
+        brightMagenta: magenta,
+        brightCyan: cyan,
+        brightWhite: fg,
+      };
+    } else {
+      theme = { ...theme, background: bg, foreground: fg, cursor: fg, cursorAccent: bg };
+    }
+  }
+  return colors ? theme : monochrome(theme);
 }

@@ -17,7 +17,7 @@ Kestral to run a command, and you decide per host whether that needs your approv
 
 ## Install
 
-Grab the latest build from the [Releases page](https://github.com/antndev/Kestral/releases/latest).
+Grab the latest build from the [Releases page](https://github.com/antndev/kestral/releases/latest).
 
 **Windows.** Download the `.exe` installer and run it.
 

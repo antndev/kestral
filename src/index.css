@@ -1,25 +1,11 @@
+/* Base layer only (Tailwind preflight). All UI is styled inline with the design
+   tokens from tokens.css. */
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "@fontsource-variable/inter";
 
-/* ReUIs echtes Basis-CSS (Custom-Variants data-open/data-selected, Keyframes,
-   no-scrollbar) und ihr echtes Theme (Tokens, Farben, Radius). 1:1 aus dem
-   keenthemes/reui Repo uebernommen. */
-@import "./reui-base.css";
-@import "./reui-theme.css";
-
-/* Inter (Variable Font ueber fontsource) hinter ReUIs --font-inter haengen. */
-:root {
-  --font-inter: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
-  /* Hintergrund des aktiven Terminal-Farbschemas. Wird von prefs.tsx gesetzt
-     und faerbt Terminal-Rahmen und Seitenleisten-Rand. */
-  --term-bg: #1e1e1e;
-}
-
-/* Dezente, themen-bezogene Scrollbar. Erscheint nur bei Bedarf, duenn und rund. */
+/* Subtle scrollbars that follow the active theme and only show when needed. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent) transparent;
+  scrollbar-color: color-mix(in oklab, var(--text-3, #85857f) 45%, transparent) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
@@ -29,54 +15,241 @@
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background-color: color-mix(in oklab, var(--muted-foreground) 30%, transparent);
+  background-color: color-mix(in oklab, var(--text-3, #85857f) 40%, transparent);
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+  background-color: color-mix(in oklab, var(--text-3, #85857f) 70%, transparent);
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-/* Terminal-Scrollbar nutzt denselben dezenten Stil wie der Rest der App
-   (globale Regel oben). overflow auto, damit sie sich ausblendet wenn kein
-   Scrollback da ist (z.B. nach clear). */
+/* auto so the terminal scrollbar hides when there is no scrollback (after clear). */
 .xterm .xterm-viewport {
   overflow-y: auto !important;
 }
 
-@layer base {
-  body {
-    @apply bg-background text-foreground;
-    font-family: var(--font-sans);
-    /* Strg+A markiert nicht die ganze Oberflaeche; gezieltes Markieren in
-       Feldern/Code-Bloecken bleibt moeglich (siehe unten). */
-    user-select: none;
-    -webkit-user-select: none;
-  }
-  input,
-  textarea,
-  pre,
-  code,
-  [data-selectable] {
-    user-select: text;
-    -webkit-user-select: text;
-  }
+body {
+  margin: 0;
+  /* Ctrl+A does not select the whole UI; fields and code blocks stay selectable. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+input,
+textarea,
+pre,
+code,
+[data-selectable] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
-/* Kurzes Wackeln fuer ungueltige Pflichtfelder. */
-@keyframes shake {
-  10%, 90% { transform: translateX(-1px); }
-  20%, 80% { transform: translateX(2px); }
-  30%, 50%, 70% { transform: translateX(-4px); }
-  40%, 60% { transform: translateX(4px); }
+:focus-visible {
+  outline: 2px solid var(--focus, #a8a8a3);
+  outline-offset: 1px;
 }
-.animate-shake {
-  animation: shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+
+button[style*="var(--btn)"]:hover:not(:disabled) {
+  --btn: var(--btn-hover);
+}
+
+input,
+progress,
+select {
+  accent-color: var(--accent);
+}
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex: none;
+  border: 1px solid var(--btn-line);
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  vertical-align: middle;
+  cursor: pointer;
+}
+input[type="checkbox"]::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  background: var(--text);
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+  transform: scale(0);
+  transition: transform 80ms ease-out;
+}
+input[type="checkbox"]:checked {
+  background: var(--btn);
+}
+input[type="checkbox"]:checked::before {
+  transform: scale(1);
+}
+input[type="checkbox"]:indeterminate::before {
+  clip-path: inset(38% 8%);
+  transform: scale(1);
+}
+input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.xterm textarea:focus-visible,
+.xterm:focus-visible {
+  outline: none;
+}
+
+:root {
+  --ease-out: cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes kst-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes kst-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes kst-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
+}
+@keyframes kst-menu {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes kst-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes kst-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes kst-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes kst-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+[data-anim="overlay"] {
+  animation: kst-fade calc(140ms * var(--anim-scale, 1)) ease-out backwards;
+}
+[data-anim="overlay"] > * {
+  animation: kst-pop calc(220ms * var(--anim-scale, 1)) var(--ease-out) backwards;
+}
+[data-anim="overlay"][data-align="flex-start"] > * {
+  animation-name: kst-drop;
+}
+[role="menu"] {
+  animation: kst-menu calc(140ms * var(--anim-scale, 1)) var(--ease-out) backwards;
+}
+[data-anim="screen"] {
+  animation: kst-rise calc(200ms * var(--anim-scale, 1)) var(--ease-out) backwards;
+}
+[data-anim="tab"] {
+  animation: kst-rise calc(180ms * var(--anim-scale, 1)) var(--ease-out) backwards;
+}
+[data-anim="app"] {
+  animation: kst-enter calc(320ms * var(--anim-scale, 1)) var(--ease-out) backwards;
+}
+[data-anim="pulse"] {
+  animation: kst-pulse 1.4s ease-in-out infinite;
+}
+@keyframes kst-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  70%,
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+[data-anim="ping"] {
+  position: relative;
+}
+[data-anim="ping"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  animation: kst-ping 2.2s var(--ease-out) infinite;
+}
+[data-stagger] > * {
+  animation: kst-rise calc(260ms * var(--anim-scale, 1)) var(--ease-out) backwards;
+}
+[data-stagger] > :nth-child(2) {
+  animation-delay: calc(28ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(3) {
+  animation-delay: calc(56ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(4) {
+  animation-delay: calc(84ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(5) {
+  animation-delay: calc(112ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(6) {
+  animation-delay: calc(140ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(7) {
+  animation-delay: calc(168ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(8) {
+  animation-delay: calc(196ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(9) {
+  animation-delay: calc(224ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(10) {
+  animation-delay: calc(252ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(11) {
+  animation-delay: calc(280ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(12) {
+  animation-delay: calc(308ms * var(--anim-scale, 1));
+}
+[data-stagger] > :nth-child(n + 13) {
+  animation-delay: calc(336ms * var(--anim-scale, 1));
+}
+button {
+  transition: transform 120ms var(--ease-out);
+}
+button:active:not(:disabled):not([data-no-press]) {
+  transform: scale(0.97);
+}
+[data-nav] {
+  background: transparent;
+  transition: background 120ms;
+}
+[data-nav]:hover:not([aria-current]) {
+  background: color-mix(in srgb, var(--sel) 55%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -89,33 +262,16 @@
   }
 }
 
-/* Animationsgeschwindigkeit aus den Einstellungen: stufenloser Regler ueber
-   --anim-scale, wirkt nur auf CSS-Transitions (Hover, Auf-/Zuklappen, Farbwechsel).
-   Greift nur wenn vom Normalwert abweichend (data-anim-scaled). Elemente mit
-   data-no-anim-scale (Spinner, der Regler selbst) bleiben aussen vor.
-
-   Keyframe-Animationen (Einblenden, Puls, Shimmer, xterm-Cursor-Blink) werden
-   bewusst NICHT mehr skaliert. Ihre Dauer pauschal auf eine feste Basis zu
-   zwingen hat lange Animationen zappeln lassen und brauchte einen Gegen-Hack
-   fuers Terminal. Ohne die animation-duration-Ueberschreibung laufen sie in
-   ihrer gedachten Geschwindigkeit. */
+/* Animation speed from Settings: scales CSS transitions only, and only when it
+   differs from normal. Elements marked data-no-anim-scale opt out. */
 html[data-anim-scaled] *:not([data-no-anim-scale]),
 html[data-anim-scaled] *:not([data-no-anim-scale])::before,
 html[data-anim-scaled] *:not([data-no-anim-scale])::after {
   transition-duration: calc(160ms * var(--anim-scale, 1)) !important;
 }
 
-/* Radix legt das Positionierungs-Transform auf diesen Wrapper. Den niemals
-   per Transition animieren, sonst gleitet das Dropdown beim Oeffnen aus der
-   Ecke herein (statt am Trigger zu erscheinen). Das Ein-/Ausblenden laeuft als
-   Animation auf dem Inhalt selbst und bleibt davon unberuehrt. */
-[data-radix-popper-content-wrapper] {
-  transition: none !important;
-}
-
-/* Edge/WebView2 blendet bei type=password ein eigenes Augen-Icon (Reveal) und
-   ein Loeschen-X ein. Beides wollen wir nicht (Passwort im Klartext zeigen ist
-   bei einem Tresor unerwuenscht) -> komplett ausblenden. */
+/* WebView2 adds its own reveal eye and clear X to password fields; a vault
+   should not offer either. */
 input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {
   display: none;

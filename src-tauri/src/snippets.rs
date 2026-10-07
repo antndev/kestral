@@ -124,7 +124,18 @@ impl SnippetStore {
         Ok((added, skipped))
     }
 
-    pub fn update(&self, snippet: Snippet) -> Result<()> {
+    pub fn get(&self, id: Uuid) -> Result<Snippet> {
+        self.items
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.id == id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(id.to_string()))
+    }
+
+    pub fn update(&self, mut snippet: Snippet) -> Result<()> {
+        snippet.normalize();
         let mut items = self.items.lock().unwrap();
         let slot = items
             .iter_mut()
@@ -132,6 +143,25 @@ impl SnippetStore {
             .ok_or_else(|| AppError::NotFound(snippet.id.to_string()))?;
         *slot = snippet;
         self.save(&items)
+    }
+
+    pub fn folders(&self) -> Vec<String> {
+        self.items.lock().unwrap().iter().map(|s| s.folder.clone()).collect()
+    }
+
+    pub fn set_folder(&self, from: &str, to: &str) -> Result<usize> {
+        let mut items = self.items.lock().unwrap();
+        let mut n = 0;
+        for s in items.iter_mut() {
+            if !s.folder.trim().is_empty() && crate::collections::same(&s.folder, from) {
+                s.folder = to.to_string();
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.save(&items)?;
+        }
+        Ok(n)
     }
 
     pub fn remove_host(&self, host_id: Uuid) -> Result<()> {

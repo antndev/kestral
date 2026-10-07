@@ -17,8 +17,28 @@ const AI_MIN_KEY = "kestral-ai-minutes";
 const SFTP_HIDDEN_KEY = "kestral-sftp-hidden";
 const SFTP_AUTOREFRESH_KEY = "kestral-sftp-autorefresh";
 const TERM_COLORS_KEY = "kestral-term-colors";
+const TERM_FONT_KEY = "kestral-term-font-size";
+const TERM_FAMILY_KEY = "kestral-term-font-family";
+const TERM_LH_KEY = "kestral-term-line-height";
+const TERM_SCROLLBACK_KEY = "kestral-term-scrollback";
+const TERM_CURSOR_KEY = "kestral-term-cursor";
+const TERM_BLINK_KEY = "kestral-term-cursor-blink";
+const TERM_COPYSEL_KEY = "kestral-term-copy-on-select";
+const TERM_BELL_KEY = "kestral-term-bell";
+const TERM_RCLICK_KEY = "kestral-term-right-click";
+
+export type CursorStyle = "block" | "bar" | "underline";
+export type BellMode = "flash" | "sound" | "off";
+export type RightClickMode = "paste" | "menu";
 
 export const THEMES: Theme[] = ["system", "light", "dark"];
+
+function readNum(key: string, fallback: number, min: number, max: number): number {
+  const raw = localStorage.getItem(key);
+  if (raw === null || raw.trim() === "") return fallback;
+  const v = Number(raw);
+  return Number.isFinite(v) && v >= min && v <= max ? v : fallback;
+}
 
 function readAnimScale(): number {
   const v = localStorage.getItem(ANIM_KEY);
@@ -69,6 +89,24 @@ type Prefs = {
   setSftpShowHidden: (v: boolean) => void;
   sftpAutoRefresh: boolean;
   setSftpAutoRefresh: (v: boolean) => void;
+  termFontSize: number;
+  setTermFontSize: (v: number) => void;
+  termFontFamily: string;
+  setTermFontFamily: (v: string) => void;
+  termLineHeight: number;
+  setTermLineHeight: (v: number) => void;
+  termScrollback: number;
+  setTermScrollback: (v: number) => void;
+  termCursor: CursorStyle;
+  setTermCursor: (v: CursorStyle) => void;
+  termCursorBlink: boolean;
+  setTermCursorBlink: (v: boolean) => void;
+  termCopyOnSelect: boolean;
+  setTermCopyOnSelect: (v: boolean) => void;
+  termBell: BellMode;
+  setTermBell: (v: BellMode) => void;
+  termRightClick: RightClickMode;
+  setTermRightClick: (v: RightClickMode) => void;
 };
 
 const PrefsCtx = createContext<Prefs | null>(null);
@@ -101,6 +139,42 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   const [termColors, setTermColorsState] = useState<boolean>(
     () => localStorage.getItem(TERM_COLORS_KEY) !== "false",
   );
+  const [termFontSize, setTermFontSizeState] = useState<number>(() => readNum(TERM_FONT_KEY, 13, 8, 32));
+  const [termFontFamily, setTermFontFamilyState] = useState<string>(() => localStorage.getItem(TERM_FAMILY_KEY) ?? "");
+  const [termLineHeight, setTermLineHeightState] = useState<number>(() => readNum(TERM_LH_KEY, 1.2, 1, 2.5));
+  const [termScrollback, setTermScrollbackState] = useState<number>(() => readNum(TERM_SCROLLBACK_KEY, 5000, 0, 200000));
+  const [termCursor, setTermCursorState] = useState<CursorStyle>(() => readEnum(TERM_CURSOR_KEY, ["block", "bar", "underline"] as const, "block"));
+  const [termCursorBlink, setTermCursorBlinkState] = useState<boolean>(() => localStorage.getItem(TERM_BLINK_KEY) !== "false");
+  const [termCopyOnSelect, setTermCopyOnSelectState] = useState<boolean>(() => localStorage.getItem(TERM_COPYSEL_KEY) === "true");
+  const [termBell, setTermBellState] = useState<BellMode>(() => readEnum(TERM_BELL_KEY, ["flash", "sound", "off"] as const, "flash"));
+  const [termRightClick, setTermRightClickState] = useState<RightClickMode>(() => readEnum(TERM_RCLICK_KEY, ["paste", "menu"] as const, "paste"));
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.storageArea !== localStorage || (e.key !== null && !e.key.startsWith("kestral-"))) return;
+      setThemeState(readEnum(THEME_KEY, THEMES, "system"));
+      setAnimScaleState(readAnimScale());
+      const tt = localStorage.getItem(TERM_KEY);
+      setTermThemeState(tt && TERMINAL_THEMES[tt] ? tt : DEFAULT_TERM_THEME);
+      const ai = localStorage.getItem(AI_MIN_KEY);
+      const aiV = ai == null ? 30 : Number(ai);
+      setAiMinutesState(Number.isFinite(aiV) && aiV >= 0 ? aiV : 30);
+      setSftpShowHiddenState(localStorage.getItem(SFTP_HIDDEN_KEY) !== "false");
+      setSftpAutoRefreshState(localStorage.getItem(SFTP_AUTOREFRESH_KEY) !== "false");
+      setTermColorsState(localStorage.getItem(TERM_COLORS_KEY) !== "false");
+      setTermFontSizeState(readNum(TERM_FONT_KEY, 13, 8, 32));
+      setTermFontFamilyState(localStorage.getItem(TERM_FAMILY_KEY) ?? "");
+      setTermLineHeightState(readNum(TERM_LH_KEY, 1.2, 1, 2.5));
+      setTermScrollbackState(readNum(TERM_SCROLLBACK_KEY, 5000, 0, 200000));
+      setTermCursorState(readEnum(TERM_CURSOR_KEY, ["block", "bar", "underline"] as const, "block"));
+      setTermCursorBlinkState(localStorage.getItem(TERM_BLINK_KEY) !== "false");
+      setTermCopyOnSelectState(localStorage.getItem(TERM_COPYSEL_KEY) === "true");
+      setTermBellState(readEnum(TERM_BELL_KEY, ["flash", "sound", "off"] as const, "flash"));
+      setTermRightClickState(readEnum(TERM_RCLICK_KEY, ["paste", "menu"] as const, "paste"));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   useEffect(() => {
     void applyTheme(theme);
@@ -151,6 +225,15 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(TERM_COLORS_KEY, String(v));
     setTermColorsState(v);
   };
+  const setTermFontSize = (v: number) => { localStorage.setItem(TERM_FONT_KEY, String(v)); setTermFontSizeState(v); };
+  const setTermFontFamily = (v: string) => { localStorage.setItem(TERM_FAMILY_KEY, v.trim()); setTermFontFamilyState(v.trim()); };
+  const setTermLineHeight = (v: number) => { localStorage.setItem(TERM_LH_KEY, String(v)); setTermLineHeightState(v); };
+  const setTermScrollback = (v: number) => { localStorage.setItem(TERM_SCROLLBACK_KEY, String(v)); setTermScrollbackState(v); };
+  const setTermCursor = (v: CursorStyle) => { localStorage.setItem(TERM_CURSOR_KEY, v); setTermCursorState(v); };
+  const setTermCursorBlink = (v: boolean) => { localStorage.setItem(TERM_BLINK_KEY, String(v)); setTermCursorBlinkState(v); };
+  const setTermCopyOnSelect = (v: boolean) => { localStorage.setItem(TERM_COPYSEL_KEY, String(v)); setTermCopyOnSelectState(v); };
+  const setTermBell = (v: BellMode) => { localStorage.setItem(TERM_BELL_KEY, v); setTermBellState(v); };
+  const setTermRightClick = (v: RightClickMode) => { localStorage.setItem(TERM_RCLICK_KEY, v); setTermRightClickState(v); };
 
   return (
     <PrefsCtx.Provider
@@ -169,6 +252,24 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
         setSftpShowHidden,
         sftpAutoRefresh,
         setSftpAutoRefresh,
+        termFontSize,
+        setTermFontSize,
+        termFontFamily,
+        setTermFontFamily,
+        termLineHeight,
+        setTermLineHeight,
+        termScrollback,
+        setTermScrollback,
+        termCursor,
+        setTermCursor,
+        termCursorBlink,
+        setTermCursorBlink,
+        termCopyOnSelect,
+        setTermCopyOnSelect,
+        termBell,
+        setTermBell,
+        termRightClick,
+        setTermRightClick,
       }}
     >
       <MotionConfig reducedMotion={animScale < 0.05 ? "always" : "user"}>{children}</MotionConfig>

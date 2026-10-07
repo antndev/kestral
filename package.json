@@ -7,7 +7,7 @@
   "author": "antndev <antonkonig691@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/antndev/Kestral.git"
+    "url": "https://github.com/antndev/kestral.git"
   },
   "engines": {
     "node": ">=20.19"

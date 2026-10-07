@@ -15,6 +15,29 @@ pub struct HostStore {
     hosts: Mutex<Vec<Host>>,
 }
 
+fn check_jump(hosts: &[Host], host: &Host) -> Result<()> {
+    let Some(first) = host.jump_host_id else {
+        return Ok(());
+    };
+    let mut seen = vec![host.id];
+    let mut next = Some(first);
+    while let Some(id) = next {
+        if seen.contains(&id) {
+            return Err(AppError::Other("This jump host would create a loop".into()));
+        }
+        if seen.len() > 5 {
+            return Err(AppError::Other("More than 5 jump hosts in a row are not supported".into()));
+        }
+        seen.push(id);
+        let jump = hosts
+            .iter()
+            .find(|h| h.id == id)
+            .ok_or_else(|| AppError::Other("The jump host no longer exists".into()))?;
+        next = jump.jump_host_id;
+    }
+    Ok(())
+}
+
 fn name_taken(hosts: &[Host], name: &str, self_id: Uuid) -> bool {
     let needle = name.trim().to_lowercase();
     hosts
@@ -123,6 +146,7 @@ impl HostStore {
                 host.name
             )));
         }
+        check_jump(&hosts, &host)?;
         hosts.push(host.clone());
         self.save(&hosts)?;
         Ok(host)
@@ -151,7 +175,8 @@ impl HostStore {
         Ok((added, skipped))
     }
 
-    pub fn update(&self, host: Host) -> Result<()> {
+    pub fn update(&self, mut host: Host) -> Result<()> {
+        host.normalize();
         let mut hosts = self.hosts.lock().unwrap();
         if name_taken(&hosts, &host.name, host.id) {
             return Err(AppError::Other(format!(
@@ -159,6 +184,7 @@ impl HostStore {
                 host.name
             )));
         }
+        check_jump(&hosts, &host)?;
         let slot = hosts
             .iter_mut()
             .find(|h| h.id == host.id)
@@ -173,6 +199,11 @@ impl HostStore {
         hosts.retain(|h| h.id != id);
         if hosts.len() == before {
             return Err(AppError::NotFound(id.to_string()));
+        }
+        for h in hosts.iter_mut() {
+            if h.jump_host_id == Some(id) {
+                h.jump_host_id = None;
+            }
         }
         self.save(&hosts)
     }
@@ -269,6 +300,10 @@ mod tests {
             forward_agent: false,
             agent_keys: Vec::new(),
             forwards: Vec::new(),
+            group: String::new(),
+            tags: Vec::new(),
+            jump_host_id: None,
+            options: Default::default(),
         };
 
         store.add(mk("prod")).unwrap();

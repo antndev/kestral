@@ -85,6 +85,7 @@ pub async fn vault_lock(state: State<'_, AppState>) -> Result<()> {
 #[tauri::command]
 pub async fn vault_change_master(
     state: State<'_, AppState>,
+    hello: State<'_, crate::hello::Hello>,
     current: String,
     new: String,
 ) -> Result<()> {
@@ -95,7 +96,9 @@ pub async fn vault_change_master(
         vault.change_master(current.as_str(), new.as_str())
     })
     .await
-    .map_err(|e| AppError::Other(e.to_string()))?
+    .map_err(|e| AppError::Other(e.to_string()))??;
+    hello.forget();
+    Ok(())
 }
 
 #[tauri::command]
@@ -151,24 +154,114 @@ pub async fn secret_list(state: State<'_, AppState>) -> Result<Vec<SecretMeta>> 
 pub struct PubkeyInfo {
     pub public_key: String,
     pub fingerprint: String,
+    pub algorithm: String,
+    pub bits: Option<u32>,
+    pub encrypted: bool,
+}
+
+struct SysRng;
+
+impl russh::keys::ssh_key::rand_core::TryRng for SysRng {
+    type Error = std::convert::Infallible;
+    fn try_next_u32(&mut self) -> std::result::Result<u32, Self::Error> {
+        Ok(rand::RngCore::next_u32(&mut rand::rngs::OsRng))
+    }
+    fn try_next_u64(&mut self) -> std::result::Result<u64, Self::Error> {
+        Ok(rand::RngCore::next_u64(&mut rand::rngs::OsRng))
+    }
+    fn try_fill_bytes(&mut self, dst: &mut [u8]) -> std::result::Result<(), Self::Error> {
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, dst);
+        Ok(())
+    }
+}
+
+impl russh::keys::ssh_key::rand_core::TryCryptoRng for SysRng {}
+
+fn pubkey_info(public: &russh::keys::ssh_key::PublicKey, encrypted: bool) -> Result<PubkeyInfo> {
+    Ok(PubkeyInfo {
+        public_key: public.to_openssh().map_err(|e| AppError::Ssh(format!("Public key: {e}")))?,
+        fingerprint: public.fingerprint(russh::keys::ssh_key::HashAlg::Sha256).to_string(),
+        algorithm: crate::local_agent::algorithm_label(public),
+        bits: crate::local_agent::key_bits(public),
+        encrypted,
+    })
+}
+
+fn wrong_passphrase(e: impl std::fmt::Display) -> AppError {
+    let text = e.to_string();
+    if text.to_lowercase().contains("crypto") || text.to_lowercase().contains("decrypt") || text.to_lowercase().contains("padding") {
+        AppError::Other("The passphrase is wrong.".into())
+    } else {
+        AppError::Ssh(format!("Load key: {text}"))
+    }
+}
+
+fn open_private(private_key: &str, passphrase: Option<&str>) -> Result<russh::keys::PrivateKey> {
+    if let Ok(parsed) = russh::keys::ssh_key::PrivateKey::from_openssh(private_key) {
+        if !parsed.is_encrypted() {
+            return Ok(parsed);
+        }
+        let Some(pass) = passphrase.filter(|p| !p.is_empty()) else {
+            return Err(AppError::Other("This key is protected by a passphrase. Enter it to continue.".into()));
+        };
+        return parsed.decrypt(pass).map_err(wrong_passphrase);
+    }
+    match russh::keys::decode_secret_key(private_key, passphrase.filter(|p| !p.is_empty())) {
+        Ok(k) => Ok(k),
+        Err(e) if passphrase.is_none() && e.to_string().to_lowercase().contains("encrypt") => {
+            Err(AppError::Other("This key is protected by a passphrase. Enter it to continue.".into()))
+        }
+        Err(e) => Err(wrong_passphrase(e)),
+    }
 }
 
 #[tauri::command]
-pub async fn derive_pubkey(private_key: String) -> Result<PubkeyInfo> {
+pub async fn derive_pubkey(private_key: String, passphrase: Option<String>) -> Result<PubkeyInfo> {
     let pk = Zeroizing::new(private_key);
-    let key = russh::keys::decode_secret_key(pk.as_str(), None)
-        .map_err(|e| AppError::Ssh(format!("Load key: {e}")))?;
-    let public = key.public_key();
-    let public_key = public
-        .to_openssh()
-        .map_err(|e| AppError::Ssh(format!("Public Key: {e}")))?;
-    let fingerprint = public
-        .fingerprint(russh::keys::ssh_key::HashAlg::Sha256)
-        .to_string();
-    Ok(PubkeyInfo {
-        public_key,
-        fingerprint,
-    })
+    let pass = passphrase.map(Zeroizing::new);
+    if let Ok(parsed) = russh::keys::ssh_key::PrivateKey::from_openssh(pk.as_str()) {
+        if parsed.is_encrypted() && pass.as_ref().is_none_or(|p| p.is_empty()) {
+            return pubkey_info(parsed.public_key(), true);
+        }
+    }
+    let key = open_private(pk.as_str(), pass.as_ref().map(|p| p.as_str()))?;
+    pubkey_info(key.public_key(), false)
+}
+
+#[tauri::command]
+pub async fn decrypt_key(private_key: String, passphrase: String) -> Result<String> {
+    let pk = Zeroizing::new(private_key);
+    let pass = Zeroizing::new(passphrase);
+    let key = open_private(pk.as_str(), Some(pass.as_str()))?;
+    let pem = key
+        .to_openssh(russh::keys::ssh_key::LineEnding::LF)
+        .map_err(|e| AppError::Ssh(format!("Encode key: {e}")))?;
+    Ok(pem.to_string())
+}
+
+#[tauri::command]
+pub async fn export_private_key(
+    state: State<'_, AppState>,
+    id: String,
+    path: String,
+    passphrase: Option<String>,
+) -> Result<()> {
+    let bytes = state.services.vault.get_secret(&id)?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| AppError::Other("This key is not valid text".into()))?;
+    let key = open_private(text, None)?;
+    let pass = passphrase.map(Zeroizing::new).filter(|p| !p.is_empty());
+    let key = match &pass {
+        Some(p) => key
+            .encrypt(&mut SysRng, p.as_bytes())
+            .map_err(|e| AppError::Ssh(format!("Encrypt key: {e}")))?,
+        None => key,
+    };
+    let pem = key
+        .to_openssh(russh::keys::ssh_key::LineEnding::LF)
+        .map_err(|e| AppError::Ssh(format!("Encode key: {e}")))?;
+    let target = std::path::PathBuf::from(path);
+    let content = pem.as_bytes().to_vec();
+    crate::util::blocking(move || Ok(crate::util::replace_file(&target, &content)?)).await
 }
 
 #[tauri::command]
@@ -179,27 +272,54 @@ pub async fn secret_reveal(state: State<'_, AppState>, id: String) -> Result<Str
 }
 
 #[tauri::command]
-pub async fn generate_key(algorithm: Option<String>, comment: Option<String>) -> Result<String> {
-    use rand::RngCore;
-    use russh::keys::ssh_key::private::{Ed25519Keypair, KeypairData, PrivateKey};
-    use russh::keys::ssh_key::LineEnding;
-
-    match algorithm.as_deref().unwrap_or("ed25519") {
-        "ed25519" => {}
-        other => return Err(AppError::Ssh(format!("Unsupported key type: {other}"))),
+pub async fn key_set_comment(state: State<'_, AppState>, id: String, comment: String) -> Result<()> {
+    use russh::keys::ssh_key::{LineEnding, PrivateKey};
+    let bytes = state.services.vault.get_secret(&id)?;
+    let text = Zeroizing::new(
+        String::from_utf8(bytes.to_vec()).map_err(|_| AppError::Other("This key is not valid text".into()))?,
+    );
+    let mut key = PrivateKey::from_openssh(text.trim()).map_err(|e| AppError::Ssh(format!("Read key: {e}")))?;
+    if key.is_encrypted() {
+        return Err(AppError::Other("This key has a passphrase, so its comment cannot be changed here".into()));
     }
-    let mut seed = Zeroizing::new([0u8; 32]);
-    rand::rngs::OsRng.fill_bytes(seed.as_mut_slice());
-    let key = PrivateKey::new(
-        KeypairData::Ed25519(Ed25519Keypair::from_seed(&seed)),
-        comment.unwrap_or_default(),
-    )
-    .map_err(|e| AppError::Ssh(format!("Generate key: {e}")))?;
-
+    key.set_comment(comment.trim());
     let pem = key
         .to_openssh(LineEnding::LF)
         .map_err(|e| AppError::Ssh(format!("Encode key: {e}")))?;
-    Ok(pem.to_string())
+    state.services.vault.put_secret(&id, SecretKind::PrivateKey, pem.as_bytes())
+}
+
+#[tauri::command]
+pub async fn generate_key(algorithm: Option<String>, comment: Option<String>) -> Result<String> {
+    use russh::keys::ssh_key::private::{KeypairData, PrivateKey, RsaKeypair};
+    use russh::keys::ssh_key::{Algorithm, EcdsaCurve, LineEnding};
+
+    let algo = algorithm.unwrap_or_else(|| "ed25519".into());
+    let comment = comment.unwrap_or_default();
+    let pem = tokio::task::spawn_blocking(move || -> Result<String> {
+        let mut rng = SysRng;
+        let fail = |e: russh::keys::ssh_key::Error| AppError::Ssh(format!("Generate key: {e}"));
+        let mut key = match algo.as_str() {
+            "ed25519" => PrivateKey::random(&mut rng, Algorithm::Ed25519).map_err(fail)?,
+            "ecdsa" | "ecdsa-p256" => PrivateKey::random(&mut rng, Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 }).map_err(fail)?,
+            "ecdsa-p384" => PrivateKey::random(&mut rng, Algorithm::Ecdsa { curve: EcdsaCurve::NistP384 }).map_err(fail)?,
+            "ecdsa-p521" => PrivateKey::random(&mut rng, Algorithm::Ecdsa { curve: EcdsaCurve::NistP521 }).map_err(fail)?,
+            "rsa" | "rsa-4096" | "rsa-3072" => {
+                let bits = if algo == "rsa-3072" { 3072 } else { 4096 };
+                let pair = RsaKeypair::random(&mut rng, bits).map_err(fail)?;
+                PrivateKey::new(KeypairData::Rsa(pair), "").map_err(fail)?
+            }
+            other => return Err(AppError::Ssh(format!("Unsupported key type: {other}"))),
+        };
+        key.set_comment(comment);
+        let pem = key
+            .to_openssh(LineEnding::LF)
+            .map_err(|e| AppError::Ssh(format!("Encode key: {e}")))?;
+        Ok(pem.to_string())
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))??;
+    Ok(pem)
 }
 
 #[tauri::command]
@@ -220,6 +340,67 @@ pub fn drag_icon_path() -> std::result::Result<String, String> {
 #[tauri::command]
 pub async fn secret_delete(state: State<'_, AppState>, id: String) -> Result<()> {
     state.services.vault.delete_secret(&id)
+}
+
+#[tauri::command]
+pub async fn secret_copy(state: State<'_, AppState>, from: String, to: String) -> Result<()> {
+    state.services.vault.copy_secret(&from, &to)
+}
+
+#[derive(Serialize)]
+pub struct HostTestResult {
+    pub ok: bool,
+    pub message: String,
+    pub auth: String,
+    pub elapsed_ms: u64,
+}
+
+#[tauri::command]
+pub async fn host_test(state: State<'_, AppState>, mut host: Host, password: Option<String>) -> Result<HostTestResult> {
+    host.normalize();
+    let temp = match password.map(Zeroizing::new) {
+        Some(pw) => {
+            let id = format!("kestral-test-{}", Uuid::new_v4());
+            state.services.vault.put_secret(&id, crate::vault::SecretKind::Password, pw.as_bytes())?;
+            host.auth = crate::model::AuthMethod::Password { secret_id: id.clone() };
+            Some(id)
+        }
+        None => None,
+    };
+    let started = std::time::Instant::now();
+    let result = state.services.ssh.connect_info(&host, &state.services.vault, &|_, _| {}, None).await;
+    if let Some(id) = temp {
+        let _ = state.services.vault.delete_secret(&id);
+    }
+    let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+    Ok(match result {
+        Ok(c) => {
+            let _ = c.session.disconnect(russh::Disconnect::ByApplication, "", "").await;
+            HostTestResult { ok: true, message: "Connected and signed in".into(), auth: c.auth, elapsed_ms }
+        }
+        Err(e) => HostTestResult { ok: false, message: e.to_string(), auth: String::new(), elapsed_ms },
+    })
+}
+
+#[tauri::command]
+pub async fn identity_list(state: State<'_, AppState>) -> Result<Vec<crate::model::Identity>> {
+    state.services.identities.list()
+}
+
+#[tauri::command]
+pub async fn identity_add(state: State<'_, AppState>, identity: crate::model::NewIdentity) -> Result<crate::model::Identity> {
+    state.services.identities.add(identity)
+}
+
+#[tauri::command]
+pub async fn identity_update(state: State<'_, AppState>, identity: crate::model::Identity) -> Result<()> {
+    state.services.identities.update(identity)
+}
+
+#[tauri::command]
+pub async fn identity_remove(state: State<'_, AppState>, id: String) -> Result<()> {
+    let id = parse_id(&id)?;
+    state.services.identities.remove(id, &state.services.hosts.list())
 }
 
 #[tauri::command]
@@ -746,6 +927,11 @@ pub async fn forward_stop(
 }
 
 #[tauri::command]
+pub async fn forward_stats(forwards: State<'_, ForwardManager>) -> Result<std::collections::HashMap<String, u32>> {
+    Ok(forwards.stats())
+}
+
+#[tauri::command]
 pub async fn forward_active(forwards: State<'_, ForwardManager>) -> Result<Vec<String>> {
     Ok(forwards
         .active_ids()
@@ -795,7 +981,7 @@ pub async fn sftp_download(
     local: String,
 ) -> Result<u64> {
     sftp_handle(&sessions, &id)?
-        .download(&remote, std::path::Path::new(&local))
+        .download(&remote, std::path::Path::new(&local), &crate::sftp::Xfer::default())
         .await
 }
 
@@ -807,7 +993,7 @@ pub async fn sftp_download_dir(
     local: String,
 ) -> Result<u64> {
     sftp_handle(&sessions, &id)?
-        .download_dir(&remote, std::path::Path::new(&local))
+        .download_dir(&remote, std::path::Path::new(&local), &crate::sftp::Xfer::default())
         .await
 }
 
@@ -819,7 +1005,7 @@ pub async fn sftp_upload(
     remote: String,
 ) -> Result<u64> {
     sftp_handle(&sessions, &id)?
-        .upload(std::path::Path::new(&local), &remote)
+        .upload(std::path::Path::new(&local), &remote, &crate::sftp::Xfer::default())
         .await
 }
 
@@ -831,7 +1017,7 @@ pub async fn sftp_upload_dir(
     remote: String,
 ) -> Result<u64> {
     sftp_handle(&sessions, &id)?
-        .upload_dir(std::path::Path::new(&local), &remote)
+        .upload_dir(std::path::Path::new(&local), &remote, &crate::sftp::Xfer::default())
         .await
 }
 
@@ -883,10 +1069,122 @@ pub async fn sftp_rename(
     sftp_handle(&sessions, &id)?.rename(&from, &to).await
 }
 
+#[derive(Serialize, Clone)]
+pub struct TransferProgress {
+    pub done: u64,
+    pub total: Option<u64>,
+}
+
+async fn run_transfer<F>(
+    transfers: &crate::sftp::Transfers,
+    transfer_id: &str,
+    total: Option<u64>,
+    on_progress: tauri::ipc::Channel<TransferProgress>,
+    work: impl FnOnce(crate::sftp::Xfer) -> F,
+) -> Result<u64>
+where
+    F: std::future::Future<Output = Result<u64>>,
+{
+    let x = crate::sftp::Xfer { cancel: transfers.register(transfer_id), ..Default::default() };
+    let done = x.done.clone();
+    let stop = tokio_util::sync::CancellationToken::new();
+    let ticker = {
+        let stop = stop.clone();
+        let done = done.clone();
+        let channel = on_progress.clone();
+        tokio::spawn(async move {
+            loop {
+                let _ = channel.send(TransferProgress { done: done.load(std::sync::atomic::Ordering::Relaxed), total });
+                tokio::select! {
+                    _ = stop.cancelled() => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {}
+                }
+            }
+        })
+    };
+    let result = work(x).await;
+    stop.cancel();
+    let _ = ticker.await;
+    transfers.finish(transfer_id);
+    if let Ok(n) = &result {
+        let _ = on_progress.send(TransferProgress { done: *n, total: total.map(|t| t.max(*n)) });
+    }
+    result
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn sftp_transfer(
+    sessions: State<'_, SftpSessions>,
+    transfers: State<'_, crate::sftp::Transfers>,
+    id: String,
+    transfer_id: String,
+    upload: bool,
+    is_dir: bool,
+    local: String,
+    remote: String,
+    on_progress: tauri::ipc::Channel<TransferProgress>,
+) -> Result<u64> {
+    let h = sftp_handle(&sessions, &id)?;
+    let local_path = std::path::PathBuf::from(&local);
+    let total = if upload {
+        let p = local_path.clone();
+        crate::util::blocking(move || Ok(crate::sftp::local_size(&p))).await.ok()
+    } else {
+        Some(h.size(&remote, is_dir).await)
+    };
+    run_transfer(&transfers, &transfer_id, total, on_progress, |x| async move {
+        match (upload, is_dir) {
+            (true, true) => h.upload_dir(&local_path, &remote, &x).await,
+            (true, false) => h.upload(&local_path, &remote, &x).await,
+            (false, true) => h.download_dir(&remote, &local_path, &x).await,
+            (false, false) => h.download(&remote, &local_path, &x).await,
+        }
+    })
+    .await
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn sftp_copy_remote(
+    sessions: State<'_, SftpSessions>,
+    transfers: State<'_, crate::sftp::Transfers>,
+    src_id: String,
+    dst_id: String,
+    transfer_id: String,
+    src_path: String,
+    dst_path: String,
+    is_dir: bool,
+    on_progress: tauri::ipc::Channel<TransferProgress>,
+) -> Result<u64> {
+    let src = sftp_handle(&sessions, &src_id)?;
+    let dst = sftp_handle(&sessions, &dst_id)?;
+    let total = Some(src.size(&src_path, is_dir).await);
+    run_transfer(&transfers, &transfer_id, total, on_progress, |x| async move {
+        src.copy_to(&src_path, &dst, &dst_path, is_dir, &x).await
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn sftp_cancel(transfers: State<'_, crate::sftp::Transfers>, transfer_id: String) -> Result<()> {
+    transfers.cancel(&transfer_id);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn sftp_close(sessions: State<'_, SftpSessions>, id: String) -> Result<()> {
     sessions.remove(&id);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn data_dir(state: State<'_, AppState>) -> Result<String> {
+    Ok(state
+        .mcp_token_path
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default())
 }
 
 #[tauri::command]
@@ -911,4 +1209,38 @@ pub async fn settings_set_onboarded(
 ) -> Result<()> {
     settings.set_onboarded();
     Ok(())
+}
+
+#[tauri::command]
+pub async fn snippet_folder_list(state: State<'_, AppState>) -> Result<Vec<String>> {
+    let s = &state.services;
+    s.collections.list(s.snippets.folders())
+}
+
+#[tauri::command]
+pub async fn snippet_folder_add(state: State<'_, AppState>, name: String) -> Result<String> {
+    let s = &state.services;
+    s.collections.add(&name, s.snippets.folders())
+}
+
+#[tauri::command]
+pub async fn snippet_folder_rename(state: State<'_, AppState>, from: String, to: String) -> Result<String> {
+    let s = &state.services;
+    let to = s.collections.rename(&from, &to, s.snippets.folders())?;
+    s.snippets.set_folder(&from, &to)?;
+    Ok(to)
+}
+
+#[tauri::command]
+pub async fn snippet_folder_remove(state: State<'_, AppState>, name: String) -> Result<usize> {
+    let s = &state.services;
+    let moved = s.snippets.set_folder(&name, "")?;
+    s.collections.remove(&name, s.snippets.folders())?;
+    Ok(moved)
+}
+
+#[tauri::command]
+pub async fn snippet_folder_reorder(state: State<'_, AppState>, order: Vec<String>) -> Result<()> {
+    let s = &state.services;
+    s.collections.reorder(order, s.snippets.folders())
 }

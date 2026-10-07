@@ -74,17 +74,6 @@ fn load_key(vault: &Arc<Vault>, id: &str) -> Result<ExposedKey> {
         .map_err(|_| AppError::Ssh("key is not valid UTF-8".into()))?;
     let key =
         decode_secret_key(text, None).map_err(|e| AppError::Ssh(format!("load key: {e}")))?;
-    // We sign with the key's default algorithm and do not honour the RSA sha2
-    // signature flags, so an RSA key would be mis-signed and rejected. Refuse to
-    // expose it rather than fail silently; ed25519 and ecdsa sign correctly.
-    if matches!(
-        key.algorithm(),
-        russh::keys::ssh_key::Algorithm::Rsa { .. }
-    ) {
-        return Err(AppError::Ssh(
-            "RSA keys are not supported by the vault agent; use an ed25519 key".into(),
-        ));
-    }
     let blob = key
         .public_key()
         .to_bytes()
@@ -148,9 +137,22 @@ fn sign(body: &[u8], ctx: &AgentContext) -> Option<Vec<u8>> {
     let mut rest = body;
     let key_blob = take_string(&mut rest)?;
     let data = take_string(&mut rest)?;
-    // Signature flags (RSA hash selection) follow but ed25519 ignores them.
+    let flags = if rest.len() >= 4 { u32::from_be_bytes([rest[0], rest[1], rest[2], rest[3]]) } else { 0 };
     let key = ctx.keys.iter().find(|k| k.blob == key_blob)?;
-    match key.key.try_sign(data) {
+    let signed = match key.key.key_data().rsa() {
+        Some(rsa) => {
+            let hash = if flags & SSH_AGENT_RSA_SHA2_512 != 0 {
+                Some(russh::keys::ssh_key::HashAlg::Sha512)
+            } else if flags & SSH_AGENT_RSA_SHA2_256 != 0 {
+                Some(russh::keys::ssh_key::HashAlg::Sha256)
+            } else {
+                None
+            };
+            (rsa, hash).try_sign(data)
+        }
+        None => key.key.try_sign(data),
+    };
+    match signed {
         Ok(sig) => {
             let wire = sig.encode_vec().ok()?;
             ctx.audit.record(
@@ -180,6 +182,9 @@ fn sign(body: &[u8], ctx: &AgentContext) -> Option<Vec<u8>> {
         }
     }
 }
+
+const SSH_AGENT_RSA_SHA2_256: u32 = 2;
+const SSH_AGENT_RSA_SHA2_512: u32 = 4;
 
 fn take_string<'a>(buf: &mut &'a [u8]) -> Option<&'a [u8]> {
     if buf.len() < 4 {
@@ -256,6 +261,10 @@ mod tests {
             forward_agent: true,
             agent_keys: vec!["k".into()],
             forwards: vec![],
+            group: String::new(),
+            tags: vec![],
+            jump_host_id: None,
+            options: Default::default(),
         };
         let ctx = AgentContext::build(&host, &vault, audit).expect("agent context");
 

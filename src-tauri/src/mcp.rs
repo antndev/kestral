@@ -34,6 +34,8 @@ struct HostView {
     username: String,
     ai_policy: AiPolicy,
     ai_file_policy: AiPolicy,
+    group: String,
+    tags: Vec<String>,
 }
 
 fn build_auth(kind: &str, secret_id: Option<String>) -> std::result::Result<AuthMethod, String> {
@@ -70,6 +72,12 @@ struct CreateHostArgs {
     auth_kind: String,
     #[serde(default)]
     secret_id: Option<String>,
+    /// Group name for the host list. Omit or leave empty for no group.
+    #[serde(default)]
+    group: Option<String>,
+    /// Free-form tags shown on the host.
+    #[serde(default)]
+    tags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -82,6 +90,12 @@ struct UpdateHostArgs {
     auth_kind: String,
     #[serde(default)]
     secret_id: Option<String>,
+    /// New group name. Omit to keep the current group, empty string to ungroup.
+    #[serde(default)]
+    group: Option<String>,
+    /// New tag list. Omit to keep the current tags.
+    #[serde(default)]
+    tags: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -90,6 +104,9 @@ struct CreateSnippetArgs {
     script: String,
     #[serde(default)]
     target_host_ids: Vec<String>,
+    /// Folder name for the snippet list. Omit or leave empty for no folder.
+    #[serde(default)]
+    folder: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -99,6 +116,9 @@ struct UpdateSnippetArgs {
     script: String,
     #[serde(default)]
     target_host_ids: Vec<String>,
+    /// New folder name. Omit to keep the current folder, empty string for none.
+    #[serde(default)]
+    folder: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -141,7 +161,7 @@ impl KestralMcp {
         }
     }
 
-    #[tool(description = "List the configured SSH hosts (id, name, address, user, ai policy) as JSON.")]
+    #[tool(description = "List the configured SSH hosts (id, name, address, user, ai policy, group, tags) as JSON.")]
     async fn list_hosts(&self) -> Result<CallToolResult, McpError> {
         if !self.services.policy.is_active() {
             return Ok(Self::disabled());
@@ -199,7 +219,7 @@ impl KestralMcp {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(description = "List saved snippets (id, label, script, target host ids) as JSON.")]
+    #[tool(description = "List saved snippets (id, label, script, target host ids, folder) as JSON.")]
     async fn list_snippets(&self) -> Result<CallToolResult, McpError> {
         if !self.services.policy.is_active() {
             return Ok(Self::disabled());
@@ -259,9 +279,14 @@ impl KestralMcp {
             forward_agent: false,
             agent_keys: Vec::new(),
             forwards: Vec::new(),
+            group: a.group.unwrap_or_default(),
+            tags: a.tags.unwrap_or_default(),
+            jump_host_id: None,
+            options: Default::default(),
         };
         match self.services.hosts.add(new) {
             Ok(h) => {
+                crate::events::data_changed("hosts");
                 self.services.audit.record(
                     h.id.to_string(),
                     h.name.clone(),
@@ -349,9 +374,14 @@ impl KestralMcp {
             } else {
                 existing.forwards
             },
+            group: a.group.unwrap_or(existing.group),
+            tags: a.tags.unwrap_or(existing.tags),
+            jump_host_id: existing.jump_host_id,
+            options: existing.options,
         };
         match self.services.hosts.update(updated.clone()) {
             Ok(()) => {
+                crate::events::data_changed("hosts");
                 let note = if target_changed {
                     " Connection target changed, so AI access was reset to locked; the user must re-enable it."
                 } else {
@@ -400,9 +430,14 @@ impl KestralMcp {
             label: a.label,
             script: a.script,
             target_host_ids: targets,
+            folder: a.folder.unwrap_or_default(),
+            vars: Default::default(),
+            parallel: true,
+            open_tabs: false,
         };
         match self.services.snippets.add(new) {
             Ok(s) => {
+                crate::events::data_changed("snippets");
                 self.services.audit.record(
                     s.id.to_string(),
                     s.label.clone(),
@@ -445,14 +480,23 @@ impl KestralMcp {
             Ok(t) => t,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
+        let existing = match self.services.snippets.get(id) {
+            Ok(s) => s,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        };
         let updated = Snippet {
             id,
             label: a.label,
             script: a.script,
             target_host_ids: targets,
+            folder: a.folder.unwrap_or(existing.folder),
+            vars: existing.vars,
+            parallel: existing.parallel,
+            open_tabs: existing.open_tabs,
         };
         match self.services.snippets.update(updated.clone()) {
             Ok(()) => {
+                crate::events::data_changed("snippets");
                 self.services.audit.record(
                     id.to_string(),
                     updated.label.clone(),
@@ -504,6 +548,7 @@ impl KestralMcp {
 
         match self.services.snippets.remove(id) {
             Ok(()) => {
+                crate::events::data_changed("snippets");
                 self.services.audit.record(
                     id.to_string(),
                     label.clone(),
@@ -634,6 +679,8 @@ fn host_views(services: &Services) -> Vec<HostView> {
             username: h.username,
             ai_policy: h.ai_policy,
             ai_file_policy: h.ai_file_policy,
+            group: h.group,
+            tags: h.tags,
         })
         .collect()
 }

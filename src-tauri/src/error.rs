@@ -29,10 +29,23 @@ pub enum AppError {
     Crypto,
     #[error("Host key changed for {0}. Refused. If this is expected, remove the old key from known_hosts.")]
     HostKeyChanged(String),
+    #[error("The host key of {0} was not trusted, so the connection was refused.")]
+    HostKeyRejected(String),
+    #[error("The host key of {0} is marked as revoked in known_hosts. Connection refused.")]
+    HostKeyRevoked(String),
     #[error("Path not allowed: {0}")]
     PathNotAllowed(String),
     #[error("SSH: {0}")]
     Ssh(String),
+    #[error("Authentication failed for {user}. {message}")]
+    AuthFailed {
+        user: String,
+        method: String,
+        credential: String,
+        message: String,
+    },
+    #[error("Connection canceled")]
+    Canceled,
     #[error("{0}")]
     Other(String),
 }

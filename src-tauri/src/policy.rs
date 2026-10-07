@@ -117,8 +117,8 @@ fn collapse_slashes(text: &str) -> String {
 /// `/`-anchored pattern matches from the root; otherwise it matches as a trailing
 /// path segment, and a directory pattern protects everything inside it.
 fn path_matches(path: &str, pattern: &str) -> bool {
-    let path = normalize_path(path);
-    let pat = normalize_path(pattern.trim());
+    let path = normalize_path(path).to_lowercase();
+    let pat = normalize_path(pattern.trim()).to_lowercase();
     if pat.is_empty() {
         return false;
     }
@@ -202,6 +202,16 @@ impl PolicyEngine {
     }
 
     /// True if AI writes to `path` are blocked by the protection list.
+    pub fn is_app_data(&self, path: &std::path::Path) -> bool {
+        let Some(dir) = self.state_path.parent() else {
+            return false;
+        };
+        let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        let dir = dir.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
+        let p = path.to_string_lossy().replace('\\', "/").to_lowercase();
+        !dir.is_empty() && (p == dir || p.starts_with(&format!("{dir}/")))
+    }
+
     pub fn is_protected(&self, path: &str) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.protected.iter().any(|pat| path_matches(path, pat))

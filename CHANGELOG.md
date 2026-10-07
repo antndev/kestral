@@ -3,6 +3,89 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.1.55 - 2026-09-02
+
+### Changed
+- AI file transfers can use any local path. Protected paths still stop AI access when a transfer touches one, locally or on the server.
+
+## 0.1.54 - 2026-08-30
+
+### Fixed
+- Collapsing a script log no longer crashes the view.
+
+## 0.1.53 - 2026-08-30
+
+### Changed
+- Back to the original neutral palette.
+
+## 0.1.52 - 2026-08-25
+
+### Changed
+- Lighter, neutral background for the main window and the login screen.
+
+## 0.1.51 - 2026-08-25
+
+### Changed
+- A near-neutral palette replaces the blue tint.
+
+## 0.1.50 - 2026-08-25
+
+### Changed
+- Cooler palette and a calmer animation-speed control.
+
+## 0.1.49 - 2026-08-22
+
+### Added
+- Vault export and import as an encrypted file with its own password. Import merges into the current vault.
+
+### Changed
+- The Claude Code skill is the single way for an AI to use Kestral.
+
+## 0.1.48 - 2026-08-22
+
+### Fixed
+- The macOS build is ad-hoc signed, so it opens with right-click Open.
+
+## 0.1.47 - 2026-08-21
+
+### Added
+- A macOS (Apple Silicon) build alongside Windows.
+
+## 0.1.46 - 2026-08-19
+
+### Changed
+- The loading window matches the system light or dark theme.
+
+## 0.1.45 - 2026-08-19
+
+### Fixed
+- The tray shows the new AI access state as soon as it is toggled.
+
+## 0.1.44 - 2026-08-19
+
+### Changed
+- Shorter tray menu labels, with the AI status line on top.
+
+## 0.1.43 - 2026-08-19
+
+### Added
+- The tray menu shows whether AI access is on.
+
+## 0.1.42 - 2026-08-19
+
+### Changed
+- AI file operations follow the host's file policy. Free no longer asks for approval.
+
+## 0.1.41 - 2026-08-19
+
+### Added
+- Closing the window can keep Kestral running in the tray, so tunnels and AI access stay up. You choose once, and can change it in Settings.
+
+## 0.1.40 - 2026-08-19
+
+### Fixed
+- No more crash when a terminal reconnects or a terminal tab closes.
+
 ## 0.1.39 - 2026-08-14
 
 ### Fixed

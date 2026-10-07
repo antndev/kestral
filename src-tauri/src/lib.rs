@@ -1,10 +1,18 @@
 mod agent;
 mod approval;
 mod audit;
+mod collections;
 mod commands;
 mod error;
+mod events;
 mod forward;
+mod hello;
+mod hostkey;
 mod hosts;
+mod identities;
+mod known_hosts;
+mod local_agent;
+mod local_fs;
 mod mcp;
 mod model;
 mod policy;
@@ -14,6 +22,7 @@ mod sftp;
 mod skill;
 mod snippets;
 mod ssh;
+mod ssh_config;
 mod state;
 mod terminal;
 mod util;
@@ -111,6 +120,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
             // When "minimize to tray" is on, the close button hides the window
             // instead of quitting, so the MCP server keeps serving the AI in the
             // background. Picking Exit from the tray sets `quitting` first.
@@ -128,15 +140,19 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // From here on, first contact with an unknown host asks the user.
+            hostkey::set_app(app.handle().clone());
+            events::set_app(app.handle().clone());
+
             // Paint the loading window in the system's light/dark colour, so the
             // first frame before the webview renders is not a theme-mismatched
             // flash. The app defaults to following the system theme.
             if let Some(w) = app.get_webview_window("main") {
                 let dark = w.theme().map(|t| t == tauri::Theme::Dark).unwrap_or(true);
                 let color = if dark {
-                    tauri::window::Color(10, 10, 10, 255)
+                    tauri::window::Color(17, 17, 17, 255)
                 } else {
-                    tauri::window::Color(255, 255, 255, 255)
+                    tauri::window::Color(250, 249, 245, 255)
                 };
                 let _ = w.set_background_color(Some(color));
             }
@@ -145,6 +161,7 @@ pub fn run() {
             let _ = std::fs::create_dir_all(&base_dir);
             util::restrict_dir(&base_dir);
             util::harden_dir(&base_dir);
+            util::tidy_data_dir(&base_dir);
 
             let settings_store =
                 Arc::new(settings::SettingsStore::load(base_dir.join("app_settings.json")));
@@ -153,13 +170,19 @@ pub fn run() {
             let vault_path = base_dir.join("vault.json");
 
             let vault = Arc::new(vault::Vault::new(vault_path));
+            known_hosts::init(vault.clone());
+            app.manage(hello::Hello::new(base_dir.join("hello.json")));
             let audit = Arc::new(audit::AuditLog::new(
                 base_dir.join("audit.log"),
                 vault.clone(),
             ));
+            let hosts = Arc::new(hosts::HostStore::new(base_dir.join("hosts.json"), vault.clone()));
+            let identities = Arc::new(identities::IdentityStore::new(vault.clone()));
             let services = Services {
                 vault: vault.clone(),
-                hosts: Arc::new(hosts::HostStore::new(base_dir.join("hosts.json"), vault.clone())),
+                hosts: hosts.clone(),
+                identities: identities.clone(),
+                collections: Arc::new(collections::CollectionStore::new(vault.clone())),
                 policy: Arc::new(policy::PolicyEngine::new(
                     base_dir.join("ai_state"),
                     base_dir.join("protected_paths.json"),
@@ -167,7 +190,7 @@ pub fn run() {
                 )),
                 approval: Arc::new(approval::ApprovalBroker::new(app.handle().clone())),
                 audit: audit.clone(),
-                ssh: Arc::new(ssh::SshManager::new(audit.clone())),
+                ssh: Arc::new(ssh::SshManager::new(audit.clone(), hosts, identities)),
                 snippets: Arc::new(snippets::SnippetStore::new(
                     base_dir.join("snippets.json"),
                     vault.clone(),
@@ -196,6 +219,7 @@ pub fn run() {
             });
             app.manage(terminal::Sessions::default());
             app.manage(sftp::SftpSessions::default());
+            app.manage(sftp::Transfers::default());
             app.manage(forward::ForwardManager::default());
 
             let ai_item = tauri::menu::MenuItem::with_id(
@@ -296,12 +320,31 @@ pub fn run() {
             commands::secret_put,
             commands::secret_list,
             commands::secret_delete,
+            commands::secret_copy,
+            hello::hello_status,
+            hello::hello_enable,
+            hello::hello_disable,
+            hello::hello_unlock,
+            commands::snippet_folder_list,
+            commands::snippet_folder_add,
+            commands::snippet_folder_rename,
+            commands::snippet_folder_remove,
+            commands::snippet_folder_reorder,
             commands::secret_reveal,
             commands::generate_key,
+            commands::key_set_comment,
             commands::derive_pubkey,
+            commands::decrypt_key,
+            commands::export_private_key,
             commands::app_changelog,
             commands::drag_icon_path,
             commands::host_list,
+            commands::host_test,
+            commands::identity_list,
+            commands::identity_add,
+            commands::identity_update,
+            commands::identity_remove,
+            local_agent::local_agent_identities,
             commands::host_add,
             commands::host_update,
             commands::host_remove,
@@ -335,6 +378,7 @@ pub fn run() {
             commands::forward_start,
             commands::forward_stop,
             commands::forward_active,
+            commands::forward_stats,
             commands::sftp_open,
             commands::sftp_list,
             commands::sftp_download,
@@ -347,13 +391,34 @@ pub fn run() {
             commands::sftp_remove,
             commands::sftp_rename,
             commands::sftp_close,
+            commands::sftp_transfer,
+            commands::sftp_copy_remote,
+            commands::sftp_cancel,
             terminal::ssh_open_shell,
             terminal::ssh_write,
+            terminal::ssh_write_bytes,
+            terminal::ssh_ping,
             terminal::ssh_resize,
             terminal::ssh_close,
+            commands::data_dir,
             commands::settings_get,
             commands::settings_set_minimize_to_tray,
             commands::settings_set_onboarded,
+            known_hosts::known_hosts_list,
+            known_hosts::known_hosts_remove,
+            known_hosts::known_hosts_forget,
+            known_hosts::known_hosts_import,
+            known_hosts::known_hosts_export,
+            hostkey::hostkey_respond,
+            hostkey::hostkey_pending,
+            local_fs::local_home,
+            local_fs::local_list,
+            local_fs::local_mkdir,
+            local_fs::local_remove,
+            local_fs::local_rename,
+            local_fs::local_read_text,
+            local_fs::local_write_text,
+            ssh_config::ssh_config_hosts,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
@@ -361,6 +426,17 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 if let Some(state) = app_handle.try_state::<AppState>() {
                     state.mcp_cancel.cancel();
+                }
+            }
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows: false,
+                ..
+            } = event
+            {
+                if let Some(w) = app_handle.get_webview_window("main") {
+                    let _ = w.show();
+                    let _ = w.set_focus();
                 }
             }
         });

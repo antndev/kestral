@@ -17,7 +17,8 @@
         "height": 760,
         "minWidth": 900,
         "minHeight": 560,
-        "backgroundColor": "#0a0a0a"
+        "backgroundColor": "#111111",
+        "decorations": false
       }
     ],
     "security": {
@@ -42,7 +43,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/antndev/Kestral/releases/latest/download/latest.json"
+        "https://github.com/antndev/kestral/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI1MEZFOTlBQzkwRTg1QUUKUldTdWhRN0ptdWtQdFpQWXZmbEdGdUJOWXkrMExRUjdqbHphQlhLam5zSWI0UG9YN1RVWS9ndWQK"
     }

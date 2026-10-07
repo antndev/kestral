@@ -122,7 +122,7 @@ impl AuditLog {
             host = %entry.host_name,
             decision = %entry.decision,
             success = entry.success,
-            "AI action"
+            "audit entry"
         );
 
         // Hold the disk lock across the append and any compaction, so no other

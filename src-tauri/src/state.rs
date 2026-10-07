@@ -26,6 +26,8 @@ pub struct McpInfo {
 pub struct Services {
     pub vault: Arc<Vault>,
     pub hosts: Arc<HostStore>,
+    pub identities: Arc<crate::identities::IdentityStore>,
+    pub collections: Arc<crate::collections::CollectionStore>,
     pub policy: Arc<PolicyEngine>,
     pub approval: Arc<ApprovalBroker>,
     pub audit: Arc<AuditLog>,
@@ -50,6 +52,38 @@ fn resolve_local(path: &str) -> PathBuf {
         }
     }
     PathBuf::from(path)
+}
+
+fn effective_local(path: &std::path::Path) -> PathBuf {
+    let mut base = path.to_path_buf();
+    if cfg!(windows) {
+        if let Some(name) = base.file_name().map(|n| n.to_string_lossy().into_owned()) {
+            let clean = name
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .trim_end_matches(['.', ' '])
+                .to_string();
+            if !clean.is_empty() {
+                base.set_file_name(clean);
+            }
+        }
+    }
+    let mut tail = Vec::new();
+    while std::fs::symlink_metadata(&base).is_err() {
+        match (base.parent().map(|p| p.to_path_buf()), base.file_name().map(|n| n.to_os_string())) {
+            (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+                tail.push(name);
+                base = parent;
+            }
+            _ => break,
+        }
+    }
+    let mut out = std::fs::canonicalize(&base).unwrap_or(base);
+    for name in tail.into_iter().rev() {
+        out.push(name);
+    }
+    out
 }
 
 impl Services {
@@ -275,14 +309,29 @@ impl Services {
     /// the kill switch while AI is already off.
     async fn guard_protected(&self, host_id: Uuid, action: &str, remote: &str) -> Result<()> {
         if self.policy.is_active() && self.policy.is_protected(remote) {
-            let (hid, hname) = match self.hosts.get(host_id) {
-                Ok(h) => (h.id.to_string(), h.name),
-                Err(_) => (host_id.to_string(), "unknown host".to_string()),
-            };
-            self.trip_protected(&hname, &hid, action, remote).await;
-            return Err(AppError::PathNotAllowed(format!(
-                "'{remote}' is protected. AI access has been stopped; re-enable it yourself to continue."
-            )));
+            return Err(self.refuse_protected(host_id, action, remote).await);
+        }
+        Ok(())
+    }
+
+    async fn refuse_protected(&self, host_id: Uuid, action: &str, path: &str) -> AppError {
+        let (hid, hname) = match self.hosts.get(host_id) {
+            Ok(h) => (h.id.to_string(), h.name),
+            Err(_) => (host_id.to_string(), "unknown host".to_string()),
+        };
+        self.trip_protected(&hname, &hid, action, path).await;
+        AppError::PathNotAllowed(format!(
+            "'{path}' is protected. AI access has been stopped; re-enable it yourself to continue."
+        ))
+    }
+
+    async fn guard_local(&self, host_id: Uuid, action: &str, raw: &str, path: &std::path::Path) -> Result<()> {
+        self.guard_protected(host_id, action, raw).await?;
+        let effective = effective_local(path);
+        let shown = effective.to_string_lossy().into_owned();
+        self.guard_protected(host_id, action, &shown).await?;
+        if self.policy.is_active() && self.policy.is_app_data(&effective) {
+            return Err(self.refuse_protected(host_id, action, raw).await);
         }
         Ok(())
     }
@@ -292,12 +341,12 @@ impl Services {
         // The local target is unconstrained, but a protected path on either side
         // (e.g. writing onto a local authorized_keys) still trips the kill switch.
         self.guard_protected(host_id, &action, remote).await?;
-        self.guard_protected(host_id, &action, local).await?;
         let local_path = resolve_local(local);
+        self.guard_local(host_id, &action, local, &local_path).await?;
+        let (host, decision) = self.authorize_file(host_id, &action).await?;
         if let Some(parent) = local_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let (host, decision) = self.authorize_file(host_id, &action).await?;
         let result =
             sftp::one_shot_download(&self.ssh, &self.vault, &host, remote, &local_path).await;
         self.audit_file(&host, &action, decision, &result);
@@ -307,8 +356,8 @@ impl Services {
     pub async fn ai_sftp_upload(&self, host_id: Uuid, local: &str, remote: &str) -> Result<u64> {
         let action = format!("sftp upload {local} -> {remote}");
         self.guard_protected(host_id, &action, remote).await?;
-        self.guard_protected(host_id, &action, local).await?;
         let local_path = resolve_local(local);
+        self.guard_local(host_id, &action, local, &local_path).await?;
         let (host, decision) = self.authorize_file(host_id, &action).await?;
         let result =
             sftp::one_shot_upload(&self.ssh, &self.vault, &host, &local_path, remote).await;

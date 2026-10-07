@@ -25,9 +25,12 @@ const DEK_ID: &str = "__kestral_dek__";
 
 const HOSTS_ID: &str = "__kestral_hosts__";
 const SNIPPETS_ID: &str = "__kestral_snippets__";
+const IDENTITIES_ID: &str = "__kestral_identities__";
+const COLLECTIONS_ID: &str = "__kestral_collections__";
+const KNOWN_HOSTS_ID: &str = "__kestral_known_hosts__";
 
 fn is_reserved(id: &str) -> bool {
-    id == DEK_ID || id == HOSTS_ID || id == SNIPPETS_ID
+    id == DEK_ID || id == HOSTS_ID || id == SNIPPETS_ID || id == IDENTITIES_ID || id == COLLECTIONS_ID || id == KNOWN_HOSTS_ID
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +44,7 @@ pub enum SecretKind {
 pub struct SecretMeta {
     pub id: String,
     pub kind: SecretKind,
+    pub created_at: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
@@ -48,6 +52,13 @@ struct Record {
     #[zeroize(skip)]
     kind: SecretKind,
     value: Vec<u8>,
+    #[zeroize(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created: Option<String>,
+}
+
+fn now_stamp() -> Option<String> {
+    Some(chrono::Utc::now().to_rfc3339())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -216,6 +227,47 @@ impl Vault {
         Ok((key, salt, data, outdated))
     }
 
+    fn decrypt_file_with_key(path: &std::path::Path, key: &[u8; 32]) -> Result<([u8; 16], BTreeMap<String, Record>)> {
+        let raw = std::fs::read(path)?;
+        let file: VaultFile = serde_json::from_slice(&raw)?;
+        let salt_vec = b64().decode(&file.header.salt).map_err(|_| AppError::Crypto)?;
+        let nonce_vec = b64().decode(&file.header.nonce).map_err(|_| AppError::Crypto)?;
+        let ct = b64().decode(&file.ciphertext).map_err(|_| AppError::Crypto)?;
+        if salt_vec.len() != 16 || nonce_vec.len() != 24 {
+            return Err(AppError::Crypto);
+        }
+        let mut salt = [0u8; 16];
+        salt.copy_from_slice(&salt_vec);
+        let aad = serde_json::to_vec(&file.header)?;
+        let cipher = XChaCha20Poly1305::new_from_slice(key).map_err(|_| AppError::Crypto)?;
+        let plaintext = cipher
+            .decrypt(XNonce::from_slice(&nonce_vec), Payload { msg: &ct, aad: &aad })
+            .map_err(|_| AppError::VaultAuth)?;
+        let plaintext = Zeroizing::new(plaintext);
+        let data: BTreeMap<String, Record> = serde_json::from_slice(&plaintext)?;
+        Ok((salt, data))
+    }
+
+    /// The key that encrypts the vault file, for wrapping by a quick unlock method.
+    pub fn file_key(&self) -> Result<Zeroizing<[u8; 32]>> {
+        let guard = self.state.lock().unwrap();
+        let unlocked = guard.as_ref().ok_or(AppError::VaultLocked)?;
+        Ok(unlocked.key.clone())
+    }
+
+    pub fn unlock_with_key(&self, key: &[u8; 32]) -> Result<()> {
+        if !self.exists() {
+            return Err(AppError::VaultMissing);
+        }
+        let (salt, data) = Vault::decrypt_file_with_key(&self.path, key)?;
+        let mut unlocked = Unlocked { key: Zeroizing::new(*key), salt, data };
+        if Self::ensure_dek(&mut unlocked) {
+            self.persist(&unlocked)?;
+        }
+        *self.state.lock().unwrap() = Some(unlocked);
+        Ok(())
+    }
+
     pub fn change_master(&self, current: &str, new: &str) -> Result<()> {
         let mut guard = self.state.lock().unwrap();
         let unlocked = guard.as_mut().ok_or(AppError::VaultLocked)?;
@@ -244,6 +296,7 @@ impl Vault {
             Record {
                 kind: SecretKind::Password,
                 value: dek.to_vec(),
+                created: None,
             },
         );
         true
@@ -267,6 +320,18 @@ impl Vault {
         SNIPPETS_ID
     }
 
+    pub const fn identities_blob_id() -> &'static str {
+        IDENTITIES_ID
+    }
+
+    pub const fn collections_blob_id() -> &'static str {
+        COLLECTIONS_ID
+    }
+
+    pub const fn known_hosts_blob_id() -> &'static str {
+        KNOWN_HOSTS_ID
+    }
+
     pub fn get_blob(&self, id: &str) -> Result<Option<Zeroizing<Vec<u8>>>> {
         let guard = self.state.lock().unwrap();
         let unlocked = guard.as_ref().ok_or(AppError::VaultLocked)?;
@@ -284,6 +349,7 @@ impl Vault {
             Record {
                 kind: SecretKind::Password,
                 value: bytes.to_vec(),
+                created: None,
             },
         );
         self.persist(unlocked)
@@ -301,8 +367,27 @@ impl Vault {
             if is_reserved(&id) {
                 continue;
             }
-            unlocked.data.insert(id, Record { kind, value });
+            let created = unlocked.data.get(&id).and_then(|r| r.created.clone()).or_else(now_stamp);
+            unlocked.data.insert(id, Record { kind, value, created });
         }
+        self.persist(unlocked)
+    }
+
+    pub fn copy_secret(&self, from: &str, to: &str) -> Result<()> {
+        if is_reserved(from) {
+            return Err(AppError::NotFound(from.to_string()));
+        }
+        if is_reserved(to) {
+            return Err(AppError::Other("Names starting with __kestral_ are reserved".into()));
+        }
+        let mut guard = self.state.lock().unwrap();
+        let unlocked = guard.as_mut().ok_or(AppError::VaultLocked)?;
+        if unlocked.data.contains_key(to) {
+            return Err(AppError::Other("Something in your vault already has this name".into()));
+        }
+        let rec = unlocked.data.get(from).ok_or_else(|| AppError::NotFound(from.to_string()))?;
+        let copy = Record { kind: rec.kind, value: rec.value.clone(), created: rec.created.clone() };
+        unlocked.data.insert(to.to_string(), copy);
         self.persist(unlocked)
     }
 
@@ -428,11 +513,13 @@ impl SecretStore for Vault {
         }
         let mut guard = self.state.lock().unwrap();
         let unlocked = guard.as_mut().ok_or(AppError::VaultLocked)?;
+        let created = unlocked.data.get(id).and_then(|r| r.created.clone()).or_else(now_stamp);
         unlocked.data.insert(
             id.to_string(),
             Record {
                 kind,
                 value: value.to_vec(),
+                created,
             },
         );
         self.persist(unlocked)
@@ -471,6 +558,7 @@ impl SecretStore for Vault {
             .map(|(id, rec)| SecretMeta {
                 id: id.clone(),
                 kind: rec.kind,
+                created_at: rec.created.clone(),
             })
             .collect())
     }
