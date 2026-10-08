@@ -3,6 +3,22 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.1 - 2026-10-08
+
+### Security
+- Imported known hosts can no longer contain wildcard patterns, and an exact host key always wins over a wildcard entry, so one line cannot vouch for every server.
+- Replacing a changed host key no longer removes wildcard lines that cover other hosts.
+- Host names and user names are checked: no spaces, commas, wildcards or shell characters.
+- When the AI changes the address or sign-in of a jump host, AI access is locked for every host that connects through it too.
+- Importing a vault export never carries over AI permissions, agent forwarding or autostarting forwards, never binds an imported host to one of your own credentials or identities, and drops jump hosts that were not part of the import.
+- The approval dialog shows every line of a command with line numbers, marks hidden characters, shows user@host:port, names uploads and downloads, and keeps Approve disabled for a moment after each new request.
+- Snippets the AI created or changed are marked and show a full preview before they run or get pasted.
+- Pasting into the terminal strips escape and control characters.
+- Exported private keys are created readable only by you, even when they replace an existing file.
+
+### Fixed
+- A server can no longer flood memory while Kestral detects its shell.
+
 ## 0.2.0 - 2026-10-08
 
 ### Changed
