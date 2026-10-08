@@ -3,6 +3,7 @@ import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent, Rea
 import * as api from "../api";
 import { IS_MAC, SANS, errText, readJson } from "./mock";
 import { WindowControls } from "./Shell";
+import { DotField } from "./DotField";
 
 export const HELLO_AUTO_KEY = "kestral-hello-auto";
 
@@ -12,9 +13,10 @@ const shakeAnim = (n: number) => (n ? `${n % 2 ? "kst-shake-a" : "kst-shake-b"} 
 
 const field: CSSProperties = { width: "100%", height: 36, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", color: "var(--text)", fontSize: 13, boxSizing: "border-box", outline: "none" };
 const button: CSSProperties = { display: "grid", placeItems: "center", height: 32, padding: "0 16px", border: "1px solid var(--btn-line)", borderRadius: 6, background: "var(--btn)", color: "var(--btn-text)", fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", boxSizing: "border-box" };
-const card: CSSProperties = { display: "flex", flexDirection: "column", gap: 14, padding: 24, border: "1px solid var(--line)", borderRadius: 12, background: "var(--bg)", boxShadow: "0 16px 48px rgba(0,0,0,.28)" };
+const card: CSSProperties = { display: "flex", flexDirection: "column", gap: 16, padding: 24, border: "1px solid var(--line)", borderRadius: 12, background: "var(--bg)", boxShadow: "0 16px 48px rgba(0,0,0,.28)" };
 const heading: CSSProperties = { margin: 0, fontSize: 16, fontWeight: 600 };
-const lead: CSSProperties = { margin: "4px 0 0", fontSize: 12.5, color: "var(--text-3)" };
+const lead: CSSProperties = { margin: "4px 0 0", fontSize: 12.5, lineHeight: 1.45, color: "var(--text-3)" };
+const actions: CSSProperties = { display: "flex", alignItems: "center", gap: 8, minHeight: 32, marginTop: -4 };
 
 function Spinner() {
   return <span aria-hidden="true" style={{ width: 14, height: 14, border: "2px solid color-mix(in srgb, currentColor 25%, transparent)", borderTopColor: "currentColor", borderRadius: "50%", boxSizing: "border-box", animation: "kst-spin 0.7s linear infinite" }} />;
@@ -43,15 +45,10 @@ function LockFrame({ className, children }: { className: string; children: React
   return (
     <div
       className={className}
-      onMouseMove={(e) => {
-        const el = e.currentTarget;
-        el.style.setProperty("--mx", ((e.clientX / el.clientWidth) * 2 - 1).toFixed(3));
-        el.style.setProperty("--my", ((e.clientY / el.clientHeight) * 2 - 1).toFixed(3));
-      }}
       style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg-side)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
       <style>{SHAKE}</style>
-      <div aria-hidden="true" style={{ position: "absolute", inset: -24, pointerEvents: "none", transform: "translate(calc(var(--mx, 0) * -10px), calc(var(--my, 0) * -10px))", transition: "transform 900ms var(--ease-out)" }}>
-        <div data-anim="breathe" style={{ position: "absolute", inset: 0, backgroundImage: "radial-gradient(circle, color-mix(in srgb, var(--text) 30%, transparent) 1.1px, transparent 1.7px)", backgroundSize: "22px 22px", backgroundPosition: "center", maskImage: "radial-gradient(ellipse 46% 52% at 50% 46%, #000 0%, rgba(0,0,0,.35) 55%, transparent 100%)", WebkitMaskImage: "radial-gradient(ellipse 46% 52% at 50% 46%, #000 0%, rgba(0,0,0,.35) 55%, transparent 100%)" }} />
+      <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", maskImage: "radial-gradient(circle at center, transparent 12%, #000 68%)", WebkitMaskImage: "radial-gradient(circle at center, transparent 12%, #000 68%)" }}>
+        {className.includes("t-light") ? <DotField from="rgba(70,70,80,.38)" to="rgba(70,70,80,.12)" /> : <DotField from="rgba(150,150,162,.5)" to="rgba(150,150,162,.16)" />}
       </div>
       <header data-tauri-drag-region style={{ position: "relative", display: "flex", justifyContent: "flex-end", height: 40, flex: "none" }}>
         {!IS_MAC && <WindowControls />}
@@ -161,8 +158,8 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   };
   const shown = err || error;
   const note = (
-    <div style={{ minHeight: 17, marginTop: -6, fontSize: 12, color: shown ? "var(--err)" : caps ? "var(--warn)" : "var(--text-3)" }} role={shown ? "alert" : undefined}>
-      {shown || (caps ? "Caps Lock is on" : exists ? "" : "A forgotten master password cannot be recovered.")}
+    <div style={{ flex: 1, minWidth: 0, fontSize: 12, lineHeight: "15px", maxHeight: 30, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", color: shown ? "var(--err)" : "var(--warn)" }} role={shown ? "alert" : undefined}>
+      {shown || (caps ? "Caps Lock is on" : "")}
     </div>
   );
 
@@ -192,10 +189,13 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
     return (
       <LockFrame className={className}>
         <form onSubmit={submit} style={card}>
-          <h1 style={heading}>Unlock Kestral</h1>
+          <div>
+            <h1 style={heading}>Unlock vault</h1>
+            <p style={lead}>Enter your master password to continue.</p>
+          </div>
           <div style={{ animation: shakeAnim(shake) }}>{input("pw", "Master password")}</div>
-          {note}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <div style={actions}>
+            {note}
             {hello?.enabled && (
               <button
                 type="button"
@@ -220,14 +220,14 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
       <form onSubmit={submit} style={card}>
         <div>
           <h1 style={heading}>Create your vault</h1>
-          <p style={lead}>Everything in Kestral is encrypted with this password.</p>
+          <p style={lead}>Everything in Kestral is encrypted with this password. It cannot be recovered if you forget it.</p>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8, animation: shakeAnim(shake) }}>
           {input("pw", "Master password")}
           {input("pw2", "Repeat password")}
         </div>
-        {note}
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <div style={actions}>
+          {note}
           <SubmitButton label="Create vault" busy={busy} ready={!!pw} />
         </div>
       </form>
