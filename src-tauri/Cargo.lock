@@ -2756,7 +2756,7 @@ dependencies = [
 
 [[package]]
 name = "kestral"
-version = "0.1.55"
+version = "0.2.0"
 dependencies = [
  "argon2 0.5.3",
  "axum",

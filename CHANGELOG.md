@@ -3,6 +3,32 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.0 - 2026-10-08
+
+### Changed
+- New look: the sidebar on the left, Chrome style tabs on top and the content below, split by two full length lines. Tabs can be dragged to reorder, the terminal starts right under the tabs, and address, state and latency live in the status bar.
+- SFTP opens as its own tab, and Settings sits at the bottom of the sidebar.
+- Hosts, snippets, port forwarding and keys show a calm read only view first. Edit switches the same pane into a form, no more popups.
+- The start mode of a port forward (manually, when Kestral opens, when the host connects) can be changed right in the rule view.
+- Calmer lock screen with the original dot background. Windows Hello can prompt automatically.
+- AI commands reuse one SSH connection per host instead of reconnecting every time.
+- Faster unlock and faster log loading.
+- New app icon.
+
+### Security
+- If the AI changes how a host signs in, AI access to that host is locked again, just like a change of address.
+- authorized_keys2 and the Windows administrators_authorized_keys file are protected paths too. Existing lists get them once.
+- SFTP refuses remote file names that would escape the target folder.
+- Release builds pin every workflow action to a fixed commit.
+
+### Fixed
+- A timed out AI command is stopped on the server instead of running on.
+- Audit entries recorded while the vault is locked are kept and written after the next unlock, and the log can no longer be emptied by accident.
+- Locking cancels running SFTP transfers.
+- Port forwards whose connection dropped no longer show as running.
+- SFTP tabs no longer freeze and ignore clicks.
+- Several leaks and stale states in SFTP, logs, the host editor and tab dragging.
+
 ## 0.1.55 - 2026-09-02
 
 ### Changed
