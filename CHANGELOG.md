@@ -3,10 +3,10 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
-## 0.2.5 - 2026-10-08
+## 0.2.6 - 2026-10-08
 
 ### Fixed
-- macOS: the traffic lights are now exactly on the title bar centre line (0.2.4 overshot by a point).
+- macOS: the traffic lights are now exactly on the title bar centre line (0.2.4 put them a point too low).
 
 ## 0.2.4 - 2026-10-08
 
