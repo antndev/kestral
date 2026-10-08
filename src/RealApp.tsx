@@ -1197,7 +1197,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         {sessions
           .filter((s) => s.kind === "sftp")
           .map((s) => (
-            <div key={s.tabId} data-anim="screen" style={box(activeTab === s.tabId)}>
+            <div key={`sftp-${s.tabId}`} data-anim="screen" style={box(activeTab === s.tabId)}>
               <SftpScreen
                 hosts={hosts}
                 host={s.host}
@@ -1215,7 +1215,9 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
               />
             </div>
           ))}
-        {sessions.map((s) => (
+        {sessions
+          .filter((s) => s.kind === "terminal")
+          .map((s) => (
           <div key={s.tabId} style={box(activeTab === s.tabId)}>
             {s.layout && (
               <TerminalSession

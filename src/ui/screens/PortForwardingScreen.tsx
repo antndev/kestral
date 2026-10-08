@@ -578,6 +578,25 @@ function RuleDetail({
     setEditing(false);
   };
 
+  async function saveStart(m: StartMode) {
+    if (!row || saving) return;
+    const updated: PortForward = { ...row.f, autostart: m === "open" || m === "both", start_on_connect: m === "connect" || m === "both" };
+    setSaving(true);
+    setFormErr("");
+    try {
+      const fresh = await api.hostList();
+      const h = fresh.find((x) => x.id === row.host.id);
+      if (!h) throw new Error("That host no longer exists.");
+      const next = { ...h, forwards: h.forwards.map((f) => (f.id === id ? updated : f)) };
+      await api.hostUpdate(next);
+      onSaved(id, fresh.map((x) => (x.id === next.id ? next : x)), "");
+    } catch (e) {
+      if (alive.current) setFormErr(errText(e));
+    } finally {
+      if (alive.current) setSaving(false);
+    }
+  }
+
   const throughHost = hosts.find((h) => h.id === draft.hostId) ?? null;
   const kind = draft.kind;
   const dynamic = kind === "dynamic";
@@ -726,7 +745,6 @@ function RuleDetail({
   };
 
   const title = row ? ruleName(row.f) : "New rule";
-  const mode = startModeOf(draft);
   const locked = saving || (!!row && !!pending);
 
   const sub = (
@@ -785,7 +803,21 @@ function RuleDetail({
           <Block title="Behaviour">
             <Facts
               rows={[
-                ["Start", START_LABEL[startModeOf(saved)]],
+                [
+                  "Start",
+                  <select
+                    aria-label="Start"
+                    value={startModeOf(saved)}
+                    disabled={saving}
+                    onChange={(e) => void saveStart(e.target.value as StartMode)}
+                    style={{ maxWidth: "100%", height: 18, margin: "0 0 0 -4px", padding: "0 2px", border: 0, borderRadius: 4, background: "transparent", color: "var(--text)", font: "inherit", cursor: saving ? "default" : "pointer" }}
+                  >
+                    {START_MODES.map((m) => (
+                      <option key={m} value={m}>{START_LABEL[m]}</option>
+                    ))}
+                    {startModeOf(saved) === "both" && <option value="both">{START_LABEL.both}</option>}
+                  </select>,
+                ],
                 ["Reachable", reach ? <span title={reach.title} style={{ color: "var(--warn)" }}>{k === "remote" ? "From other machines" : "From your network"}</span> : `Only from ${k === "remote" ? hostName : "this computer"}`],
               ]}
             />
@@ -868,23 +900,6 @@ function RuleDetail({
             <label htmlFor="pf-dport" style={fieldLabel}>Port</label>
             <input id="pf-dport" type="text" inputMode="numeric" disabled={dynamic} value={dynamic ? "" : draft.destPort} onChange={(e) => set({ destPort: e.target.value })} aria-invalid={bad.destPort || undefined} style={field("destPort", dynamic ? { ...monoField, opacity: 0.6 } : monoField)} />
           </div>
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <label htmlFor="pf-start" style={fieldLabel}>Start</label>
-          <select
-            id="pf-start"
-            value={mode}
-            onChange={(e) => {
-              const m = e.target.value as StartMode;
-              set({ autostart: m === "open" || m === "both", startOnConnect: m === "connect" || m === "both" });
-            }}
-            style={{ ...input, padding: "0 8px" }}
-          >
-            {START_MODES.map((m) => (
-              <option key={m} value={m}>{START_LABEL[m]}</option>
-            ))}
-            {(mode === "both" || (saved && startModeOf(saved) === "both")) && <option value="both">{START_LABEL.both}</option>}
-          </select>
         </div>
       </div>
 
