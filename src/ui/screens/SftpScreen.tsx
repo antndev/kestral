@@ -1514,7 +1514,7 @@ function PaneView({
   };
 
   const header = (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderBottom: "1px solid var(--line)", background: focused ? "var(--bg-sunken)" : undefined, boxShadow: focused ? "inset 0 2px 0 var(--focus)" : undefined }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderBottom: "1px solid var(--line)" }}>
       <label htmlFor={`${uid}-loc`} style={srOnly}>
         Location
       </label>
@@ -1846,14 +1846,14 @@ function PaneView({
   );
 }
 
-function EditorView({ pane, editor, label, focused, onClose }: { pane: Pane; editor: Editing; label: string; focused: boolean; onClose(): void }) {
+function EditorView({ pane, editor, label, onClose }: { pane: Pane; editor: Editing; label: string; focused: boolean; onClose(): void }) {
   const dirty = editor.content !== editor.original;
   const areaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => areaRef.current?.focus(), []);
   const error = editor.error || pane.error;
   return (
     <>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 45, padding: "0 10px", borderBottom: "1px solid var(--line)", background: focused ? "var(--bg-sunken)" : undefined, boxShadow: focused ? "inset 0 2px 0 var(--focus)" : undefined, boxSizing: "border-box" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 45, padding: "0 10px", borderBottom: "1px solid var(--line)", boxSizing: "border-box" }}>
         <span style={{ color: "var(--text-2)", display: "flex", flex: "none" }}>
           <FileIcon />
         </span>
@@ -2805,7 +2805,7 @@ export function SftpScreen({
   return (
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 8, height: 56, flex: "none", padding: "0 16px", borderBottom: "1px solid var(--line)", background: "var(--tab)", boxSizing: "border-box", whiteSpace: "nowrap" }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600, flex: "none" }}>SFTP</h1>
+        <h1 style={{ position: "relative", top: -1, margin: 0, fontSize: 20, fontWeight: 600, flex: "none" }}>SFTP</h1>
         <button
           ref={transfersBtnRef}
           type="button"

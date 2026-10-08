@@ -90,7 +90,7 @@ async fn list(sftp: &SftpSession, path: &str) -> Result<Vec<FileEntry>> {
     Ok(out)
 }
 
-const MAX_AI_DOWNLOAD: u64 = 2 * 1024 * 1024 * 1024;
+pub(crate) const MAX_AI_DOWNLOAD: u64 = 2 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Default)]
 pub struct Xfer {
@@ -316,7 +316,7 @@ pub fn local_size(path: &Path) -> u64 {
 }
 
 pub struct SftpHandle {
-    _conn: client::Handle<ClientHandler>,
+    _conn: Arc<client::Handle<ClientHandler>>,
     sftp: SftpSession,
 }
 
@@ -408,37 +408,12 @@ impl SftpHandle {
 
 pub async fn connect(ssh: &SshManager, vault: &Arc<Vault>, host: &Host) -> Result<SftpHandle> {
     let conn = ssh.connect(host, vault).await?;
+    on_session(Arc::new(conn)).await
+}
+
+pub async fn on_session(conn: Arc<client::Handle<ClientHandler>>) -> Result<SftpHandle> {
     let sftp = open_subsystem(&conn).await?;
     Ok(SftpHandle { _conn: conn, sftp })
-}
-
-pub async fn one_shot_list(
-    ssh: &SshManager,
-    vault: &Arc<Vault>,
-    host: &Host,
-    path: &str,
-) -> Result<Vec<FileEntry>> {
-    connect(ssh, vault, host).await?.list(path).await
-}
-
-pub async fn one_shot_download(
-    ssh: &SshManager,
-    vault: &Arc<Vault>,
-    host: &Host,
-    remote: &str,
-    local: &Path,
-) -> Result<u64> {
-    connect(ssh, vault, host).await?.download(remote, local, &Xfer::limited(MAX_AI_DOWNLOAD)).await
-}
-
-pub async fn one_shot_upload(
-    ssh: &SshManager,
-    vault: &Arc<Vault>,
-    host: &Host,
-    local: &Path,
-    remote: &str,
-) -> Result<u64> {
-    connect(ssh, vault, host).await?.upload(local, remote, &Xfer::default()).await
 }
 
 #[derive(Default)]

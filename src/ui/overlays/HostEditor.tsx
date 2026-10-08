@@ -324,11 +324,21 @@ function forwardText(f: PortForward): string {
   return `${f.local_port} → ${f.remote_host}:${f.remote_port}`;
 }
 
+function Frame({ inline, z, onBackdrop, children }: { inline: boolean; z: number; onBackdrop(): void; children: ReactNode }) {
+  if (inline) return <>{children}</>;
+  return (
+    <Overlay z={z} align="flex-start" padding="52px 16px 24px" onBackdrop={onBackdrop}>
+      {children}
+    </Overlay>
+  );
+}
+
 export function HostEditor(p: {
   host: Host | null;
   prefill?: Partial<NewHost>;
   hosts: Host[];
   connectAfterSave?: boolean;
+  inline?: boolean;
   onClose(): void;
   onSaved(h: Host, connect: boolean): void;
 }) {
@@ -997,6 +1007,7 @@ export function HostEditor(p: {
     else leave();
   };
   const z = useModalLayer(dialogRef, {
+    inline: p.inline,
     initialFocus: labelRef,
     onEscape: () => {
       if (keyPanel) {
@@ -1062,20 +1073,32 @@ export function HostEditor(p: {
 
   return (
     <>
-      <Overlay z={z} align="flex-start" padding="52px 16px 24px" onBackdrop={close}>
+      <Frame inline={!!p.inline} z={z} onBackdrop={close}>
         <section
           ref={dialogRef}
-          role="dialog"
-          aria-modal="true"
+          role={p.inline ? "region" : "dialog"}
+          aria-modal={p.inline ? undefined : "true"}
           aria-labelledby={fid("title")}
           aria-busy={!!busy || undefined}
-          style={{ width: 680, maxWidth: "100%", maxHeight: "100%", display: "flex", flexDirection: "column", borderRadius: 12, background: "var(--bg)", color: "var(--text)", boxShadow: "var(--shadow)", overflow: "hidden" }}
+          onKeyDown={
+            p.inline
+              ? (e) => {
+                  if (e.key !== "Escape" || e.defaultPrevented) return;
+                  e.preventDefault();
+                  if (keyPanel) closeKeyPanel();
+                  else close();
+                }
+              : undefined
+          }
+          style={p.inline ? { display: "flex", flexDirection: "column", color: "var(--text)" } : { width: 680, maxWidth: "100%", maxHeight: "100%", display: "flex", flexDirection: "column", borderRadius: 12, background: "var(--bg)", color: "var(--text)", boxShadow: "var(--shadow)", overflow: "hidden" }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--line)" }}>
-            <h2 id={fid("title")} style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 16, fontWeight: 600 }}>{editing ? "Edit host" : "New host"}</h2>
-            <button type="button" aria-label="Close" disabled={!!busy} onClick={close} style={{ ...iconBtn, cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}>
-              <CloseIcon size={14} />
-            </button>
+          <div style={p.inline ? { display: "flex", alignItems: "center", gap: 12, paddingBottom: 18 } : { display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--line)" }}>
+            <h2 id={fid("title")} style={{ flex: 1, minWidth: 0, margin: 0, fontSize: p.inline ? 18 : 16, fontWeight: 600 }}>{editing ? (p.inline && current ? `Edit ${current.name}` : "Edit host") : "New host"}</h2>
+            {!p.inline && (
+              <button type="button" aria-label="Close" disabled={!!busy} onClick={close} style={{ ...iconBtn, cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}>
+                <CloseIcon size={14} />
+              </button>
+            )}
           </div>
 
           <form
@@ -1086,7 +1109,7 @@ export function HostEditor(p: {
             }}
             style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
           >
-          <div style={{ flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", gap: 22, padding: 20 }}>
+          <div style={p.inline ? { display: "flex", flexDirection: "column", gap: 22, paddingBottom: 22 } : { flex: 1, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column", gap: 22, padding: 20 }}>
             {/* General */}
             <section aria-labelledby={fid("general")} style={sectionStyle}>
               <h3 id={fid("general")} style={h3Style}>General</h3>
@@ -2070,7 +2093,7 @@ export function HostEditor(p: {
             )}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 20px", borderTop: "1px solid var(--line)", background: "var(--bg-side)" }}>
+          <div style={p.inline ? { position: "sticky", bottom: -24, display: "flex", alignItems: "center", gap: 8, padding: "16px 0 24px", borderTop: "1px solid var(--line)", background: "var(--bg)" } : { display: "flex", alignItems: "center", gap: 8, padding: "14px 20px", borderTop: "1px solid var(--line)", background: "var(--bg-side)" }}>
             <button
               type="button"
               disabled={!canTest || test.state === "busy"}
@@ -2096,7 +2119,7 @@ export function HostEditor(p: {
           </div>
           </form>
         </section>
-      </Overlay>
+      </Frame>
       {confirmDiscard && (
         <ConfirmDialog
           title="Discard changes?"

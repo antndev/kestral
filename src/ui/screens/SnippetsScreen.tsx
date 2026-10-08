@@ -19,9 +19,34 @@ import * as api from "../../api";
 import type { Host, Snippet } from "../../api";
 import { usePrefs } from "../../lib/prefs";
 import { IS_MAC, KEYS, MONO, errText, termFontStack } from "../mock";
-import { ChevronIcon, DotsIcon, PlayIcon, PlusIcon, SearchIcon } from "../icons";
+import { ChevronIcon, DotsIcon, PlayIcon, PlusIcon, SnippetIcon, TrashIcon } from "../icons";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
+import {
+  Block,
+  Blocks,
+  DetailHead,
+  EditFooter,
+  EmptyState,
+  Facts,
+  List,
+  ListFilter,
+  ListItem,
+  ScreenHeader,
+  SplitView,
+  arrowNav,
+  chip as hostChip,
+  errLine,
+  mono,
+  muted as quiet,
+  oneLine,
+  pageBtn,
+  primaryBtn,
+  sectionLabel,
+  smallBtn,
+  srOnly,
+  type Fact,
+} from "../kit";
 
 const LiveTerminalOutput = lazy(() =>
   import("../../TerminalOutput").then((m) => ({ default: m.LiveTerminalOutput })),
@@ -30,16 +55,16 @@ const LiveTerminalOutput = lazy(() =>
 const fieldLabel: CSSProperties = { display: "block", marginBottom: 6, fontSize: 12, fontWeight: 500, color: "var(--text-2)" };
 const field: CSSProperties = { width: "100%", height: 32, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
 const h3: CSSProperties = { margin: "0 0 6px", fontSize: 12, fontWeight: 500, color: "var(--text-2)" };
-const subMono: CSSProperties = { maxWidth: "100%", fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
-const btn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box" };
-const btnPrimary: CSSProperties = { ...btn, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
-const btnDanger: CSSProperties = { ...btn, border: "1px solid var(--err)", background: "transparent", color: "var(--err)" };
-const btnSmall: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 28, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer", boxSizing: "border-box" };
+const btnDanger: CSSProperties = { ...pageBtn, border: "1px solid var(--err)", background: "transparent", color: "var(--err)" };
 const muted: CSSProperties = { fontSize: 12, color: "var(--text-2)" };
+const chip: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, height: 24, padding: "0 4px 0 10px", borderRadius: 12, background: "var(--bg-raised)", fontSize: 12, boxSizing: "border-box" };
 
 function off(style: CSSProperties, disabled: boolean): CSSProperties {
   return disabled ? { ...style, opacity: 0.5, cursor: "default" } : style;
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -399,7 +424,6 @@ export function SnippetsScreen({
   const [actionErr, setActionErr] = useState("");
   const [selId, setSelId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
-  const [filterFocused, setFilterFocused] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
   const [folderToDelete, setFolderToDelete] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>(NO_SAVE);
@@ -407,12 +431,17 @@ export function SnippetsScreen({
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [varPrompt, setVarPrompt] = useState<null | { snippetId: string; mode: "run" | "paste"; names: string[]; values: Record<string, string> }>(null);
   const [confirmDelete, setConfirmDelete] = useState<Snippet | null>(null);
-  const [hotRow, setHotRow] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [freshId, setFreshId] = useState<string | null>(null);
+  const [discarding, setDiscarding] = useState(false);
   const runs = useSyncExternalStore(subscribeRuns, getRuns);
 
   const rootRef = useRef<HTMLElement | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const nameRef = useRef<HTMLInputElement | null>(null);
-  const focusName = useRef(false);
+  const editBtnRef = useRef<HTMLButtonElement | null>(null);
+  const focusName = useRef<"select" | "focus" | null>(null);
+  const focusEditBtn = useRef(false);
   const alive = useRef(true);
   const snippetsRef = useRef<Snippet[]>([]);
   const dirty = useRef<Set<string>>(new Set());
@@ -516,6 +545,8 @@ export function SnippetsScreen({
   }
 
   const selected = snippets.find((s) => s.id === selId) ?? null;
+  const editing = !!selected && editId === selected.id;
+  const fresh = editing && freshId === selected.id;
 
   const allFolders = useMemo(() => {
     const out = [...folders];
@@ -534,7 +565,8 @@ export function SnippetsScreen({
     return list.filter((g) => g.items.length > 0 || (g.name !== "" && !q));
   }, [snippets, allFolders, filter]);
 
-  const visibleOrder = groups.flatMap((g) => g.items.map((s) => s.id));
+  const visibleItems = groups.flatMap((g) => g.items);
+  const visibleOrder = visibleItems.map((s) => s.id);
   const firstVisible = visibleOrder[0] ?? null;
 
   useEffect(() => {
@@ -543,13 +575,19 @@ export function SnippetsScreen({
   }, [loaded, snippets, selId, firstVisible]);
 
 
+  const shownId = selected?.id ?? null;
   useEffect(() => {
-    if (focusName.current && selected) {
-      focusName.current = false;
+    if (focusName.current && editing) {
+      const how = focusName.current;
+      focusName.current = null;
       nameRef.current?.focus();
-      nameRef.current?.select();
+      if (how === "select") nameRef.current?.select();
     }
-  }, [selected]);
+    if (focusEditBtn.current && !editing) {
+      focusEditBtn.current = false;
+      editBtnRef.current?.focus();
+    }
+  }, [shownId, editing]);
 
   const prefsFor = (id: string) => {
     const sn = snippets.find((x) => x.id === id);
@@ -604,7 +642,22 @@ export function SnippetsScreen({
     if (id === selId) return;
     void flush();
     setSelId(id);
+    setEditId(null);
+    setFreshId(null);
     setSaveStatus((s) => (s.state === "saved" ? NO_SAVE : s));
+  }
+
+  function startEdit() {
+    if (!selected) return;
+    focusName.current = "focus";
+    setEditId(selected.id);
+  }
+
+  function finishEdit() {
+    void flush();
+    focusEditBtn.current = true;
+    setEditId(null);
+    setFreshId(null);
   }
 
   const selectRef = useRef(select);
@@ -614,6 +667,8 @@ export function SnippetsScreen({
     if (snippets.some((s) => s.id === focusRequest.id)) {
       setFilter("");
       selectRef.current(focusRequest.id);
+      setEditId(null);
+      setFreshId(null);
     }
   }, [focusRequest, loaded]);
 
@@ -628,8 +683,10 @@ export function SnippetsScreen({
       commitSnippets([...snippetsRef.current, normalize(created)]);
       setLoadErr("");
       setFilter("");
-      focusName.current = true;
+      focusName.current = "select";
       setSelId(created.id);
+      setEditId(created.id);
+      setFreshId(created.id);
       setSaveStatus((s) => (s.state === "saved" ? NO_SAVE : s));
     } catch (e) {
       if (alive.current) setActionErr(errText(e));
@@ -650,7 +707,24 @@ export function SnippetsScreen({
     const nextId = visibleOrder[idx + 1] ?? visibleOrder[idx - 1] ?? null;
     commitSnippets(snippetsRef.current.filter((s) => s.id !== id));
     if (selId === id) setSelId(nextId);
+    setEditId((cur) => (cur === id ? null : cur));
+    setFreshId((cur) => (cur === id ? null : cur));
     setSaveStatus((s) => (s.id === id ? NO_SAVE : s));
+  }
+
+  async function discardNew(target: Snippet) {
+    if (discarding) return;
+    setDiscarding(true);
+    setActionErr("");
+    dirty.current.delete(target.id);
+    try {
+      await saveChain.current;
+      await deleteSnippet(target);
+    } catch (e) {
+      if (alive.current) setActionErr(errText(e));
+    } finally {
+      if (alive.current) setDiscarding(false);
+    }
   }
 
   async function refreshFolders() {
@@ -712,8 +786,20 @@ export function SnippetsScreen({
   }
 
   const plan = selected ? planFor(selected) : null;
+  const runMode: RunMode = prefs.tabs ? "tabs" : prefs.parallel ? "parallel" : "serial";
+  const subLine = selected && plan ? `${selected.folder || "No folder"} · ${plan.targets.length > 0 ? plural(plan.targets.length, "host") : "no hosts"}` : "";
   const snippetRuns = runs.filter((r) => r.snippetId === selId);
   const busyIds = new Set(runs.filter((r) => r.results.some((x) => isLive(x.status))).map((r) => r.snippetId));
+  const liveRuns = snippetRuns.filter((r) => r.results.some((x) => isLive(x.status)));
+  const selBusy = liveRuns.length > 0;
+  const canStop = liveRuns.some((r) => r.results.some((x) => x.status === "queued"));
+  const busyRef = useRef(selBusy);
+  busyRef.current = selBusy;
+
+  function stopRuns() {
+    if (selId && Date.now() - (lastRun.current[selId] ?? 0) < RUN_DEBOUNCE_MS) return;
+    for (const r of liveRuns) if (r.results.some((x) => x.status === "queued")) cancelQueued(r.runId);
+  }
   const promptSnippet = varPrompt ? snippets.find((s) => s.id === varPrompt.snippetId) ?? null : null;
   useEffect(() => {
     if (confirmDelete && loaded && !snippets.some((x) => x.id === confirmDelete.id)) setConfirmDelete(null);
@@ -729,6 +815,8 @@ export function SnippetsScreen({
     const now = Date.now();
     if (now - (lastRun.current[s.id] ?? 0) < RUN_DEBOUNCE_MS) return;
     lastRun.current[s.id] = now;
+    setEditId((cur) => (cur === s.id ? null : cur));
+    setFreshId((cur) => (cur === s.id ? null : cur));
     const { p, targets, tabs } = planFor(s);
     if (tabs) onRunInTabs(script, targets.map((h) => h.id));
     else void startRun(s.id, script, targets, p.parallel);
@@ -770,6 +858,7 @@ export function SnippetsScreen({
       if (!onPage && !root.contains(t)) return;
       if (!isOnTop(root)) return;
       e.preventDefault();
+      if (busyRef.current) return;
       beginRef.current("run");
     };
     window.addEventListener("keydown", onKey);
@@ -781,239 +870,294 @@ export function SnippetsScreen({
     return s ? s.label.trim() || "Untitled" : "";
   };
 
+  const failed = loaded && snippets.length === 0 && loadErr !== "";
+  const emptyVault = loaded && snippets.length === 0 && allFolders.length === 0;
+  const fullState = failed || emptyVault;
+  const focusRow = (id: string) => rowRefs.current.get(id)?.focus();
+  const newButton = (style: CSSProperties) => (
+    <button type="button" onClick={newSnippet} disabled={creating} style={off(style, creating)}>
+      <PlusIcon size={14} sw={1.75} />
+      <Stable text={creating ? "Creating…" : "New snippet"} alts={["New snippet", "Creating…"]} />
+    </button>
+  );
+
   return (
     <main ref={rootRef} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, padding: "20px 28px 14px" }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Snippets</h1>
-        <span style={{ color: "var(--text-2)" }}>{!loaded ? (loadErr ? "" : "Loading…") : `${snippets.length} ${snippets.length === 1 ? "snippet" : "snippets"}`}</span>
-        <span role="alert" title={actionErr || undefined} style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--err)", textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+      <ScreenHeader title="Snippets" meta={!loaded ? (loadErr ? "" : "Loading…") : plural(snippets.length, "snippet")}>
+        <span role="alert" title={actionErr || undefined} style={{ ...oneLine, flex: "0 1 auto", maxWidth: 360, fontSize: 12, color: "var(--err)" }}>
           {actionErr}
         </span>
-        <button type="button" onClick={newSnippet} disabled={creating} style={off(btnPrimary, creating)}>
-          <PlusIcon size={14} sw={1.75} />
-          <Stable text={creating ? "Creating…" : "New snippet"} alts={["New snippet", "Creating…"]} />
-        </button>
-      </div>
+        {loaded && !fullState && newButton(primaryBtn)}
+      </ScreenHeader>
 
-      <div style={{ display: "flex", flex: 1, minHeight: 0, borderTop: "1px solid var(--line)" }}>
-        <div style={{ flex: "0 0 280px", minWidth: 0, display: "flex", flexDirection: "column", gap: 6, padding: "12px 10px", borderRight: "1px solid var(--line)", overflow: "auto", boxSizing: "border-box" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, height: 32, flex: "none", padding: "0 10px", border: `1px solid ${filterFocused ? "var(--focus)" : "var(--line)"}`, borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text-2)", boxSizing: "border-box" }}>
-            <SearchIcon size={14} />
-            <span style={srOnly}>Filter snippets</span>
-            <input
-              type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              onFocus={() => setFilterFocused(true)}
-              onBlur={() => setFilterFocused(false)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape" && filter) {
-                  e.stopPropagation();
-                  setFilter("");
-                }
-              }}
-              placeholder="Filter snippets"
-              style={{ flex: 1, minWidth: 0, border: 0, outline: "none", background: "transparent", color: "var(--text)" }}
-            />
-          </label>
-          {loaded && snippets.length > 0 && filter.trim() !== "" && visibleOrder.length === 0 && (
-            <p style={{ margin: "8px", ...muted }}>No snippets match "{filter.trim()}".</p>
-          )}
-          {groups.map((g) => (
-            <div key={g.name || "\u0000"} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              {g.name && (
-                <FolderHeader
-                  name={g.name}
-                  onRename={() => setFolderDialog({ mode: "rename", from: g.name })}
-                  onRemove={() => setFolderToDelete(g.name)}
-                />
-              )}
-              {g.items.length === 0 && <p style={{ margin: "2px 10px", fontSize: 12, color: "var(--text-3)" }}>Empty folder</p>}
-              {g.items.map((s) => {
-                const current = s.id === selId;
-                const rowPlan = blockFor(s);
-                const showPlay = hotRow === s.id;
-                return (
-                  <div
-                    key={s.id}
-                    onMouseEnter={() => setHotRow(s.id)}
-                    onMouseLeave={() => setHotRow((h) => (h === s.id ? null : h))}
-                    onFocus={() => setHotRow(s.id)}
-                    onBlur={(e) => {
-                      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHotRow((h) => (h === s.id ? null : h));
-                    }}
-                    style={{ position: "relative" }}
-                  >
-                    <button
-                      type="button"
-                      aria-current={current}
-                      onClick={() => select(s.id)}
-                      style={{ display: "flex", flexDirection: "column", gap: 2, width: "100%", padding: "7px 10px", border: 0, borderRadius: 6, background: current ? "var(--sel)" : "transparent", color: "var(--text)", textAlign: "left", cursor: "pointer" }}
-                    >
-                      <span style={{ display: "flex", alignItems: "center", gap: 6, maxWidth: "100%", paddingRight: 28, boxSizing: "border-box" }}>
-                        <span style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: s.label.trim() ? undefined : "var(--text-3)" }}>
-                          {s.label.trim() || "Untitled"}
-                        </span>
-                        {busyIds.has(s.id) && (
-                          <span title="Running" aria-label="Running" style={{ width: 6, height: 6, flex: "none", borderRadius: "50%", background: "var(--warn)" }} />
-                        )}
-                      </span>
-                      <span style={subMono}>{s.script.split("\n").find((l) => l.trim()) ?? " "}</span>
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Run ${s.label.trim() || "Untitled"}`}
-                      title={rowPlan.runBlocked || rowPlan.runTitle}
-                      disabled={!!rowPlan.runBlocked}
-                      onClick={() => runFromList(s)}
-                      style={{ position: "absolute", top: 6, right: 6, display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: rowPlan.runBlocked ? "default" : "pointer", opacity: showPlay ? (rowPlan.runBlocked ? 0.5 : 1) : 0, pointerEvents: showPlay ? "auto" : "none", boxSizing: "border-box" }}
-                    >
-                      <PlayIcon size={12} />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
-
-        <section aria-label="Snippet editor" style={{ flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", gap: 20, padding: "24px 28px", overflow: "auto", boxSizing: "border-box" }}>
-          {!loaded ? null : loadErr && snippets.length === 0 ? (
-            <div style={{ margin: "auto", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-2)" }}>Could not load snippets.</div>
-              <p role="alert" style={{ margin: 0, fontSize: 12, color: "var(--err)" }}>{loadErr}</p>
-              <button type="button" onClick={() => void retryLoad()} disabled={retrying} style={off(btn, retrying)}>
-                <Stable text={retrying ? "Retrying…" : "Retry"} alts={["Retry", "Retrying…"]} />
+      {fullState ? (
+        <div style={{ flex: 1, minHeight: 0, display: "flex", borderTop: "1px solid var(--line)" }}>
+          {failed ? (
+            <EmptyState>
+              <p role="alert" style={errLine}>Could not load snippets: {loadErr}</p>
+              <button type="button" onClick={() => void retryLoad()} disabled={retrying} style={off(smallBtn, retrying)}>
+                <Stable text={retrying ? "Retrying…" : "Try again"} alts={["Try again", "Retrying…"]} />
               </button>
-            </div>
-          ) : !selected || !plan ? (
-            <div style={{ margin: "auto", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-              <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-2)" }}>{snippets.length === 0 ? "No snippets yet." : "Select a snippet."}</div>
-              <div style={{ fontSize: 13, color: "var(--text-3)" }}>
-                {snippets.length === 0 ? "Save commands you run often, then run them on one host or many." : "Pick one from the list to edit or run it."}
-              </div>
-              {snippets.length === 0 && (
-                <button type="button" onClick={newSnippet} disabled={creating} style={{ ...off(btn, creating), marginTop: 10 }}>
-                  <PlusIcon size={14} sw={1.75} />
-                  <Stable text={creating ? "Creating…" : "New snippet"} alts={["New snippet", "Creating…"]} />
-                </button>
-              )}
-            </div>
+            </EmptyState>
           ) : (
+            <EmptyState icon={<SnippetIcon size={20} />}>
+              <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <span>No snippets yet</span>
+                <span style={{ fontSize: 12, color: "var(--text-3)" }}>Save commands you run often, then run them on one host or many.</span>
+              </span>
+              {newButton(primaryBtn)}
+            </EmptyState>
+          )}
+        </div>
+      ) : (
+        <SplitView
+          detailLabel="Snippet details"
+          list={
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
-                <div>
-                  <label htmlFor="sn-name" style={fieldLabel}>Name</label>
-                  <input id="sn-name" ref={nameRef} type="text" value={selected.label} onChange={(e) => edit({ label: e.target.value })} placeholder="Untitled" style={field} />
-                </div>
-                <div>
-                  <label htmlFor="sn-folder" style={fieldLabel}>Folder</label>
-                  <select
-                    id="sn-folder"
-                    value={selected.folder}
-                    onChange={(e) => {
-                      if (e.target.value === NEW_FOLDER) setFolderDialog({ mode: "create" });
-                      else moveToFolder(e.target.value);
-                    }}
-                    style={{ ...field, padding: "0 8px" }}
-                  >
-                    <option value="">No folder</option>
-                    {allFolders.map((f) => (
-                      <option key={f} value={f}>{f}</option>
-                    ))}
-                    <option value={NEW_FOLDER}>New folder…</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <h3 style={h3} id="sn-command-label">Command</h3>
-                <CommandEditor key={selected.id} value={selected.script} onChange={(script) => edit({ script })} labelledBy="sn-command-label" />
-                <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-2)" }}>Use {"{name}"} for a value you fill in when running.</p>
-              </div>
-
-              {plan.vars.length > 0 && (
-                <div>
-                  <h3 style={h3}>Variables</h3>
-                  <div style={{ display: "grid", gridTemplateColumns: "100px minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
-                    {plan.vars.map((v) => {
-                      const s = prefs.vars[v] ?? { value: "", ask: false };
-                      const setVar = (patch: Partial<VarSetting>) =>
-                        updatePrefs({ ...prefs, vars: { ...prefs.vars, [v]: { ...s, ...patch } } });
-                      return <VarRow key={v} name={v} setting={s} onChange={setVar} />;
-                    })}
-                  </div>
-                </div>
+              <ListFilter value={filter} onChange={setFilter} placeholder="Filter snippets" />
+              {loaded && snippets.length > 0 && filter.trim() !== "" && visibleOrder.length === 0 && (
+                <p style={{ margin: 8, ...muted }}>No snippets match “{filter.trim()}”.</p>
               )}
-
-              <div>
-                <h3 style={{ ...h3, marginBottom: 8 }}>Run on</h3>
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-                  {plan.targets.map((h) => (
-                    <span key={h.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 26, padding: "0 4px 0 10px", borderRadius: 13, background: "var(--bg-raised)", fontSize: 12 }}>
-                      {h.name}
+              {groups.map((g) => (
+                <div key={g.name || "\u0000"} style={{ display: "flex", flexDirection: "column" }}>
+                  {g.name && (
+                    <FolderHeader
+                      name={g.name}
+                      onRename={() => setFolderDialog({ mode: "rename", from: g.name })}
+                      onRemove={() => setFolderToDelete(g.name)}
+                    />
+                  )}
+                  {g.items.length === 0 ? (
+                    <p style={{ margin: "2px 8px", fontSize: 12, color: "var(--text-3)" }}>Empty folder</p>
+                  ) : (
+                    <List label={g.name || "Snippets"}>
+                      {g.items.map((s) => {
+                        const name = s.label.trim();
+                        const busy = busyIds.has(s.id);
+                        const rowPlan = blockFor(s);
+                        return (
+                          <ListItem
+                            key={s.id}
+                            icon={
+                              <span data-anim={busy ? "pulse" : undefined} style={{ display: "flex" }}>
+                                <SnippetIcon />
+                              </span>
+                            }
+                            iconColor={busy ? "var(--warn)" : undefined}
+                            title={
+                              <>
+                                {name || <span style={{ color: "var(--text-3)" }}>Untitled</span>}
+                                {busy && <span style={srOnly}>, running</span>}
+                              </>
+                            }
+                            sub={<span style={{ fontFamily: MONO, fontSize: 11.5 }}>{s.script.split("\n").find((l) => l.trim()) ?? " "}</span>}
+                            selected={s.id === selId}
+                            onSelect={() => select(s.id)}
+                            onKeyDown={(e) => arrowNav(visibleItems, visibleOrder.indexOf(s.id), e, select, focusRow)}
+                            buttonRef={(el) => {
+                              if (el) rowRefs.current.set(s.id, el);
+                              else rowRefs.current.delete(s.id);
+                            }}
+                            trailing={
+                              <RowRun
+                                name={name || "Untitled"}
+                                title={rowPlan.runBlocked || rowPlan.runTitle}
+                                disabled={!!rowPlan.runBlocked}
+                                onRun={() => runFromList(s)}
+                              />
+                            }
+                          />
+                        );
+                      })}
+                    </List>
+                  )}
+                </div>
+              ))}
+            </>
+          }
+        >
+          {!selected || !plan ? (
+            loaded && snippets.length === 0 && <p style={{ margin: 0, color: "var(--text-2)" }}>No snippets yet. Save commands you run often, then run them on one host or many.</p>
+          ) : (
+            <div key={editing ? "edit" : "view"} data-anim="tab" style={{ display: "flex", flexDirection: "column", gap: 22, minWidth: 0 }}>
+              <DetailHead
+                title={<span style={{ color: selected.label.trim() ? undefined : "var(--text-3)" }}>{selected.label.trim() || "Untitled"}</span>}
+                sub={<span title={subLine} style={oneLine}>{subLine}</span>}
+                actions={
+                  editing ? undefined : (
+                    <>
+                      <RunButton
+                        stop={selBusy}
+                        label={plan.runLabel}
+                        disabled={selBusy ? !canStop : !!plan.runBlocked}
+                        title={selBusy ? (canStop ? "Skip the hosts that have not started yet" : "A command that already started keeps running on the server until it finishes") : plan.runBlocked || plan.runTitle}
+                        onClick={selBusy ? stopRuns : () => begin("run")}
+                      />
                       <button
                         type="button"
-                        aria-label={`Remove ${h.name}`}
-                        onClick={() => edit({ target_host_ids: selected.target_host_ids.filter((t) => t !== h.id) })}
-                        style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, padding: 0, border: 0, borderRadius: 9, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}
+                        onClick={() => begin("paste")}
+                        disabled={!!plan.pasteBlocked}
+                        title={plan.pasteBlocked || (pasteTo?.name ? `Paste into ${pasteTo.name}` : undefined)}
+                        style={{ ...off(pageBtn, !!plan.pasteBlocked), flex: "none" }}
                       >
-                        <ChipCloseIcon />
+                        Paste into active terminal
                       </button>
-                    </span>
-                  ))}
-                  <TargetPicker
-                    hosts={hosts}
-                    targets={plan.targets.map((h) => h.id)}
-                    onAdd={(ids) => {
-                      const keep = selected.target_host_ids.filter((id) => hostById.has(id));
-                      edit({ target_host_ids: [...keep, ...ids.filter((id) => !keep.includes(id))] });
-                    }}
-                  />
-                </div>
-                {plan.targets.length > 1 && (
-                  <div style={{ marginTop: 12 }}>
-                    <RunModePicker
-                      value={prefs.tabs ? "tabs" : prefs.parallel ? "parallel" : "serial"}
-                      onChange={(m) => updatePrefs({ ...prefs, tabs: m === "tabs", parallel: m === "tabs" ? prefs.parallel : m === "parallel" })}
-                    />
+                      <button ref={editBtnRef} type="button" onClick={startEdit} style={{ ...pageBtn, flex: "none" }}>
+                        Edit
+                      </button>
+                      <SnippetMenu name={selected.label.trim() || "Untitled"} onDelete={() => setConfirmDelete(selected)} />
+                      <div style={{ flex: "1 1 0", minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
+                        <SaveIndicator status={saveStatus} selId={selId} otherLabel={labelOf(saveStatus.id)} onRetry={() => void flush()} />
+                      </div>
+                    </>
+                  )
+                }
+              />
+
+              {editing ? (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
+                    <div>
+                      <label htmlFor="sn-name" style={fieldLabel}>Name</label>
+                      <input id="sn-name" ref={nameRef} type="text" value={selected.label} onChange={(e) => edit({ label: e.target.value })} placeholder="Untitled" style={field} />
+                    </div>
+                    <div>
+                      <label htmlFor="sn-folder" style={fieldLabel}>Folder</label>
+                      <select
+                        id="sn-folder"
+                        value={selected.folder}
+                        onChange={(e) => {
+                          if (e.target.value === NEW_FOLDER) setFolderDialog({ mode: "create" });
+                          else moveToFolder(e.target.value);
+                        }}
+                        style={{ ...field, padding: "0 8px" }}
+                      >
+                        <option value="">No folder</option>
+                        {allFolders.map((f) => (
+                          <option key={f} value={f}>{f}</option>
+                        ))}
+                        <option value={NEW_FOLDER}>New folder…</option>
+                      </select>
+                    </div>
                   </div>
-                )}
-              </div>
 
-              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, paddingTop: 16, borderTop: "1px solid var(--line)" }}>
-                <button type="button" onClick={() => begin("run")} disabled={!!plan.runBlocked} title={plan.runBlocked || plan.runTitle} style={off(btnPrimary, !!plan.runBlocked)}>
-                  <PlayIcon />
-                  <Stable text={plan.runLabel} alts={RUN_LABELS} align="start" />
-                  <kbd style={{ marginLeft: 4, fontFamily: "inherit", fontSize: 11, opacity: 0.85 }}>{RUN_KBD}</kbd>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => begin("paste")}
-                  disabled={!!plan.pasteBlocked}
-                  title={plan.pasteBlocked || (pasteTo?.name ? `Paste into ${pasteTo.name}` : undefined)}
-                  style={off(btn, !!plan.pasteBlocked)}
-                >
-                  Paste into active terminal
-                </button>
-                <div style={{ flex: 1 }} />
-                <SaveIndicator status={saveStatus} selId={selId} otherLabel={labelOf(saveStatus.id)} onRetry={() => void flush()} />
-                <button type="button" onClick={() => selected && setConfirmDelete(selected)} style={{ height: 32, padding: "0 10px", border: 0, borderRadius: 6, background: "transparent", color: "var(--err)", cursor: "pointer" }}>
-                  Delete
-                </button>
-              </div>
+                  <div>
+                    <h3 style={h3} id="sn-command-label">Command</h3>
+                    <CommandEditor key={selected.id} value={selected.script} onChange={(script) => edit({ script })} labelledBy="sn-command-label" />
+                    <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-3)" }}>Use {"{name}"} for a value you fill in when running.</p>
+                  </div>
 
-              {snippetRuns.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                  {snippetRuns.map((run, i) => (
-                    <RunBlock key={run.runId} run={run} latest={i === 0} />
-                  ))}
-                </div>
+                  {plan.vars.length > 0 && (
+                    <div>
+                      <h3 style={h3}>Variables</h3>
+                      <div style={{ display: "grid", gridTemplateColumns: "100px minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8 }}>
+                        {plan.vars.map((v) => {
+                          const s = prefs.vars[v] ?? { value: "", ask: false };
+                          const setVar = (patch: Partial<VarSetting>) =>
+                            updatePrefs({ ...prefs, vars: { ...prefs.vars, [v]: { ...s, ...patch } } });
+                          return <VarRow key={v} name={v} setting={s} onChange={setVar} />;
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <h3 style={{ ...h3, marginBottom: 8 }}>Run on</h3>
+                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+                      {plan.targets.map((h) => (
+                        <span key={h.id} style={chip}>
+                          {h.name}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${h.name}`}
+                            onClick={() => edit({ target_host_ids: selected.target_host_ids.filter((t) => t !== h.id) })}
+                            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, padding: 0, border: 0, borderRadius: 9, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}
+                          >
+                            <ChipCloseIcon />
+                          </button>
+                        </span>
+                      ))}
+                      <TargetPicker
+                        hosts={hosts}
+                        targets={plan.targets.map((h) => h.id)}
+                        onAdd={(ids) => {
+                          const keep = selected.target_host_ids.filter((id) => hostById.has(id));
+                          edit({ target_host_ids: [...keep, ...ids.filter((id) => !keep.includes(id))] });
+                        }}
+                      />
+                    </div>
+                    {plan.targets.length > 1 && (
+                      <div style={{ marginTop: 12 }}>
+                        <RunModePicker
+                          value={runMode}
+                          onChange={(m) => updatePrefs({ ...prefs, tabs: m === "tabs", parallel: m === "tabs" ? prefs.parallel : m === "parallel" })}
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <EditFooter
+                    left={
+                      fresh ? undefined : (
+                        <button type="button" onClick={() => setConfirmDelete(selected)} style={btnDanger}>
+                          <TrashIcon />
+                          Delete
+                        </button>
+                      )
+                    }
+                  >
+                    <SaveIndicator status={saveStatus} selId={selId} otherLabel={labelOf(saveStatus.id)} onRetry={() => void flush()} />
+                    {fresh && (
+                      <button type="button" onClick={() => void discardNew(selected)} disabled={discarding} style={{ ...off(pageBtn, discarding), flex: "none" }}>
+                        Cancel
+                      </button>
+                    )}
+                    <button type="button" onClick={finishEdit} disabled={discarding} style={{ ...off(primaryBtn, discarding), flex: "none" }}>
+                      Done
+                    </button>
+                  </EditFooter>
+                </>
+              ) : (
+                <>
+                  <Block title="Command">
+                    <CommandView value={selected.script} />
+                  </Block>
+
+                  <Blocks>
+                    {plan.vars.length > 0 && (
+                      <Block title="Variables">
+                        <Facts rows={plan.vars.map((v) => varFact(v, prefs.vars[v]))} />
+                      </Block>
+                    )}
+                    <Block title="Run on">
+                      {plan.targets.length === 0 ? (
+                        <p style={{ ...quiet, margin: 0 }}>No hosts</p>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {plan.targets.map((h) => (
+                              <span key={h.id} title={h.name} style={hostChip}>{h.name}</span>
+                            ))}
+                          </div>
+                          {plan.targets.length > 1 && <span style={{ color: "var(--text-2)" }}>{RUN_MODES.find((m) => m.id === runMode)?.label}</span>}
+                        </div>
+                      )}
+                    </Block>
+                  </Blocks>
+
+                  {snippetRuns.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                      {snippetRuns.map((run, i) => (
+                        <RunBlock key={run.runId} run={run} latest={i === 0} />
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
-            </>
+            </div>
           )}
-        </section>
-      </div>
+        </SplitView>
+      )}
 
       {folderDialog && (
         <FolderDialog
@@ -1081,6 +1225,75 @@ const ChipCloseIcon = () => (
   </svg>
 );
 
+const StopIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+    <rect x="3.75" y="3.75" width="8.5" height="8.5" rx="1.5" />
+  </svg>
+);
+
+const MORPH = "180ms var(--ease-out)";
+
+function RunButton({ stop, label, disabled, title, onClick }: { stop: boolean; label: string; disabled: boolean; title?: string; onClick(): void }) {
+  const glyph = (on: boolean, turn: number): CSSProperties => ({ gridArea: "1 / 1", display: "flex", opacity: on ? 1 : 0, transform: on ? "rotate(0deg) scale(1)" : `rotate(${turn}deg) scale(0.4)`, transition: `opacity ${MORPH}, transform ${MORPH}` });
+  const layer = (on: boolean): CSSProperties => ({ gridArea: "1 / 1", display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", opacity: on ? 1 : 0, transition: `opacity ${MORPH}` });
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} title={title} style={{ ...off(primaryBtn, disabled), flex: "none", transition: `opacity ${MORPH}, transform 160ms var(--ease-out)` }}>
+      <span aria-hidden="true" style={{ display: "grid", placeItems: "center", width: 12, height: 12 }}>
+        <span style={glyph(!stop, 90)}>
+          <PlayIcon />
+        </span>
+        <span style={glyph(stop, -90)}>
+          <StopIcon />
+        </span>
+      </span>
+      <span style={{ display: "grid", justifyItems: "start" }}>
+        <span aria-hidden={stop ? true : undefined} style={layer(!stop)}>
+          <Stable text={label} alts={RUN_LABELS} align="start" />
+          <kbd style={{ marginLeft: 4, fontFamily: "inherit", fontSize: 11, opacity: 0.85 }}>{RUN_KBD}</kbd>
+        </span>
+        <span aria-hidden={stop ? undefined : true} style={layer(stop)}>Stop</span>
+      </span>
+    </button>
+  );
+}
+
+function RowRun({ name, title, disabled, onRun }: { name: string; title: string; disabled: boolean; onRun(): void }) {
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const [hot, setHot] = useState(false);
+  useEffect(() => {
+    const row = ref.current?.closest("li");
+    if (!row) return;
+    const show = () => setHot(true);
+    const hide = () => setHot(false);
+    const blur = (e: FocusEvent) => {
+      if (!row.contains(e.relatedTarget as Node | null)) setHot(false);
+    };
+    row.addEventListener("mouseenter", show);
+    row.addEventListener("mouseleave", hide);
+    row.addEventListener("focusin", show);
+    row.addEventListener("focusout", blur);
+    return () => {
+      row.removeEventListener("mouseenter", show);
+      row.removeEventListener("mouseleave", hide);
+      row.removeEventListener("focusin", show);
+      row.removeEventListener("focusout", blur);
+    };
+  }, []);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={`Run ${name}`}
+      title={title}
+      disabled={disabled}
+      onClick={onRun}
+      style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: disabled ? "default" : "pointer", opacity: hot ? (disabled ? 0.5 : 1) : 0, pointerEvents: hot ? "auto" : "none", boxSizing: "border-box", transition: "opacity 120ms, transform 160ms var(--ease-out)" }}
+    >
+      <PlayIcon size={12} />
+    </button>
+  );
+}
+
 function FolderHeader({ name, onRename, onRemove }: { name: string; onRename(): void; onRemove(): void }) {
   const [hover, setHover] = useState(false);
   const [open, setOpen] = useState(false);
@@ -1119,9 +1332,9 @@ function FolderHeader({ name, onRename, onRemove }: { name: string; onRename(): 
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHover(false);
       }}
-      style={{ position: "relative" }}
+      style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, padding: "6px 4px 4px 8px" }}
     >
-      <h2 style={{ margin: "8px 8px 2px", paddingRight: 24, fontSize: 12, fontWeight: 600, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>
+      <h2 style={{ ...sectionLabel, ...oneLine, flex: 1, margin: 0 }} title={name}>
         {name}
       </h2>
       <button
@@ -1130,12 +1343,12 @@ function FolderHeader({ name, onRename, onRemove }: { name: string; onRename(): 
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        style={{ position: "absolute", top: 4, right: 4, display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: 0, borderRadius: 4, background: open ? "var(--sel)" : "transparent", color: "var(--text-2)", cursor: "pointer", opacity: shown ? 1 : 0, pointerEvents: shown ? "auto" : "none" }}
+        style={{ display: "flex", flex: "none", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: 0, borderRadius: 4, background: open ? "var(--sel)" : "transparent", color: "var(--text-2)", cursor: "pointer", opacity: shown ? 1 : 0, pointerEvents: shown ? "auto" : "none" }}
       >
         <DotsIcon size={14} />
       </button>
       {open && (
-        <div role="menu" style={{ position: "absolute", top: 28, right: 4, zIndex: 20, minWidth: 180, padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", boxSizing: "border-box" }}>
+        <div role="menu" style={{ position: "absolute", top: "100%", right: 4, zIndex: 20, minWidth: 180, padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", boxSizing: "border-box" }}>
           <button
             type="button"
             role="menuitem"
@@ -1170,6 +1383,117 @@ function FolderHeader({ name, onRename, onRemove }: { name: string; onRename(): 
 
 // ---------------------------------------------------------------------------
 
+const codeFrame: CSSProperties = { display: "flex", border: "1px solid var(--line)", borderRadius: 8, background: "var(--term-bg)", fontFamily: MONO, fontSize: 12.5, lineHeight: 1.7, overflow: "hidden" };
+const codeGutter: CSSProperties = { padding: "10px 8px", minWidth: 28, textAlign: "right", color: "var(--term-dim)", borderRight: "1px solid var(--term-line)", userSelect: "none", boxSizing: "border-box" };
+const codeText: CSSProperties = { margin: 0, padding: "10px 12px", fontFamily: MONO, fontSize: 12.5, lineHeight: 1.7, whiteSpace: "pre", tabSize: 4, letterSpacing: "normal", boxSizing: "border-box" };
+
+function CommandView({ value }: { value: string }) {
+  const lines = value.split("\n").length;
+  return (
+    <div style={codeFrame}>
+      <div aria-hidden="true" style={codeGutter}>
+        {Array.from({ length: lines }, (_, i) => (
+          <div key={i}>{i + 1}</div>
+        ))}
+      </div>
+      <pre data-selectable style={{ ...codeText, flex: 1, minWidth: 0, overflowX: "auto", color: "var(--term-text)" }}>
+        {value ? highlight(value) : <span style={{ color: "var(--term-dim)" }}>No command yet</span>}
+        {"\n"}
+      </pre>
+    </div>
+  );
+}
+
+function varFact(name: string, setting: VarSetting | undefined): Fact {
+  if (!setting || setting.value === "") return [name, <span style={quiet}>Asked when run</span>];
+  if (setting.ask)
+    return [
+      name,
+      <span title={`${setting.value}, asked when run`}>
+        <span style={mono}>{setting.value}</span>
+        <span style={quiet}>, asked when run</span>
+      </span>,
+    ];
+  return [name, <span title={setting.value} style={mono}>{setting.value}</span>];
+}
+
+function SnippetMenu({ name, onDelete }: { name: string; onDelete(): void }) {
+  const [open, setOpen] = useState(false);
+  const [hot, setHot] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const itemRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    itemRef.current?.focus();
+    const onDown = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && (ref.current?.getClientRects().length ?? 0) > 0) {
+        e.stopPropagation();
+        setOpen(false);
+        btnRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative", display: "flex", flex: "none" }}>
+      <button
+        ref={btnRef}
+        type="button"
+        aria-label={`More actions for ${name}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        style={{ ...pageBtn, width: 32, padding: 0, justifyContent: "center", background: open ? "var(--bg-raised)" : "var(--bg)", color: "var(--text-2)" }}
+      >
+        <DotsIcon />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label={`Actions for ${name}`}
+          onKeyDown={(e) => {
+            if (e.key === "Tab") {
+              e.preventDefault();
+              setOpen(false);
+              btnRef.current?.focus();
+            }
+          }}
+          style={{ position: "absolute", top: 36, left: 0, zIndex: 20, minWidth: 160, padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", boxSizing: "border-box" }}
+        >
+          <button
+            ref={itemRef}
+            type="button"
+            role="menuitem"
+            onMouseEnter={() => setHot(true)}
+            onMouseLeave={() => setHot(false)}
+            onFocus={(e) => e.currentTarget.matches(":focus-visible") && setHot(true)}
+            onBlur={() => setHot(false)}
+            onClick={() => {
+              setOpen(false);
+              btnRef.current?.focus();
+              onDelete();
+            }}
+            style={{ display: "flex", alignItems: "center", width: "100%", height: 28, padding: "0 10px", border: 0, borderRadius: 4, background: hot ? "var(--sel)" : "transparent", color: "var(--err)", textAlign: "left", cursor: "pointer", fontSize: 13, outline: "none" }}
+          >
+            Delete snippet
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CommandEditor({ value, onChange, labelledBy }: { value: string; onChange(v: string): void; labelledBy: string }) {
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const [scroll, setScroll] = useState({ left: 0, top: 0 });
@@ -1198,17 +1522,15 @@ function CommandEditor({ value, onChange, labelledBy }: { value: string; onChang
     return () => ro.disconnect();
   }, [fit]);
 
-  const text: CSSProperties = { margin: 0, padding: "10px 12px", fontFamily: MONO, fontSize: 12.5, lineHeight: 1.7, whiteSpace: "pre", tabSize: 4, letterSpacing: "normal", boxSizing: "border-box" };
-
   return (
-    <div style={{ display: "flex", border: `1px solid ${focused ? "var(--focus)" : "var(--line)"}`, borderRadius: 8, background: "var(--term-bg)", fontFamily: MONO, fontSize: 12.5, lineHeight: 1.7, overflow: "hidden" }}>
-      <div aria-hidden="true" style={{ padding: "10px 8px", minWidth: 28, textAlign: "right", color: "var(--term-dim)", borderRight: "1px solid var(--term-line)", userSelect: "none", boxSizing: "border-box" }}>
+    <div style={{ ...codeFrame, border: `1px solid ${focused ? "var(--focus)" : "var(--line)"}` }}>
+      <div aria-hidden="true" style={codeGutter}>
         {Array.from({ length: lines }, (_, i) => (
           <div key={i}>{i + 1}</div>
         ))}
       </div>
       <div style={{ position: "relative", flex: 1, minWidth: 0, overflow: "hidden" }}>
-        <pre aria-hidden="true" style={{ ...text, position: "absolute", top: 0, left: 0, minWidth: "100%", color: "var(--term-text)", pointerEvents: "none", transform: `translate(${-scroll.left}px, ${-scroll.top}px)` }}>
+        <pre aria-hidden="true" style={{ ...codeText, position: "absolute", top: 0, left: 0, minWidth: "100%", color: "var(--term-text)", pointerEvents: "none", transform: `translate(${-scroll.left}px, ${-scroll.top}px)` }}>
           {value ? highlight(value) : <span style={{ color: "var(--term-dim)" }}>{"cd /opt/{app} && docker compose up -d"}</span>}
           {"\n"}
         </pre>
@@ -1227,7 +1549,7 @@ function CommandEditor({ value, onChange, labelledBy }: { value: string; onChang
           autoCorrect="off"
           autoComplete="off"
           data-selectable
-          style={{ ...text, position: "relative", display: "block", width: "100%", border: 0, background: "transparent", color: "transparent", WebkitTextFillColor: "transparent", caretColor: "var(--term-text)", overflowX: "auto", overflowY: "hidden", resize: "none", outline: "none" }}
+          style={{ ...codeText, position: "relative", display: "block", width: "100%", border: 0, background: "transparent", color: "transparent", WebkitTextFillColor: "transparent", caretColor: "var(--term-text)", overflowX: "auto", overflowY: "hidden", resize: "none", outline: "none" }}
         />
       </div>
     </div>
@@ -1266,15 +1588,15 @@ function SaveIndicator({ status, selId, otherLabel, onRetry }: { status: SaveSta
   if (status.state === "error") {
     const text = mine || !otherLabel ? `Not saved: ${status.error}` : `"${otherLabel}" not saved: ${status.error}`;
     return (
-      <span role="status" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--err)", minWidth: 0 }}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }} title={text}>{text}</span>
-        <button type="button" onClick={onRetry} style={{ padding: 0, border: 0, background: "transparent", color: "var(--link)", fontSize: 12, cursor: "pointer" }}>Retry</button>
+      <span role="status" style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 1 auto", fontSize: 12, color: "var(--err)", minWidth: 0 }}>
+        <span style={{ ...oneLine, maxWidth: 260 }} title={text}>{text}</span>
+        <button type="button" onClick={onRetry} style={{ flex: "none", padding: 0, border: 0, background: "transparent", color: "var(--link)", fontSize: 12, cursor: "pointer" }}>Retry</button>
       </span>
     );
   }
   const text = !mine ? "" : status.state === "saving" || status.state === "pending" ? "Saving…" : status.state === "saved" ? "Saved" : "";
   return (
-    <span role="status" aria-live="polite" style={{ fontSize: 12, color: "var(--text-3)" }}>
+    <span role="status" aria-live="polite" style={{ ...oneLine, flex: "0 1 auto", fontSize: 12, color: "var(--text-3)" }}>
       {text}
     </span>
   );
@@ -1322,13 +1644,13 @@ function TargetPicker({ hosts, targets, onAdd }: { hosts: Host[]; targets: strin
         disabled={!!blocked}
         title={blocked || undefined}
         onClick={() => setOpen((o) => !o)}
-        style={off({ display: "inline-flex", alignItems: "center", gap: 4, height: 26, padding: "0 10px", border: "1px dashed var(--line)", borderRadius: 13, background: "transparent", color: "var(--text-2)", fontSize: 12, cursor: "pointer" }, !!blocked)}
+        style={off({ display: "inline-flex", alignItems: "center", gap: 4, height: 24, padding: "0 10px", border: "1px dashed var(--line)", borderRadius: 12, background: "transparent", color: "var(--text-2)", fontSize: 12, cursor: "pointer", boxSizing: "border-box" }, !!blocked)}
       >
         <PlusIcon size={12} sw={1.75} />
         Add host
       </button>
       {open && (
-        <div role="menu" style={{ position: "absolute", top: 30, left: 0, zIndex: 20, minWidth: 240, maxWidth: 320, maxHeight: 300, overflow: "auto", padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", boxSizing: "border-box" }}>
+        <div role="menu" style={{ position: "absolute", top: 28, left: 0, zIndex: 20, minWidth: 240, maxWidth: 320, maxHeight: 300, overflow: "auto", padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", boxSizing: "border-box" }}>
           {free.map((h) => (
             <button key={h.id} type="button" role="menuitem" onMouseEnter={() => setHot(h.id)} onMouseLeave={() => setHot(null)} onClick={() => pick([h.id])} style={item(h.id)}>
               <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
@@ -1388,11 +1710,7 @@ function RunBlock({ run, latest }: { run: ScriptRun; latest: boolean }) {
   }, [latest, run.startedAt]);
   const queued = run.results.some((x) => x.status === "queued");
   const running = run.results.some((x) => x.status === "running");
-  const stoppable = !run.parallel && run.results.length > 1;
   const time = new Date(run.startedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
-  const stopTitle = queued
-    ? "Skip the hosts that have not started yet"
-    : "A command that already started keeps running on the server until it finishes";
 
   return (
     <div ref={blockRef} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1405,18 +1723,7 @@ function RunBlock({ run, latest }: { run: ScriptRun; latest: boolean }) {
             {run.results.length > 1 ? (run.parallel ? ", at the same time" : ", one after another") : ""}
           </span>
         </h3>
-        {stoppable && (
-          <button
-            type="button"
-            onClick={() => cancelQueued(run.runId)}
-            disabled={!queued}
-            title={stopTitle}
-            style={{ ...off(btnSmall, !queued), visibility: queued || running ? "visible" : "hidden" }}
-          >
-            Stop
-          </button>
-        )}
-        <button type="button" onClick={() => clearRun(run.runId)} title={queued ? "Hide this output. Hosts that have not started are skipped." : running ? "Hide this output. The command keeps running on the server." : "Remove this output"} style={btnSmall}>
+        <button type="button" onClick={() => clearRun(run.runId)} title={queued ? "Hide this output. Hosts that have not started are skipped." : running ? "Hide this output. The command keeps running on the server." : "Remove this output"} style={smallBtn}>
           Clear
         </button>
       </div>
@@ -1614,8 +1921,8 @@ function FolderDialog({
           {err && <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--err)" }}>{err}</p>}
         </div>
         <DialogButtons
-          primary={<button type="submit" disabled={busy} style={off(btnPrimary, busy)}><Stable text={busy ? "Saving…" : submitLabel} alts={[submitLabel, "Saving…"]} /></button>}
-          cancel={<button type="button" onClick={onClose} disabled={busy} style={off(btn, busy)}>Cancel</button>}
+          primary={<button type="submit" disabled={busy} style={off(primaryBtn, busy)}><Stable text={busy ? "Saving…" : submitLabel} alts={[submitLabel, "Saving…"]} /></button>}
+          cancel={<button type="button" onClick={onClose} disabled={busy} style={off(pageBtn, busy)}>Cancel</button>}
         />
       </form>
     </Modal>
@@ -1670,11 +1977,11 @@ function VarPromptDialog({
         </div>
         <DialogButtons
           primary={
-            <button type="submit" disabled={missing.length > 0} title={missing.length > 0 ? "Fill in every variable" : undefined} style={off(btnPrimary, missing.length > 0)}>
+            <button type="submit" disabled={missing.length > 0} title={missing.length > 0 ? "Fill in every variable" : undefined} style={off(primaryBtn, missing.length > 0)}>
               {mode === "paste" ? "Paste" : runLabel}
             </button>
           }
-          cancel={<button type="button" onClick={onClose} style={btn}>Cancel</button>}
+          cancel={<button type="button" onClick={onClose} style={pageBtn}>Cancel</button>}
         />
       </form>
     </Modal>
@@ -1715,7 +2022,7 @@ function ConfirmDeleteDialog({ title, message, onConfirm, onClose }: { title: st
             <Stable text={busy ? "Deleting…" : "Delete"} alts={["Delete", "Deleting…"]} />
           </button>
         }
-        cancel={<button ref={cancelRef} type="button" onClick={onClose} disabled={busy} style={off(btn, busy)}>Cancel</button>}
+        cancel={<button ref={cancelRef} type="button" onClick={onClose} disabled={busy} style={off(pageBtn, busy)}>Cancel</button>}
       />
     </Modal>
   );

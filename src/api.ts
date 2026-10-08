@@ -370,6 +370,7 @@ export const approvalRespond = (id: string, approved: boolean) =>
   invoke<void>("approval_respond", { id, approved });
 
 export const auditList = () => invoke<AuditEntry[]>("audit_list");
+export const auditSince = (after: string | null, limit?: number) => invoke<{ full: boolean; entries: AuditEntry[] }>("audit_since", { after, limit });
 export const auditUserCommand = (hostId: string, command: string) =>
   invoke<void>("audit_user_command", { hostId, command });
 

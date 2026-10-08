@@ -89,8 +89,8 @@ export const DotsIcon = ({ size = 14 }: Props) => (
     <path d="M3.5 8h.01M8 8h.01M12.5 8h.01" />
   </Icon>
 );
-export const CloseIcon = ({ size = 12 }: Props) => (
-  <Icon size={size} join={false}>
+export const CloseIcon = ({ size = 12, sw }: Props) => (
+  <Icon size={size} sw={sw} join={false}>
     <path d="m4 4 8 8M12 4l-8 8" />
   </Icon>
 );

@@ -1,4 +1,5 @@
 mod agent;
+mod ai_pool;
 mod approval;
 mod audit;
 mod collections;
@@ -195,7 +196,18 @@ pub fn run() {
                     base_dir.join("snippets.json"),
                     vault.clone(),
                 )),
+                ai_pool: Arc::new(ai_pool::AiPool::default()),
             };
+            {
+                let pool = services.ai_pool.clone();
+                let policy = services.policy.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        pool.prune(policy.is_active());
+                    }
+                });
+            }
 
             let token_path = base_dir.join("mcp_token");
             let token = vault::load_or_create_token(&token_path);
@@ -359,6 +371,7 @@ pub fn run() {
             commands::ai_set_protected,
             commands::approval_respond,
             commands::audit_list,
+            commands::audit_since,
             commands::audit_user_command,
             commands::snippet_list,
             commands::snippet_add,

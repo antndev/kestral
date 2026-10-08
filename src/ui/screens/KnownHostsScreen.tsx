@@ -1,20 +1,17 @@
-import { CSSProperties, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { writeText as clipWrite } from "@tauri-apps/plugin-clipboard-manager";
 import * as api from "../../api";
 import type { Host, HostKeyChanged, KnownHostEntry } from "../../api";
 import { IS_MAC, MONO, errText } from "../mock";
-import { CheckIcon, SearchIcon, TrashIcon, WarningIcon } from "../icons";
+import { CheckIcon, TrashIcon, WarningIcon } from "../icons";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
+import { EmptyState, ListFilter, ScreenHeader, errLine, pageBtn, smallBtn, srOnly, td, th } from "../kit";
 
-const th: CSSProperties = { height: 32, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
-const cell: CSSProperties = { padding: "0 12px", borderBottom: "1px solid var(--line-soft)" };
-const pageBtn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
 const dangerOutlineBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--err)", background: "transparent", color: "var(--err)" };
 const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer" };
 const checkbox: CSSProperties = { width: 14, height: 14, margin: 0, accentColor: "var(--accent)", cursor: "pointer" };
-const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
 
 function disabledLook(disabled: boolean): CSSProperties {
   return disabled ? { opacity: 0.55, cursor: "default" } : {};
@@ -453,34 +450,17 @@ export function KnownHostsScreen(p: {
 
   return (
     <main style={{ position: "relative", flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 28px 14px" }}>
-        <h1 style={{ flex: "none", margin: 0, fontSize: 20, fontWeight: 600 }}>Known hosts</h1>
-        <span style={{ flex: "none", color: "var(--text-2)" }}>{entries === null ? (loadErr ? "" : "Loading…") : `${count} ${count === 1 ? "entry" : "entries"}`}</span>
-        <div style={{ flex: 1 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 6, height: 32, flex: "0 1 220px", minWidth: 120, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, boxSizing: "border-box", color: "var(--text-2)" }}>
-          <SearchIcon size={14} />
-          <span style={srOnly}>Filter known hosts</span>
-          <input
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape" && filter) {
-                e.stopPropagation();
-                setFilter("");
-              }
-            }}
-            placeholder="Filter by host or fingerprint"
-            style={{ flex: 1, minWidth: 0, border: 0, outline: "none", background: "transparent", color: "var(--text)" }}
-          />
-        </label>
+      <ScreenHeader title="Known hosts" meta={entries === null ? (loadErr ? "" : "Loading…") : `${count} ${count === 1 ? "entry" : "entries"}`}>
+        <div style={{ flex: "0 1 220px", minWidth: 120 }}>
+          <ListFilter value={filter} onChange={setFilter} placeholder="Filter by host or fingerprint" />
+        </div>
         <button type="button" onClick={importFile} disabled={!!transfer} title="Import an OpenSSH known_hosts file" style={{ ...pageBtn, flex: "none", ...disabledLook(!!transfer) }}>
           <Stable text={transfer === "import" ? "Importing…" : "Import…"} alts={["Import…", "Importing…"]} />
         </button>
         <button type="button" onClick={exportFile} disabled={!!transfer} title="Export to an OpenSSH known_hosts file" style={{ ...pageBtn, flex: "none", ...disabledLook(!!transfer) }}>
           <Stable text={transfer === "export" ? "Exporting…" : "Export…"} alts={["Export…", "Exporting…"]} />
         </button>
-      </div>
+      </ScreenHeader>
 
       {banners.map(([key, group]) => {
         const first = group[0];
@@ -497,88 +477,86 @@ export function KnownHostsScreen(p: {
         );
       })}
 
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "0 28px 80px" }}>
-        {loadErr && entries === null ? (
-          <EmptyState>
-            <span style={{ color: "var(--err)", fontSize: 12 }}>Could not read the known hosts: {loadErr}</span>
-            <button type="button" onClick={refresh} disabled={loading} style={{ ...pageBtn, height: 28, fontSize: 12, ...disabledLook(loading) }}>Try again</button>
-          </EmptyState>
-        ) : entries === null ? (
-          <EmptyState>Loading…</EmptyState>
-        ) : entries.length === 0 ? (
-          <EmptyState>
-            <span>No known hosts yet.</span>
-            <span style={{ fontSize: 12, color: "var(--text-3)" }}>Hosts you trust when you connect are saved here, encrypted in your vault. You can also import an existing known_hosts file.</span>
-          </EmptyState>
-        ) : (
-          <>
-            {loadErr && <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--err)" }}>Could not refresh: {loadErr}</p>}
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-              <thead>
-                <tr>
-                  <th scope="col" style={{ ...th, width: 36, padding: "0 0 0 12px" }}>
-                    <input ref={selectAllRef} type="checkbox" aria-label="Select all shown entries" checked={allSelected} disabled={visible.length === 0} onChange={toggleAllVisible} style={{ ...checkbox, ...disabledLook(visible.length === 0) }} />
-                  </th>
-                  <th scope="col" style={th}>Host</th>
-                  <th scope="col" style={th}>Port</th>
-                  <th scope="col" style={th}>Key type</th>
-                  <th scope="col" style={th}>Fingerprint</th>
-                  <th scope="col" style={{ width: 40, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((e) => {
-                  const rk = rowKey(e);
-                  const changed = changedRows.has(rk);
-                  const checked = selected.has(entryId(e));
-                  const isCopied = copied === rk;
-                  const matched = rowHosts.get(rk);
-                  const addresses = e.hashed ? (matched ?? []).map((h) => hostLabel(h.hostname, h.port)) : plainNames(e).map((a) => parsePattern(a).host);
-                  const primary = matched ? matched.map((h) => h.name).join(", ") : e.hashed ? "(hashed)" : e.host;
-                  const secondaryParts = matched ? addresses : e.hashed ? [`${e.hosts.slice(0, 14)}…`] : addresses.slice(1);
-                  const secondary = [...new Set(secondaryParts)].filter((a) => a !== primary).join(" · ");
-                  return (
-                    <tr key={rk} style={{ background: checked ? "var(--sel)" : "transparent" }}>
-                      <td style={{ ...cell, padding: "0 0 0 12px" }}>
-                        <input type="checkbox" aria-label={`Select ${shownName(e)}`} checked={checked} onChange={() => toggle(e)} style={checkbox} />
-                      </td>
-                      <td style={{ ...cell, height: 46 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontWeight: 600, color: e.hashed && !matched ? "var(--text-2)" : "var(--text)", overflowWrap: "anywhere" }} title={e.hashed && !matched ? "OpenSSH stored this name hashed, so it cannot be shown." : e.hosts}>
-                            {primary}
-                          </span>
-                          {changed && <span style={{ display: "inline-flex", alignItems: "center", height: 18, padding: "0 6px", borderRadius: 9, background: "var(--warn-tint)", color: "var(--warn)", fontSize: 11, fontWeight: 600 }}>Changed</span>}
-                        </div>
-                        {secondary && <div title={e.hosts} style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)", overflowWrap: "anywhere" }}>{secondary}</div>}
-                      </td>
-                      <td style={cell}>
-                        {!e.hashed ? e.port : matched ? [...new Set(matched.map((h) => h.port))].join(", ") : <span style={{ color: "var(--text-3)" }} title="The port is part of the hashed name, so it cannot be shown.">unknown</span>}
-                      </td>
-                      <td style={cell} title={e.key_type}>{keyTypeLabel(e.key_type)}</td>
-                      <td style={{ ...cell, fontFamily: MONO, fontSize: 12, color: "var(--text-2)" }}>
-                        <button
-                          type="button"
-                          onClick={() => copyFingerprint(e)}
-                          title={isCopied ? "Copied" : `${e.fingerprint}\nClick to copy`}
-                          aria-label={isCopied ? "Fingerprint copied" : `Copy fingerprint of ${shownName(e)}`}
-                          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: 0, border: 0, background: "transparent", font: "inherit", color: isCopied ? "var(--ok)" : "inherit", cursor: "copy", whiteSpace: "nowrap" }}
-                        >
-                          {shortFingerprint(e.fingerprint)}
-                          <span aria-hidden="true" style={{ display: "flex", width: 12, visibility: isCopied ? "visible" : "hidden" }}><CheckIcon size={12} /></span>
-                        </button>
-                      </td>
-                      <td style={{ padding: "0 8px", borderBottom: "1px solid var(--line-soft)" }}>
-                        <button type="button" aria-label={`Remove ${shownName(e)}`} title="Remove" onClick={() => setConfirm([e])} style={iconBtn}><TrashIcon /></button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {visible.length === 0 && <p style={{ margin: "16px 12px", color: "var(--text-2)" }}>No entries match “{filter.trim()}”.</p>}
-          </>
-        )}
-      </div>
+      {loadErr && entries === null ? (
+        <EmptyState>
+          <span style={{ color: "var(--err)", fontSize: 12 }}>Could not read the known hosts: {loadErr}</span>
+          <button type="button" onClick={refresh} disabled={loading} style={{ ...smallBtn, ...disabledLook(loading) }}>Try again</button>
+        </EmptyState>
+      ) : entries === null ? (
+        <EmptyState>Loading…</EmptyState>
+      ) : entries.length === 0 ? (
+        <EmptyState>
+          <span>No known hosts yet.</span>
+          <span style={{ fontSize: 12, color: "var(--text-3)" }}>Hosts you trust when you connect are saved here, encrypted in your vault. You can also import an existing known_hosts file.</span>
+        </EmptyState>
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "0 28px 80px", borderTop: "1px solid var(--line)" }}>
+          {loadErr && <p style={{ ...errLine, margin: "0 0 10px" }}>Could not refresh: {loadErr}</p>}
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <thead>
+              <tr>
+                <th scope="col" style={{ ...th, width: 36, padding: "0 0 0 12px" }}>
+                  <input ref={selectAllRef} type="checkbox" aria-label="Select all shown entries" checked={allSelected} disabled={visible.length === 0} onChange={toggleAllVisible} style={{ ...checkbox, ...disabledLook(visible.length === 0) }} />
+                </th>
+                <th scope="col" style={th}>Host</th>
+                <th scope="col" style={th}>Port</th>
+                <th scope="col" style={th}>Key type</th>
+                <th scope="col" style={th}>Fingerprint</th>
+                <th scope="col" style={{ ...th, width: 40, padding: 0 }}><span style={srOnly}>Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((e) => {
+                const rk = rowKey(e);
+                const changed = changedRows.has(rk);
+                const checked = selected.has(entryId(e));
+                const isCopied = copied === rk;
+                const matched = rowHosts.get(rk);
+                const addresses = e.hashed ? (matched ?? []).map((h) => hostLabel(h.hostname, h.port)) : plainNames(e).map((a) => parsePattern(a).host);
+                const primary = matched ? matched.map((h) => h.name).join(", ") : e.hashed ? "(hashed)" : e.host;
+                const secondaryParts = matched ? addresses : e.hashed ? [`${e.hosts.slice(0, 14)}…`] : addresses.slice(1);
+                const secondary = [...new Set(secondaryParts)].filter((a) => a !== primary).join(" · ");
+                return (
+                  <tr key={rk} style={{ background: checked ? "var(--sel)" : "transparent" }}>
+                    <td style={{ ...td, padding: "0 0 0 12px" }}>
+                      <input type="checkbox" aria-label={`Select ${shownName(e)}`} checked={checked} onChange={() => toggle(e)} style={checkbox} />
+                    </td>
+                    <td style={{ ...td, height: 46 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontWeight: 600, color: e.hashed && !matched ? "var(--text-2)" : "var(--text)", overflowWrap: "anywhere" }} title={e.hashed && !matched ? "OpenSSH stored this name hashed, so it cannot be shown." : e.hosts}>
+                          {primary}
+                        </span>
+                        {changed && <span style={{ display: "inline-flex", alignItems: "center", height: 18, padding: "0 6px", borderRadius: 9, background: "var(--warn-tint)", color: "var(--warn)", fontSize: 11, fontWeight: 600 }}>Changed</span>}
+                      </div>
+                      {secondary && <div title={e.hosts} style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)", overflowWrap: "anywhere" }}>{secondary}</div>}
+                    </td>
+                    <td style={td}>
+                      {!e.hashed ? e.port : matched ? [...new Set(matched.map((h) => h.port))].join(", ") : <span style={{ color: "var(--text-3)" }} title="The port is part of the hashed name, so it cannot be shown.">unknown</span>}
+                    </td>
+                    <td style={td} title={e.key_type}>{keyTypeLabel(e.key_type)}</td>
+                    <td style={{ ...td, fontFamily: MONO, fontSize: 12, color: "var(--text-2)" }}>
+                      <button
+                        type="button"
+                        onClick={() => copyFingerprint(e)}
+                        title={isCopied ? "Copied" : `${e.fingerprint}\nClick to copy`}
+                        aria-label={isCopied ? "Fingerprint copied" : `Copy fingerprint of ${shownName(e)}`}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: 0, border: 0, background: "transparent", font: "inherit", color: isCopied ? "var(--ok)" : "inherit", cursor: "copy", whiteSpace: "nowrap" }}
+                      >
+                        {shortFingerprint(e.fingerprint)}
+                        <span aria-hidden="true" style={{ display: "flex", width: 12, visibility: isCopied ? "visible" : "hidden" }}><CheckIcon size={12} /></span>
+                      </button>
+                    </td>
+                    <td style={{ ...td, padding: "0 8px" }}>
+                      <button type="button" aria-label={`Remove ${shownName(e)}`} title="Remove" onClick={() => setConfirm([e])} style={iconBtn}><TrashIcon /></button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {visible.length === 0 && <p style={{ margin: "16px 12px", color: "var(--text-2)" }}>No entries match “{filter.trim()}”.</p>}
+        </div>
+      )}
 
       <div
         aria-hidden={bar ? undefined : true}
@@ -601,14 +579,6 @@ export function KnownHostsScreen(p: {
 
       {confirm && <RemoveDialog entries={confirm} nameOf={shownName} onConfirm={() => remove(confirm)} onClose={() => setConfirm(null)} />}
     </main>
-  );
-}
-
-function EmptyState({ children }: { children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 200, padding: 24, color: "var(--text-2)", textAlign: "center" }}>
-      {children}
-    </div>
   );
 }
 

@@ -3,8 +3,8 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import type { Host } from "../../api";
 import { termBus } from "../termBus";
 import type { PaneStage, SessionStatus } from "../termBus";
-import { KEYS, MONO } from "../mock";
-import { CloseIcon, CollapseIcon, DotsIcon, SftpIcon, SnippetIcon, SplitIcon } from "../icons";
+import { MONO } from "../mock";
+import { CloseIcon, CollapseIcon, DotsIcon, RefreshIcon } from "../icons";
 import { MAX_PANES, aggregate, dnd, equalShare, leaves, paneHost, paneStore, shape } from "../panes";
 import type { Layout, PaneSpec, Side, Zone } from "../panes";
 
@@ -16,7 +16,6 @@ export function encodingLabel(enc: string | undefined): string {
   return e === "iso-8859-1" ? "ISO-8859-1" : e === "windows-1252" ? "Windows-1252" : "UTF-8";
 }
 
-const toolBtn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 28, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer", boxSizing: "border-box" };
 
 export interface MenuEntry {
   label: string;
@@ -391,14 +390,8 @@ export function TerminalSession({
   onSplit,
   onClosePane,
   onRatio,
-  onEqualize,
   onZoom,
-  onBroadcast,
   onPopOut,
-  onOpenSftp,
-  onOpenSnippets,
-  onCloseTab,
-  onDuplicate,
   onEditHost,
   onDragPane,
 }: {
@@ -415,24 +408,16 @@ export function TerminalSession({
   onSplit(paneId: string, side?: Side): void;
   onClosePane(paneId: string): void;
   onRatio(path: string, ratio: number): void;
-  onEqualize(): void;
   onZoom(paneId: string | null): void;
-  onBroadcast(on: boolean): void;
   onPopOut(paneId: string): void;
-  onOpenSftp(h: Host): void;
-  onOpenSnippets(): void;
-  onCloseTab(): void;
-  onDuplicate(h: Host): void;
   onEditHost(h: Host): void;
   onDragPane(e: ReactMouseEvent, paneId: string, label: string): void;
 }) {
   const infos = useSyncExternalStore(paneStore.subscribe, paneStore.infos);
   const { hint } = useSyncExternalStore(dnd.subscribe, dnd.get);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [paneMenu, setPaneMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const menuBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const ids = useMemo(() => leaves(layout), [layout]);
   const multi = ids.length > 1;
@@ -477,39 +462,8 @@ export function TerminalSession({
     return () => cancelAnimationFrame(raf);
   }, [structure, active]);
 
-  const focusTerminal = () => termBus.byId(focus)?.focus?.();
   const reconnect = (list: string[]) => list.forEach((id) => termBus.byId(id)?.reconnect());
   const splitEntry = (target: string, side: Side, label: string): MenuEntry => ({ label, disabled: full, title: full ? `Up to ${MAX_PANES} panes per tab` : undefined, onSelect: () => onSplit(target, side) });
-
-  const sessionMenu: (MenuEntry | null)[] = [
-    { label: multi ? "Reconnect all panes" : "Reconnect", onSelect: () => reconnect(multi ? ids : [focus]) },
-    null,
-    { ...splitEntry(focus, "right", "Split right"), hint: KEYS.split },
-    splitEntry(focus, "bottom", "Split down"),
-    ...(multi
-      ? [
-          {
-            label: broadcast ? "Stop broadcasting" : "Broadcast input to all panes",
-            onSelect: () => {
-              onBroadcast(!broadcast);
-              focusTerminal();
-            },
-          },
-          { label: "Even out pane sizes", disabled: !!zoomed, onSelect: onEqualize },
-        ]
-      : []),
-    null,
-    { label: `New tab to ${focusHost.name}`, onSelect: () => onDuplicate(focusHost) },
-    {
-      label: "Clear scrollback",
-      onSelect: () => {
-        termBus.byId(focus)?.clear?.();
-        focusTerminal();
-      },
-    },
-    null,
-    { label: "Close tab", hint: KEYS.closeTab, danger: true, onSelect: onCloseTab },
-  ];
 
   const paneItems = (id: string): (MenuEntry | null)[] => [
     splitEntry(id, "right", "Split right"),
@@ -606,47 +560,6 @@ export function TerminalSession({
 
   return (
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, minHeight: 44, padding: "6px 12px", borderBottom: "1px solid var(--line)", background: "var(--tab)", boxSizing: "border-box" }}>
-        <h1 style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>{focusHost.name}</h1>
-        <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--text-2)" }}>
-          {focusHost.username}@{focusHost.hostname}
-          {focusHost.port !== 22 ? `:${focusHost.port}` : ""}
-        </span>
-        <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          onClick={() => onSplit(focus)}
-          disabled={full}
-          title={full ? `Up to ${MAX_PANES} panes per tab` : `Split (${KEYS.split}). Drag tabs or hosts into the terminal to split too.`}
-          style={{ ...toolBtn, opacity: full ? 0.5 : 1, cursor: full ? "default" : "pointer" }}
-        >
-          <SplitIcon />
-          Split
-        </button>
-        <button type="button" onClick={() => onOpenSftp(focusHost)} style={toolBtn}>
-          <SftpIcon size={14} />
-          SFTP
-        </button>
-        <button type="button" onClick={onOpenSnippets} style={toolBtn}>
-          <SnippetIcon size={14} />
-          Snippets
-        </button>
-        <div style={{ position: "relative" }}>
-          <button
-            ref={menuBtnRef}
-            type="button"
-            aria-label="More session actions"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((o) => !o)}
-            style={{ ...toolBtn, width: 28, padding: 0, justifyContent: "center", background: menuOpen ? "var(--sel)" : "var(--bg)" }}
-          >
-            <DotsIcon />
-          </button>
-          {menuOpen && <PopupMenu label="Session actions" items={sessionMenu} ignoreRef={menuBtnRef} onClose={() => setMenuOpen(false)} style={{ position: "absolute", top: "calc(100% + 4px)", right: 0 }} />}
-        </div>
-      </div>
-
       <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0, background: "var(--term-line)" }}>{zoomed ? renderPane(zoomed) : renderNode(layout, "")}</div>
 
       {paneMenu && ids.includes(paneMenu.id) && (
@@ -659,18 +572,23 @@ export function TerminalSession({
       )}
 
       <footer style={{ display: "flex", alignItems: "center", gap: 16, height: 26, flex: "none", padding: "0 6px 0 12px", borderTop: "1px solid var(--line)", background: "var(--bg-side)", color: "var(--text-2)", fontSize: 12, boxSizing: "border-box", whiteSpace: "nowrap", overflow: "hidden" }}>
+        <span title={`${focusHost.username}@${focusHost.hostname}${focusHost.port !== 22 ? `:${focusHost.port}` : ""}`} style={{ flex: "none", maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", fontFamily: MONO, fontSize: 11.5 }}>
+          {focusHost.username}@{focusHost.hostname}
+          {focusHost.port !== 22 ? `:${focusHost.port}` : ""}
+        </span>
         <span role="status" style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, color: "var(--text)" }}>
           <span aria-hidden="true" style={{ width: 7, height: 7, flex: "none", borderRadius: "50%", boxSizing: "border-box", ...paneDot(focusStage) }} />
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{stateText}</span>
         </span>
-        {focusStage === "connected" && typeof focusInfo?.latency === "number" && <span>Latency {focusInfo.latency} ms</span>}
+        {focusStage === "connected" && typeof focusInfo?.latency === "number" && <span title="Latency">{focusInfo.latency} ms</span>}
         {encoding !== "UTF-8" && <span>{encoding}</span>}
         {broadcast && multi && <span style={{ color: "var(--warn)" }}>Broadcast on</span>}
         {zoomed && <span>Zoomed</span>}
         {multi && counts.map((c) => <span key={c.k}>{c.n} {c.k}</span>)}
         <div style={{ flex: 1 }} />
         {canReconnect && (
-          <button type="button" onClick={() => reconnect([focus])} style={{ flex: "none", height: 20, padding: "0 8px", border: "1px solid var(--btn-line)", borderRadius: 4, background: "var(--btn)", color: "var(--btn-text)", fontSize: 11.5, cursor: "pointer" }}>
+          <button type="button" data-icon-btn onClick={() => reconnect([focus])} style={{ display: "flex", alignItems: "center", gap: 5, flex: "none", height: 20, padding: "0 8px 0 6px", border: 0, borderRadius: 5, color: "var(--text)", fontSize: 12, cursor: "pointer" }}>
+            <RefreshIcon size={12} />
             {focusStage === "reconnecting" ? "Reconnect now" : "Reconnect"}
           </button>
         )}

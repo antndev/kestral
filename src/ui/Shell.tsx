@@ -48,6 +48,8 @@ const NAV: { id: SectionId; label: string; icon: ReactNode }[] = [
 ];
 const STRIP = 40;
 const SIDEBAR_W = 240;
+const SLIDE_MS = 240;
+const slide = (prop: string) => `${prop} ${SLIDE_MS}ms var(--ease-out)`;
 
 function useNow(on: boolean, every: number) {
   const [now, setNow] = useState(() => Date.now());
@@ -175,6 +177,23 @@ export function WindowControls() {
   );
 }
 
+function NewTabButton({ onClick, tabSized }: { onClick: () => void; tabSized?: boolean }) {
+  return (
+    <button
+      type="button"
+      data-icon-btn
+      aria-label="New tab"
+      title={`New tab (${KEYS.newTab})`}
+      onClick={onClick}
+      style={{ ...iconBtn(28), width: tabSized ? 25 : 28, height: tabSized ? 25 : 28, borderRadius: 6, background: undefined, flex: "none", color: "var(--text-2)" }}
+    >
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinecap="round" aria-hidden="true">
+        <path d="M6.5 2.5v8M2.5 6.5h8" />
+      </svg>
+    </button>
+  );
+}
+
 function TabLabel({ text, bold }: { text: string; bold: boolean }) {
   const item: CSSProperties = { gridArea: "1 / 1", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
   return (
@@ -195,10 +214,10 @@ function TitleBar({
   onLock,
   onSelectTab,
   onCloseTab,
-  onNewTab,
-  onToggleSidebar,
   onDragTab,
+  onReorderTab,
   tabMenu,
+  onNewTab,
   sidebarOpen,
 }: {
   sidebarOpen: boolean;
@@ -209,14 +228,85 @@ function TitleBar({
   onLock: () => void;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
-  onNewTab: () => void;
-  onToggleSidebar: () => void;
   onDragTab: (e: React.MouseEvent, id: string, name: string) => void;
+  onReorderTab: (id: string, beforeId: string) => void;
   tabMenu: (id: string) => ContextItem[];
+  onNewTab: () => void;
 }) {
   const [tabCtx, setTabCtx] = useState<{ x: number; y: number; id: string; restore: HTMLElement | null } | null>(null);
   const stripRef = useRef<HTMLElement | null>(null);
   const [hoverTab, setHoverTab] = useState<string | null>(null);
+  const [tabSlide, setTabSlide] = useState<{ id: string; dx: number; from: number; to: number; w: number; settling: boolean; done?: boolean } | null>(null);
+  const startSlide = (e: React.MouseEvent<HTMLElement>, id: string, name: string) => {
+    if (e.button !== 0) return;
+    const strip = stripRef.current;
+    if (!strip) return;
+    const els = [...strip.querySelectorAll<HTMLElement>("[data-tab-id]")];
+    const rects = els.map((el) => ({ id: el.dataset.tabId ?? "", left: el.offsetLeft, width: el.offsetWidth }));
+    const from = rects.findIndex((r) => r.id === id);
+    if (from < 0) return;
+    const me = rects[from];
+    const band = strip.getBoundingClientRect();
+    const tabEl = e.currentTarget;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    let started = false;
+    let to = from;
+    const cleanup = () => {
+      window.removeEventListener("mousemove", move, true);
+      window.removeEventListener("mouseup", up, true);
+      window.removeEventListener("keydown", key, true);
+      document.documentElement.style.cursor = "";
+    };
+    const move = (ev: MouseEvent) => {
+      const dx = ev.clientX - sx;
+      if (!started) {
+        if (Math.abs(dx) < 5 && Math.abs(ev.clientY - sy) < 5) return;
+        started = true;
+        onSelectTab(id);
+        document.documentElement.style.cursor = "grabbing";
+      }
+      ev.preventDefault();
+      if (ev.clientY > band.bottom + 28 || ev.clientY < band.top - 28) {
+        cleanup();
+        setTabSlide(null);
+        onDragTab({ button: 0, currentTarget: tabEl, clientX: ev.clientX, clientY: ev.clientY } as unknown as React.MouseEvent, id, name);
+        return;
+      }
+      const last = rects[rects.length - 1];
+      const cdx = Math.max(rects[0].left - me.left, Math.min(last.left + last.width - me.left - me.width, dx));
+      const center = me.left + cdx + me.width / 2;
+      to = rects.filter((r, k) => k !== from && r.left + r.width / 2 < center).length;
+      setTabSlide({ id, dx: cdx, from, to, w: me.width, settling: false });
+    };
+    const up = () => {
+      cleanup();
+      if (!started) return;
+      const stop = (ev: Event) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+      };
+      window.addEventListener("click", stop, { capture: true, once: true });
+      window.setTimeout(() => window.removeEventListener("click", stop, { capture: true }), 0);
+      const slot = to > from ? rects[to].left + rects[to].width - me.width : to < from ? rects[to].left : me.left;
+      setTabSlide({ id, dx: slot - me.left, from, to, w: me.width, settling: true });
+      window.setTimeout(() => {
+        if (to !== from) onReorderTab(id, rects[to].id);
+        setTabSlide({ id, dx: 0, from, to: from, w: me.width, settling: true, done: true });
+        requestAnimationFrame(() => requestAnimationFrame(() => setTabSlide(null)));
+      }, 150);
+    };
+    const key = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      cleanup();
+      setTabSlide(null);
+    };
+    window.addEventListener("mousemove", move, true);
+    window.addEventListener("mouseup", up, true);
+    window.addEventListener("keydown", key, true);
+  };
   useEffect(() => {
     stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${activeTab}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeTab, tabs.length]);
@@ -226,13 +316,8 @@ function TitleBar({
   const stripShown = !!payload && (payload.kind === "host" || (payload.kind === "pane" && (tabs.find((t) => t.id === payload.tabId)?.panes ?? 1) > 1));
 
   return (
-    <header data-tauri-drag-region data-tab-strip style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, height: STRIP, paddingLeft: sidebarOpen ? 4 : inset, background: stripLit ? "color-mix(in srgb, var(--accent) 10%, var(--bg-chrome))" : "var(--bg-chrome)", boxSizing: "border-box", transition: "background 120ms" }}>
+    <header data-tauri-drag-region data-tab-strip style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, height: STRIP, paddingLeft: sidebarOpen ? 0 : inset + 36, background: stripLit ? "color-mix(in srgb, var(--accent) 10%, var(--bg-chrome))" : "var(--bg-chrome)", boxSizing: "border-box", transition: `background 120ms, ${slide("padding-left")}` }}>
       <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 1, background: "var(--line)", pointerEvents: "none" }} />
-      {!sidebarOpen && (
-        <button type="button" aria-label="Show sidebar" title="Show sidebar" onClick={onToggleSidebar} style={{ ...iconBtn(), flex: "none", color: "var(--text-2)" }}>
-          <SidebarToggleIcon />
-        </button>
-      )}
       <nav
         ref={stripRef}
         role="tablist"
@@ -250,6 +335,8 @@ function TitleBar({
           const here = hint?.kind === "tab" && hint.tabId === t.id ? hint : null;
           const into = here?.mode === "into";
           const dragged = payload?.kind === "tab" && payload.tabId === t.id;
+          const sliding = tabSlide?.id === t.id;
+          const shift = !tabSlide || sliding ? 0 : tabSlide.from < tabSlide.to && i > tabSlide.from && i <= tabSlide.to ? -tabSlide.w : tabSlide.from > tabSlide.to && i >= tabSlide.to && i < tabSlide.from ? tabSlide.w : 0;
           const panes = t.panes ?? 0;
           const openMenu = (x: number, y: number, el: HTMLElement) => setTabCtx({ x, y, id: t.id, restore: el });
           return (
@@ -257,6 +344,9 @@ function TitleBar({
               key={t.id}
               role="tab"
               data-anim="tab"
+              onAnimationEnd={(e) => {
+                if (e.target === e.currentTarget) e.currentTarget.removeAttribute("data-anim");
+              }}
               tabIndex={0}
               aria-selected={active}
               data-tab-id={t.id}
@@ -285,7 +375,7 @@ function TitleBar({
               }}
               onMouseDown={(e) => {
                 if ((e.target as HTMLElement).closest("button")) return;
-                onDragTab(e, t.id, t.name);
+                startSlide(e, t.id, t.name);
               }}
               onMouseEnter={() => setHoverTab(t.id)}
               onMouseLeave={() => setHoverTab((h) => (h === t.id ? null : h))}
@@ -298,7 +388,7 @@ function TitleBar({
                 minWidth: 88,
                 flex: "0 1 auto",
                 height: 32,
-                padding: "0 5px 0 11px",
+                padding: "0 6px 0 10px",
                 background: into ? (here?.ok ? "var(--accent-tint)" : "var(--err-tint)") : active ? "var(--tab)" : "transparent",
                 borderWidth: "1px 1px 0",
                 borderStyle: "solid",
@@ -306,10 +396,12 @@ function TitleBar({
                 borderRadius: "8px 8px 0 0",
                 boxSizing: "border-box",
                 color: active || t.attention || into ? "var(--text)" : "var(--text-2)",
-                boxShadow: here?.mode === "reorder" ? "inset 2px 0 0 var(--accent)" : into ? `inset 0 0 0 1px ${here?.ok ? "var(--accent)" : "var(--err)"}` : undefined,
+                boxShadow: here?.mode === "reorder" ? "inset 2px 0 0 var(--text-3)" : into ? `inset 0 0 0 1px ${here?.ok ? "var(--accent)" : "var(--err)"}` : undefined,
                 opacity: dragged ? 0.55 : 1,
                 cursor: "pointer",
-                transition: "background 120ms, opacity 120ms",
+                zIndex: sliding ? 2 : undefined,
+                transform: tabSlide?.done ? undefined : sliding ? `translateX(${tabSlide.dx}px)` : shift ? `translateX(${shift}px)` : undefined,
+                transition: tabSlide?.done || (sliding && !tabSlide.settling) ? "background 120ms, opacity 120ms" : "background 120ms, opacity 120ms, transform 150ms var(--ease-out)",
               }}
             >
               {!active && !into && (
@@ -342,20 +434,19 @@ function TitleBar({
                   e.stopPropagation();
                   onCloseTab(t.id);
                 }}
-                style={{ ...iconBtn(20), flex: "none", color: "var(--text-2)" }}
+                data-icon-btn
+                style={{ ...iconBtn(22), background: undefined, flex: "none", color: "var(--text-2)" }}
               >
-                <CloseIcon />
+                <CloseIcon sw={1.67} />
               </button>
             </div>
           );
         })}
       </nav>
-      <div style={{ position: "relative", display: "flex", alignItems: "center", alignSelf: "flex-end", height: 32, flex: "none" }}>
-        <button type="button" aria-label="New tab" title={`New tab (${KEYS.newTab})`} onClick={onNewTab} style={iconBtn()}>
-          <PlusIcon />
-        </button>
+      <div style={{ position: "relative", display: "flex", alignItems: "flex-start", alignSelf: tabs.length ? "flex-end" : "center", height: tabs.length ? 32 : 28, flex: "none", paddingTop: tabs.length ? 4 : 0, boxSizing: "border-box", marginLeft: tabs.length ? -7 : 0 }}>
+        {(tabs.length > 0 || !sidebarOpen) && <NewTabButton onClick={onNewTab} tabSized={tabs.length > 0} />}
         {stripShown && (
-          <div aria-hidden="true" style={{ position: "absolute", left: "100%", top: 1, display: "flex", alignItems: "center", gap: 6, height: 26, padding: "0 10px", marginLeft: 4, border: `1px dashed ${stripLit ? "var(--accent)" : "var(--line)"}`, borderRadius: 6, background: stripLit ? "var(--accent-tint)" : "transparent", color: stripLit ? "var(--text)" : "var(--text-2)", fontSize: 12, whiteSpace: "nowrap", transition: "background 120ms, border-color 120ms, color 120ms" }}>
+          <div aria-hidden="true" style={{ position: "absolute", left: "100%", top: 3, display: "flex", alignItems: "center", gap: 6, height: 26, padding: "0 10px", marginLeft: 4, border: `1px dashed ${stripLit ? "var(--accent)" : "var(--line)"}`, borderRadius: 6, background: stripLit ? "var(--accent-tint)" : "transparent", color: stripLit ? "var(--text)" : "var(--text-2)", fontSize: 12, whiteSpace: "nowrap", transition: "background 120ms, border-color 120ms, color 120ms" }}>
             <PlusIcon size={12} />
             New tab
           </div>
@@ -471,6 +562,7 @@ export function Shell({
   onToggleSidebar,
   onSelectSection,
   onDragTab,
+  onReorderTab,
   tabMenu,
   onSelectTab,
   onCloseTab,
@@ -492,6 +584,7 @@ export function Shell({
   onToggleSidebar: () => void;
   onSelectSection: (s: SectionId) => void;
   onDragTab: (e: React.MouseEvent, id: string, name: string) => void;
+  onReorderTab: (id: string, beforeId: string) => void;
   tabMenu: (id: string) => ContextItem[];
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
@@ -501,20 +594,45 @@ export function Shell({
   children: ReactNode;
 }) {
   const inset = useMacInset();
+  const firstLayout = useRef(true);
+  useEffect(() => {
+    if (firstLayout.current) {
+      firstLayout.current = false;
+      return;
+    }
+    const root = document.documentElement;
+    const scale = parseFloat(getComputedStyle(root).getPropertyValue("--anim-scale"));
+    const settle = () => {
+      root.removeAttribute("data-relayout");
+      window.dispatchEvent(new Event("kst-relayout"));
+    };
+    root.setAttribute("data-relayout", "");
+    const t = window.setTimeout(settle, (SLIDE_MS + 40) * (Number.isFinite(scale) ? scale : 1));
+    return () => {
+      window.clearTimeout(t);
+      settle();
+    };
+  }, [sidebarOpen]);
   return (
     <div className={theme === "light" ? "t-light" : "t-dark"} data-anim="app" style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
+      <button type="button" aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} title={sidebarOpen ? "Hide sidebar" : "Show sidebar"} onClick={onToggleSidebar} style={{ ...iconBtn(), position: "absolute", top: (STRIP - 28) / 2, left: inset, zIndex: 3, color: "var(--text-2)" }}>
+        <SidebarToggleIcon />
+      </button>
+      {sidebarOpen && tabs.length === 0 && (
+        <div data-anim="tab" style={{ position: "absolute", top: (STRIP - 28) / 2, left: SIDEBAR_W - 36, zIndex: 3 }}>
+          <NewTabButton onClick={onNewTab} />
+        </div>
+      )}
       <div style={{ display: "flex", height: STRIP, flex: "none" }}>
-        {sidebarOpen && (
-          <div data-tauri-drag-region style={{ display: "flex", alignItems: "center", width: SIDEBAR_W, flex: `0 0 ${SIDEBAR_W}px`, paddingLeft: inset, background: "var(--bg-side)", borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)", boxSizing: "border-box" }}>
-            <button type="button" aria-label="Hide sidebar" title="Hide sidebar" onClick={onToggleSidebar} style={{ ...iconBtn(), flex: "none", color: "var(--text-2)" }}>
-              <SidebarToggleIcon />
-            </button>
-          </div>
-        )}
-        <TitleBar sidebarOpen={sidebarOpen} tabs={tabs} activeTab={activeTab} updateReady={updateReady} onUpdate={onUpdate} onLock={onLock} onSelectTab={onSelectTab} onCloseTab={onCloseTab} onNewTab={onNewTab} onToggleSidebar={onToggleSidebar} onDragTab={onDragTab} tabMenu={tabMenu} />
+        <div data-tauri-drag-region style={{ width: sidebarOpen ? SIDEBAR_W : 0, flex: "none", overflow: "hidden", transition: slide("width") }}>
+          <div data-tauri-drag-region style={{ width: SIDEBAR_W, height: "100%", background: "var(--bg-side)", borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)", boxSizing: "border-box" }} />
+        </div>
+        <TitleBar sidebarOpen={sidebarOpen} tabs={tabs} activeTab={activeTab} updateReady={updateReady} onUpdate={onUpdate} onLock={onLock} onSelectTab={onSelectTab} onCloseTab={onCloseTab} onDragTab={onDragTab} onReorderTab={onReorderTab} tabMenu={tabMenu} onNewTab={onNewTab} />
       </div>
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        {sidebarOpen && <Sidebar section={section} vaultActive={vaultActive} aiActive={aiActive} aiUntil={aiUntil} onSelect={onSelectSection} onOpenPalette={onOpenPalette} />}
+        <div inert={!sidebarOpen || undefined} style={{ display: "flex", width: sidebarOpen ? SIDEBAR_W : 0, flex: "none", overflow: "hidden", transition: slide("width") }}>
+          <Sidebar section={section} vaultActive={vaultActive} aiActive={aiActive} aiUntil={aiUntil} onSelect={onSelectSection} onOpenPalette={onOpenPalette} />
+        </div>
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>{children}</div>
       </div>
     </div>

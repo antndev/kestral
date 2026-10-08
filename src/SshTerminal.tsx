@@ -506,10 +506,16 @@ export function SshTerminal(props: SshTerminalProps) {
 
     let raf = 0;
     const ro = new ResizeObserver(() => {
+      if (document.documentElement.hasAttribute("data-relayout")) return;
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(refit);
     });
     ro.observe(el);
+    const onRelayout = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(refit);
+    };
+    window.addEventListener("kst-relayout", onRelayout);
 
     return () => {
       disposed = true;
@@ -518,6 +524,7 @@ export function SshTerminal(props: SshTerminalProps) {
       refitRef.current = null;
       cancelAnimationFrame(raf);
       ro.disconnect();
+      window.removeEventListener("kst-relayout", onRelayout);
       dataSub.dispose();
       window.clearTimeout(selTimer);
       selSub.dispose();

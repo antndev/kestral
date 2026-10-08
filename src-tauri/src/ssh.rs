@@ -552,15 +552,6 @@ impl SshManager {
         Ok((first, "Password".into()))
     }
 
-    pub async fn run_command(
-        &self,
-        host: &Host,
-        vault: &Arc<Vault>,
-        command: &str,
-    ) -> Result<CommandOutput> {
-        self.run_command_opts(host, vault, command, false).await
-    }
-
     pub async fn run_command_opts(
         &self,
         host: &Host,
@@ -569,7 +560,16 @@ impl SshManager {
         pty: bool,
     ) -> Result<CommandOutput> {
         let session = self.connect(host, vault).await?;
+        self.exec_on(&session, host, command, pty).await
+    }
 
+    pub async fn exec_on(
+        &self,
+        session: &client::Handle<ClientHandler>,
+        host: &Host,
+        command: &str,
+        pty: bool,
+    ) -> Result<CommandOutput> {
         let mut channel = session
             .channel_open_session()
             .await

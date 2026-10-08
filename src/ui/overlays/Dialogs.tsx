@@ -16,6 +16,7 @@ type LayerOpts = {
   onEscape?: () => void;
   onTab?: (backwards: boolean) => void;
   initialFocus?: RefObject<HTMLElement | null>;
+  inline?: boolean;
 };
 type Layer = { id: number; container: RefObject<HTMLElement | null>; opts: { current: LayerOpts } };
 
@@ -97,6 +98,10 @@ export function useModalLayer(container: RefObject<HTMLElement | null>, opts: La
   const [id] = useState(() => nextLayer++);
 
   useEffect(() => {
+    if (latest.current.inline) {
+      latest.current.initialFocus?.current?.focus({ preventScroll: true });
+      return;
+    }
     const layer: Layer = { id, container, opts: latest };
     layers.push(layer);
     const previous = document.activeElement as HTMLElement | null;
@@ -145,7 +150,7 @@ export function Overlay({
         if (onBackdrop && downOnBackdrop.current && e.target === e.currentTarget) onBackdrop();
         downOnBackdrop.current = false;
       }}
-      style={{ position: "fixed", inset: 0, zIndex: z, display: "flex", alignItems: align, justifyContent: "center", padding, background: "var(--overlay)", boxSizing: "border-box" }}
+      style={{ position: "fixed", inset: 0, zIndex: z, display: "flex", alignItems: align, justifyContent: "center", padding, background: "var(--overlay)", backdropFilter: "blur(3px)", WebkitBackdropFilter: "blur(3px)", boxSizing: "border-box" }}
     >
       {children}
     </div>
@@ -179,7 +184,7 @@ const btnBase: CSSProperties = { display: "inline-flex", alignItems: "center", j
 const btn = {
   secondary: { ...btnBase, border: "1px solid var(--line)", background: "var(--bg)", color: "var(--text)" } as CSSProperties,
   primary: { ...btnBase, padding: "0 16px", border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 } as CSSProperties,
-  danger: { ...btnBase, border: "1px solid var(--err)", background: "transparent", color: "var(--err)" } as CSSProperties,
+  danger: { ...btnBase, padding: "0 16px", border: "1px solid color-mix(in srgb, var(--err) 45%, transparent)", background: "color-mix(in srgb, var(--err) 14%, transparent)", color: "var(--err)", fontWeight: 500 } as CSSProperties,
   ghost: { ...btnBase, border: "1px solid transparent", background: "transparent", color: "var(--text-2)" } as CSSProperties,
 };
 const disabledStyle: CSSProperties = { opacity: 0.6, cursor: "default" };
@@ -355,18 +360,21 @@ export function ConfirmDialog({
 
   return (
     <Overlay z={z} onBackdrop={danger ? undefined : close}>
-      <section ref={ref} role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} aria-busy={busy} tabIndex={-1} style={dialogBox(440)}>
+      <section ref={ref} role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} aria-busy={busy} tabIndex={-1} style={{ ...dialogBox(400), gap: 20, padding: "22px 24px 20px" }}>
         <div>
           <h2 id={titleId} style={title}>{heading}</h2>
-          <p id={descId} style={{ ...lead, overflowWrap: "anywhere" }}>{message}</p>
+          <p id={descId} style={{ ...lead, lineHeight: 1.5, overflowWrap: "anywhere" }}>{message}</p>
         </div>
-        <p role="alert" style={{ ...errLine, minHeight: 17 }}>{err}</p>
-        <Actions>
+        <Actions left={<span role="alert" title={err || undefined} style={{ display: "block", color: "var(--err)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{err}</span>}>
           {[
             <Button key="cancel" btnRef={cancelRef} disabled={busy} title={busy ? WORKING : undefined} onClick={close}>Cancel</Button>,
             <Button key="ok" btnRef={confirmRef} kind={danger ? "danger" : "primary"} disabled={busy} title={busy ? WORKING : undefined} onClick={confirm}>
-              {busy && <Spinner />}
-              {confirmLabel ?? (danger ? "Delete" : "Confirm")}
+              <span style={{ display: "grid", placeItems: "center" }}>
+                <span style={{ gridArea: "1 / 1", opacity: busy ? 0 : 1 }}>{confirmLabel ?? (danger ? "Delete" : "Confirm")}</span>
+                <span style={{ gridArea: "1 / 1", display: "flex", opacity: busy ? 1 : 0 }}>
+                  <Spinner />
+                </span>
+              </span>
             </Button>,
           ]}
         </Actions>

@@ -12,6 +12,7 @@ import { CheckIcon, SearchIcon } from "../icons";
 import { Markdown } from "../Markdown";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
+import { HELLO_AUTO_KEY } from "../LockScreen";
 import { updateLock } from "../../lib/updateLock";
 import { SegGroup, segItem } from "../SegGroup";
 
@@ -526,6 +527,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
   const [hello, setHello] = useState<api.HelloStatus | null>(helloCache);
   const [helloBusy, setHelloBusy] = useState(false);
   const [helloNote, setHelloNote] = useState<Note>(null);
+  const [helloAuto, setHelloAuto] = useState(() => readJson(HELLO_AUTO_KEY, false));
 
   function refreshHello() {
     return api.helloStatus().then((st) => {
@@ -721,7 +723,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
     { group: "General", label: "New tab", combos: app("T") },
     { group: "General", label: "Open settings", combos: [[MOD, ","]] },
     { group: "General", label: "Lock the vault", combos: app("L") },
-    { group: "General", label: "Close a dialog or settings", combos: [["Esc"]] },
+    { group: "General", label: "Close a dialog", combos: [["Esc"]] },
     { group: "Tabs", label: "Close tab", combos: app("W") },
     { group: "Tabs", label: "Next tab", combos: [["Ctrl", "Tab"]] },
     { group: "Tabs", label: "Previous tab", combos: [["Ctrl", "Shift", "Tab"]] },
@@ -956,6 +958,28 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
           },
         ]
       : []),
+    ...(showHello && hello?.enabled
+      ? [
+          {
+            id: "hello-auto", page: "Vault and security" as Page, label: `Ask for ${helloMethod} on start`, hint: "The prompt opens as soon as Kestral starts locked", keywords: "windows hello touch id automatic prompt start",
+            node: (
+              <div style={row}>
+                {noteHead("hello-auto", `Ask for ${helloMethod} on start`, "The prompt opens as soon as Kestral starts locked", null)}
+                <div style={ctlBox}>
+                  <Toggle
+                    on={helloAuto}
+                    onChange={(v) => {
+                      setHelloAuto(v);
+                      writeJson(HELLO_AUTO_KEY, v);
+                    }}
+                    labelledBy={labelId("hello-auto")}
+                  />
+                </div>
+              </div>
+            ),
+          },
+        ]
+      : []),
     {
       id: "data-dir", page: "Vault and security", label: "Data folder", keywords: "location path files storage vault settings audit log",
       node: (
@@ -1084,8 +1108,8 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
 
   return (
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 28px 14px" }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Settings</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 56, padding: "12px 28px", boxSizing: "border-box" }}>
+        <h1 style={{ position: "relative", top: -1, margin: 0, fontSize: 20, fontWeight: 600 }}>Settings</h1>
       </div>
 
       <div style={{ display: "flex", flex: 1, minHeight: 0, borderTop: "1px solid var(--line)" }}>

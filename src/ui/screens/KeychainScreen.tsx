@@ -17,7 +17,7 @@ const h3: CSSProperties = { margin: "0 0 6px", fontSize: 12, fontWeight: 500, co
 const outlineBtn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 28, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
 const pageBtn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
 const primaryBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
-const dangerOutlineBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--err)", background: "transparent", color: "var(--err)" };
+const dangerOutlineBtn: CSSProperties = { ...pageBtn, border: "1px solid color-mix(in srgb, var(--err) 40%, transparent)", background: "color-mix(in srgb, var(--err) 10%, transparent)", color: "var(--err)" };
 const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer", flex: "none" };
 const th: CSSProperties = { height: 32, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 const cell: CSSProperties = { padding: "0 12px", borderBottom: "1px solid var(--line-soft)" };
@@ -461,8 +461,8 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
 
   return (
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, padding: "20px 28px 14px" }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Keychain</h1>
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, minHeight: 56, padding: "12px 28px", boxSizing: "border-box" }}>
+        <h1 style={{ position: "relative", top: -1, margin: 0, fontSize: 20, fontWeight: 600 }}>Keychain</h1>
         <SegGroup label="View" value={tab} style={{ marginLeft: 8 }}>
           {(
             [
@@ -798,6 +798,10 @@ function KeyDetail(p: {
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, overflowWrap: "anywhere" }}>{p.secret.id}</h2>
           <p style={{ margin: "4px 0 0", color: "var(--text-2)" }}>{[ok ? ok.algo.replace(/ \d+$/, "") : p.info ? "Private key" : "Reading…", ok && keyBits(ok.pub) ? `${keyBits(ok.pub)} bit` : "", createdLabel(p.secret.created_at)].filter(Boolean).join(", ")}</p>
         </div>
+        <button type="button" onClick={() => setModal("delete")} disabled={renaming} title={busyTip} style={{ ...dangerOutlineBtn, flex: "none", ...disabledLook(renaming) }}>
+          <TrashIcon />
+          Delete
+        </button>
       </div>
 
       {failed && (
@@ -939,13 +943,6 @@ function KeyDetail(p: {
           </div>
         </div>
       )}
-
-      <div style={{ paddingTop: 16, borderTop: "1px solid var(--line)" }}>
-        <button type="button" onClick={() => setModal("delete")} disabled={renaming} title={busyTip} style={{ ...dangerOutlineBtn, ...disabledLook(renaming) }}>
-          <TrashIcon />
-          Delete key
-        </button>
-      </div>
 
       {modal === "show" && <ShowPrivateKeyDialog id={p.secret.id} onClose={() => setModal(null)} />}
       {modal === "export" && (

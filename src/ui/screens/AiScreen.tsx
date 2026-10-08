@@ -5,9 +5,10 @@ import * as api from "../../api";
 import type { AiCaps, AiPolicy, AiStatus, Host, McpInfo } from "../../api";
 import { usePrefs } from "../../lib/prefs";
 import { MONO, errText } from "../mock";
-import { PlusIcon, SearchIcon, TrashIcon } from "../icons";
+import { PlusIcon, TrashIcon } from "../icons";
 import { ConfirmDialog } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
+import { ListFilter, ScreenHeader, oneLine, pageBtn, sectionLabel, smallBtn, td, th } from "../kit";
 
 const DURATIONS = [
   { minutes: 15, label: "15m" },
@@ -41,31 +42,12 @@ const row: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "cen
 const rowLast: CSSProperties = { ...row, borderBottom: 0, paddingBottom: 0 };
 const rowHead: CSSProperties = { flex: "1 1 240px", minWidth: 0 };
 const sub: CSSProperties = { margin: "2px 0 0", fontSize: 12, color: "var(--text-2)" };
-const sectionLabel: CSSProperties = { margin: "14px 0 0", fontSize: 12, fontWeight: 500, color: "var(--text-2)" };
-const clip: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-const th: CSSProperties = { height: 32, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", borderBottom: "1px solid var(--line)" };
-const cell: CSSProperties = { padding: "0 12px", borderBottom: "1px solid var(--line-soft)" };
+const groupLabel: CSSProperties = { ...sectionLabel, margin: "14px 0 0" };
 const field: CSSProperties = { width: "100%", height: 32, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
 const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer", flex: "none" };
 
-function btn(kind: "primary" | "secondary", size: 32 | 28, disabled?: boolean): CSSProperties {
-  const base: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-    height: size,
-    padding: size === 32 ? "0 12px" : "0 10px",
-    borderRadius: 6,
-    fontSize: size === 32 ? 13 : 12,
-    whiteSpace: "nowrap",
-    cursor: disabled ? "default" : "pointer",
-    opacity: disabled ? 0.6 : 1,
-    boxSizing: "border-box",
-    flex: "none",
-  };
-  if (kind === "primary") return { ...base, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
-  return { ...base, border: "1px solid var(--line)", background: "var(--bg)", color: "var(--text)" };
+function dim(off: boolean): CSSProperties {
+  return off ? { opacity: 0.6, cursor: "default" } : {};
 }
 
 function useAlive() {
@@ -181,7 +163,7 @@ function Card({ title, desc, note, right, children }: { title: string; desc?: Re
         <div style={{ flex: "1 1 260px", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h2 style={{ ...cardTitle, flex: "none" }}>{title}</h2>
-            <span data-selectable aria-live="polite" title={note ?? undefined} style={{ ...clip, flex: 1, textAlign: "right", fontSize: 12, color: "var(--err)" }}>
+            <span data-selectable aria-live="polite" title={note ?? undefined} style={{ ...oneLine, flex: 1, textAlign: "right", fontSize: 12, color: "var(--err)" }}>
               {note}
             </span>
           </div>
@@ -371,22 +353,22 @@ function MasterCard({ onAiChanged }: { onAiChanged?(active: boolean): void }) {
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <Toggle on={active} label="AI access" disabled={!status} title={toggleTitle} onChange={(v) => apply(v)} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ ...cardTitle, ...clip }}>{head}</p>
+          <p style={{ ...cardTitle, ...oneLine }}>{head}</p>
           <p style={{ ...sub, display: "flex", alignItems: "center", gap: 6, minHeight: 18 }} aria-live="polite" title={err ?? (tripped ? `${tripped.path} on ${tripped.host_name}` : undefined)}>
             {err ? (
-              <span data-selectable style={{ ...clip, color: "var(--err)" }}>{err}</span>
+              <span data-selectable style={{ ...oneLine, color: "var(--err)" }}>{err}</span>
             ) : tripped ? (
               <>
                 <Dot color="var(--warn)" />
-                <span style={clip}>Stopped because a protected path was touched.</span>
+                <span style={oneLine}>Stopped because a protected path was touched.</span>
               </>
             ) : (
-              <span style={{ ...clip, fontVariantNumeric: "tabular-nums" }}>{detail}</span>
+              <span style={{ ...oneLine, fontVariantNumeric: "tabular-nums" }}>{detail}</span>
             )}
           </p>
         </div>
         {loadErr && (
-          <button type="button" onClick={load} style={btn("secondary", 28)}>
+          <button type="button" onClick={load} style={{ ...smallBtn, flex: "none" }}>
             Retry
           </button>
         )}
@@ -475,13 +457,13 @@ function SkillCard() {
       title="Claude Code skill"
       note={err}
       desc={
-        <span title={state} style={{ ...clip, display: "block" }}>
+        <span title={state} style={{ ...oneLine, display: "block" }}>
           {state}
         </span>
       }
       right={
         <div ref={actionRef} tabIndex={-1} style={{ outline: "none" }}>
-          <button type="button" onClick={onClick} disabled={off} title={installed === null ? "Checking whether the skill is installed" : undefined} style={btn("secondary", 32, off)}>
+          <button type="button" onClick={onClick} disabled={off} title={installed === null ? "Checking whether the skill is installed" : undefined} style={{ ...pageBtn, flex: "none", ...dim(off) }}>
             <Stable text={label} alts={SKILL_LABELS} />
           </button>
         </div>
@@ -556,9 +538,9 @@ function CapsCard() {
 
   return (
     <Card title="What the AI may do" note={err}>
-      <h3 style={sectionLabel}>Read</h3>
+      <h3 style={groupLabel}>Read</h3>
       {renderRows("read")}
-      <h3 style={sectionLabel}>Manage</h3>
+      <h3 style={groupLabel}>Manage</h3>
       {renderRows("manage")}
     </Card>
   );
@@ -689,7 +671,7 @@ function ProtectedCard() {
             </div>
           ))}
           <div style={{ marginTop: 4 }}>
-            <button type="button" onClick={add} style={btn("secondary", 28)}>
+            <button type="button" onClick={add} style={{ ...smallBtn, flex: "none" }}>
               <PlusIcon size={14} sw={1.75} />
               Add path
             </button>
@@ -780,10 +762,9 @@ function PolicyCard({ hosts, onHostsChanged }: { hosts: Host[]; onHostsChanged()
         <>
           <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
             {hosts.length > 6 && (
-              <label style={{ display: "flex", alignItems: "center", gap: 6, height: 28, width: 220, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", boxSizing: "border-box", color: "var(--text-2)" }}>
-                <SearchIcon size={14} />
-                <input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter hosts" aria-label="Filter hosts" style={{ flex: 1, minWidth: 0, border: 0, outline: "none", background: "transparent", color: "var(--text)", fontSize: 12 }} />
-              </label>
+              <div style={{ width: 220 }}>
+                <ListFilter value={filter} onChange={setFilter} placeholder="Filter hosts" />
+              </div>
             )}
             <div style={{ flex: 1 }} />
             {hosts.length > 1 && (
@@ -792,7 +773,7 @@ function PolicyCard({ hosts, onHostsChanged }: { hosts: Host[]; onHostsChanged()
                   <Stable text={hidden > 0 ? `Set all ${hosts.length} hosts` : "Set all hosts"} alts={["Set all hosts", `Set all ${hosts.length} hosts`]} align="end" />
                 </span>
                 {POLICIES.map((p) => (
-                  <button key={p.value} type="button" onClick={() => setConfirmBulk(p.value)} disabled={bulk !== null} title={bulk !== null ? "Saving…" : `Set commands and files to ${p.label} on every host`} style={btn("secondary", 28, bulk !== null)}>
+                  <button key={p.value} type="button" onClick={() => setConfirmBulk(p.value)} disabled={bulk !== null} title={bulk !== null ? "Saving…" : `Set commands and files to ${p.label} on every host`} style={{ ...smallBtn, flex: "none", ...dim(bulk !== null) }}>
                     <Stable text={bulk === p.value ? "Saving…" : p.label} alts={[p.label, "Saving…"]} />
                   </button>
                 ))}
@@ -811,7 +792,7 @@ function PolicyCard({ hosts, onHostsChanged }: { hosts: Host[]; onHostsChanged()
               <tbody>
                 {shown.map((h, i) => {
                   const last = i === shown.length - 1;
-                  const c: CSSProperties = last ? { ...cell, borderBottom: 0 } : cell;
+                  const c: CSSProperties = last ? { ...td, borderBottom: 0 } : td;
                   const busyTitle = bulk !== null ? "Saving…" : undefined;
                   return (
                     <tr key={h.id}>
@@ -833,7 +814,7 @@ function PolicyCard({ hosts, onHostsChanged }: { hosts: Host[]; onHostsChanged()
                 })}
                 {shown.length === 0 && (
                   <tr>
-                    <td colSpan={3} style={{ ...cell, borderBottom: 0, height: 40, paddingLeft: 0, color: "var(--text-2)" }}>No hosts match the filter.</td>
+                    <td colSpan={3} style={{ ...td, borderBottom: 0, paddingLeft: 0, color: "var(--text-2)" }}>No hosts match the filter.</td>
                   </tr>
                 )}
               </tbody>
@@ -866,9 +847,7 @@ export function AiScreen({ hosts, onHostsChanged, onAiChanged }: { hosts: Host[]
   }, []);
   return (
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, padding: "20px 28px 14px" }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>AI access</h1>
-      </div>
+      <ScreenHeader title="AI access" />
       <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "0 28px 28px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 920 }}>
           <MasterCard onAiChanged={onAiChanged} />

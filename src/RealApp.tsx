@@ -48,7 +48,6 @@ import { AiScreen } from "./ui/screens/AiScreen";
 import { LogsScreen } from "./ui/screens/LogsScreen";
 import { WelcomeScreen } from "./ui/screens/WelcomeScreen";
 import { SettingsScreen } from "./ui/screens/SettingsScreen";
-import { HostEditor } from "./ui/overlays/HostEditor";
 import { CommandPalette, type PaletteAction } from "./ui/overlays/CommandPalette";
 import { AiStoppedDialog, ApprovalDialog, ConfirmDialog, HostKeyChangedDialog, HostKeyDialog, TrayOnboardingDialog, UpdateDialog } from "./ui/overlays/Dialogs";
 
@@ -115,14 +114,21 @@ export default function RealApp() {
     };
   }, []);
 
+  const lockedByHand = useRef(false);
   const cls = theme === "light" ? "t-light" : "t-dark";
   const screen =
     exists === null ? (
       <BootScreen className={cls} error={bootError} onRetry={() => void refreshVault()} />
     ) : !unlocked ? (
-      <LockScreen className={cls} exists={exists} error={bootError} onUnlocked={refreshVault} />
+      <LockScreen className={cls} exists={exists} error={bootError} autoHello={!lockedByHand.current} onUnlocked={refreshVault} />
     ) : (
-      <Workspace theme={theme} onLocked={refreshVault} />
+      <Workspace
+        theme={theme}
+        onLocked={() => {
+          lockedByHand.current = true;
+          return refreshVault();
+        }}
+      />
     );
   return (
     <>
@@ -207,6 +213,11 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   };
   const toastRef = useRef<(kind: "info" | "error" | "ok", text: string) => void>(() => {});
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const editHost = (st: EditorState) => {
+    setEditor(st);
+    setSection("hosts");
+    setActiveTab("vault");
+  };
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [approvals, setApprovals] = useState<(ApprovalRequest & { receivedAt: number; expired?: boolean })[]>([]);
   const [aiStopped, setAiStopped] = useState<{ host_name: string; path: string } | null>(null);
@@ -807,7 +818,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
     else if (q.identity === "password") prefill.auth = { kind: "password", secret_id: "" };
     else if (q.identity.startsWith("identity:")) prefill.auth = { kind: "identity", identity_id: q.identity.slice(9) };
     else if (q.identity) prefill.auth = { kind: "key", secret_id: q.identity };
-    setEditor({ host: null, prefill, connectAfterSave: true });
+    editHost({ host: null, prefill, connectAfterSave: true });
   }
 
   function deleteHost(h: Host) {
@@ -851,7 +862,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   function duplicateHost(h: Host) {
     const { id: _id, ...rest } = h;
     void _id;
-    setEditor({
+    editHost({
       host: null,
       prefill: {
         ...rest,
@@ -893,10 +904,10 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         splitActive(a.host);
         break;
       case "edit":
-        setEditor({ host: a.host });
+        editHost({ host: a.host });
         break;
       case "new-host":
-        setEditor({ host: null });
+        editHost({ host: null });
         break;
       case "section":
         goSection(a.section);
@@ -1021,6 +1032,18 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
     if (!s) return [];
     const items: ContextItem[] = [];
     const cur = activeSession;
+    const panes = s.layout ? leaves(s.layout) : [];
+    if (s.kind === "terminal" && s.layout) {
+      items.push({ label: "Split right", onClick: () => splitPane(id, { side: "right" }) });
+      items.push({ label: "Split down", onClick: () => splitPane(id, { side: "bottom" }) });
+      if (panes.length > 1) {
+        items.push({ label: s.broadcast ? "Stop broadcasting" : "Broadcast input to all panes", onClick: () => patchTab(id, () => ({ broadcast: !s.broadcast })) });
+        items.push({ label: "Even out pane sizes", onClick: () => patchTab(id, (x) => (x.layout ? { layout: equalize(x.layout) } : null)) });
+      }
+      items.push({ label: "Open SFTP", onClick: () => openSftp(tabHost(s)) });
+      items.push({ label: panes.length > 1 ? "Reconnect all panes" : "Reconnect", onClick: () => panes.forEach((p) => termBus.byId(p)?.reconnect()) });
+      items.push({ label: "Clear scrollback", onClick: () => s.focus && termBus.byId(s.focus)?.clear?.() });
+    }
     items.push({ label: s.kind === "sftp" ? `Terminal to ${tabHost(s).name}` : `New tab to ${tabHost(s).name}`, onClick: () => openTerminal(tabHost(s), undefined, s.focus ? termBus.byId(s.focus)?.password?.() : null) });
     if (cur && cur.tabId !== id && cur.layout && s.layout && leaves(cur.layout).length + leaves(s.layout).length <= MAX_PANES) {
       items.push({ label: "Move into current tab", onClick: () => mergeTab(id, cur.tabId, null, null) });
@@ -1065,20 +1088,27 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
           Retry
         </button>
       </main>
-    ) : hosts.length === 0 ? (
-        <WelcomeScreen onQuickConnect={quickConnect} onNewHost={() => setEditor({ host: null })} onImported={refreshAll} />
+    ) : hosts.length === 0 && !editor ? (
+        <WelcomeScreen onQuickConnect={quickConnect} onNewHost={() => editHost({ host: null })} onImported={refreshAll} />
       ) : (
         <HostsScreen
           hosts={hosts}
           statuses={statuses}
           onConnect={(h) => openTerminal(h)}
           onSftp={openSftp}
-          onEdit={(h) => setEditor({ host: h })}
-          onNew={() => setEditor({ host: null })}
+          onEdit={(h) => editHost({ host: h })}
+          onNew={() => editHost({ host: null })}
           onDuplicate={duplicateHost}
           onDelete={deleteHost}
           onQuickConnect={quickConnect}
           onDragHost={(e, id, label) => startDrag(e, { kind: "host", hostId: id }, label)}
+          editor={editor}
+          onEditorClose={() => setEditor(null)}
+          onEditorSaved={(h, connect) => {
+            setEditor(null);
+            void refreshHosts();
+            if (connect) openTerminal(h);
+          }}
         />
       );
   }
@@ -1087,7 +1117,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       <KeychainScreen
         hosts={hosts}
         onHostsChanged={() => void refreshHosts()}
-        onEditHost={(h) => setEditor({ host: h })}
+        onEditHost={(h) => editHost({ host: h })}
       />
     );
   else if (section === "snippets") sectionBody = <SnippetsScreen hosts={hosts} pasteTarget={pasteSession ? { name: tabHost(pasteSession).name, connected: stages[pasteSession.focus ?? ""] === "connected" } : null} onRunInTabs={runInTabs} onPasteToActive={pasteToActive} onSnippetsChanged={refreshSnippets} focusRequest={snippetFocus} />;
@@ -1126,6 +1156,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       onToggleSidebar={() => setSidebarOpen((o) => !o)}
       onSelectSection={goSection}
       onDragTab={(e, id, label) => startDrag(e, { kind: "tab", tabId: id }, label)}
+      onReorderTab={reorderTab}
       tabMenu={tabMenu}
       onSelectTab={selectTab}
       onCloseTab={closeTab}
@@ -1174,18 +1205,9 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
                   }}
                   onClosePane={closePane}
                   onRatio={(path, r) => patchTab(s.tabId, (x) => (x.layout ? { layout: setRatio(x.layout, path, r) } : null))}
-                  onEqualize={() => patchTab(s.tabId, (x) => (x.layout ? { layout: equalize(x.layout) } : null))}
                   onZoom={(id) => patchTab(s.tabId, () => ({ zoom: id }))}
-                  onBroadcast={(on) => patchTab(s.tabId, () => ({ broadcast: on }))}
                   onPopOut={popOut}
-                  onOpenSftp={openSftp}
-                  onOpenSnippets={() => goSection("snippets")}
-                  onCloseTab={() => closeTab(s.tabId)}
-                  onDuplicate={(h) => {
-                    const from = s.focus && specs[s.focus]?.hostId === h.id ? s.focus : undefined;
-                    openTerminal(h, undefined, from ? termBus.byId(from)?.password?.() : null);
-                  }}
-                  onEditHost={(h) => setEditor({ host: hosts.find((x) => x.id === h.id) ?? h })}
+                  onEditHost={(h) => editHost({ host: hosts.find((x) => x.id === h.id) ?? h })}
                   onDragPane={(e, paneId, label) => startDrag(e, { kind: "pane", tabId: s.tabId, paneId }, label)}
                 />
             )}
@@ -1197,26 +1219,12 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
             const s = sessionsRef.current.find((x) => x.layout && hasPane(x.layout, paneId));
             if (s) ringBell(s.tabId);
           }}
-          onEditHost={(h) => setEditor({ host: hostsRef.current.find((x) => x.id === h.id) ?? h })}
+          onEditHost={(h) => editHost({ host: hostsRef.current.find((x) => x.id === h.id) ?? h })}
           onClosePane={closePane}
         />
       </div>
 
       {paletteOpen && <CommandPalette hosts={hosts} snippets={snippets} canSplit={activeSession?.kind === "terminal"} hostsOnly={paletteHosts} onAction={onPalette} onClose={() => setPaletteOpen(false)} />}
-      {editor && (
-        <HostEditor
-          host={editor.host}
-          prefill={editor.prefill}
-          hosts={hosts}
-          connectAfterSave={editor.connectAfterSave}
-          onClose={() => setEditor(null)}
-          onSaved={(h, connect) => {
-            setEditor(null);
-            void refreshHosts();
-            if (connect) openTerminal(h);
-          }}
-        />
-      )}
       {hostKeyReqs[0] && (
         <HostKeyDialog
           key={hostKeyReqs[0].id}

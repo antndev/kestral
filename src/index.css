@@ -239,14 +239,33 @@ input[type="checkbox"]:disabled {
   animation-delay: calc(336ms * var(--anim-scale, 1));
 }
 button {
-  transition: transform 120ms var(--ease-out);
+  transition: transform 160ms var(--ease-out);
 }
 button:active:not(:disabled):not([data-no-press]) {
-  transform: scale(0.97);
+  transform: scale(0.985);
+}
+@keyframes kst-breathe {
+  50% {
+    opacity: 0.55;
+  }
+}
+[data-anim="breathe"] {
+  animation: kst-breathe 9s ease-in-out infinite;
+}
+[data-icon-btn] {
+  background: transparent;
+  transition: background 120ms, color 120ms, transform 160ms var(--ease-out);
+}
+[data-icon-btn]:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text) !important;
 }
 [data-nav] {
   background: transparent;
-  transition: background 120ms;
+  transition: background 120ms, transform 160ms var(--ease-out);
+}
+button[data-nav]:active:not(:disabled):not([data-no-press]) {
+  transform: scale(0.995);
 }
 [data-nav]:hover:not([aria-current]) {
   background: color-mix(in srgb, var(--sel) 55%, transparent);

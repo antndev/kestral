@@ -480,6 +480,10 @@ export function installDevMock() {
       case "ai_set_protected": protectedPaths = p.paths; return null;
       case "approval_respond": return null;
       case "audit_list": return audit;
+      case "audit_since": {
+        const at = p.after ? audit.findIndex((e: Any) => e.id === p.after) : -1;
+        return at < 0 ? { full: true, entries: p.limit ? audit.slice(-p.limit) : audit } : { full: false, entries: audit.slice(at + 1) };
+      }
       case "audit_user_command": return null;
       case "app_changelog": return "## 0.1.56\n- New design\n\n## 0.1.55\n- AI file transfers can use any local path\n";
       case "mcp_info": return { url: "http://127.0.0.1:4517/mcp", token: "kst_9f2c4e7a1b3d5f6e8a0c2e4f6a8b0d1e", running: true };

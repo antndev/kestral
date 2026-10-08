@@ -58,13 +58,11 @@ impl AuditLog {
             }
         };
 
-        let mut out = Vec::new();
+        let lines: Vec<&str> = raw.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        let total = lines.len();
+        let mut out = Vec::with_capacity(total.min(MAX_ENTRIES));
         let mut broken = 0usize;
-        for line in raw.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
+        for line in &lines[total.saturating_sub(MAX_ENTRIES)..] {
             match self.vault.open_envelope(line.as_bytes()) {
                 Ok((plain, _)) => match serde_json::from_slice::<AuditEntry>(&plain) {
                     Ok(entry) => out.push(entry),
@@ -77,10 +75,6 @@ impl AuditLog {
             tracing::warn!("{broken} audit lines could not be read");
         }
 
-        let total = out.len();
-        if total > MAX_ENTRIES {
-            out.drain(0..total - MAX_ENTRIES);
-        }
         tracing::info!("{} audit entries loaded", out.len());
         *self.entries.lock().unwrap() = out;
 
@@ -211,6 +205,17 @@ impl AuditLog {
 
     pub fn list(&self) -> Vec<AuditEntry> {
         self.entries.lock().unwrap().clone()
+    }
+
+    pub fn since(&self, after: Option<&str>, limit: Option<usize>) -> (bool, Vec<AuditEntry>) {
+        let entries = self.entries.lock().unwrap();
+        match after.and_then(|id| entries.iter().rposition(|e| e.id == id)) {
+            Some(i) => (false, entries[i + 1..].to_vec()),
+            None => {
+                let from = limit.map_or(0, |n| entries.len().saturating_sub(n));
+                (true, entries[from..].to_vec())
+            }
+        }
     }
 
     pub fn list_ai(&self) -> Vec<AuditEntry> {

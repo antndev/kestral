@@ -33,6 +33,7 @@ pub struct Services {
     pub audit: Arc<AuditLog>,
     pub ssh: Arc<SshManager>,
     pub snippets: Arc<SnippetStore>,
+    pub ai_pool: Arc<crate::ai_pool::AiPool>,
 }
 
 // Turn a local path the AI named into a real path: expand a leading ~ to the
@@ -142,6 +143,7 @@ impl Services {
     /// The user has to turn AI back on by hand.
     async fn trip_protected(&self, host_name: &str, host_id: &str, action: &str, offending: &str) {
         self.policy.disable();
+        self.ai_pool.clear();
         self.approval
             .notify_stopped(host_name.to_string(), offending.to_string());
         self.audit.record(
@@ -177,7 +179,7 @@ impl Services {
         command: &str,
         decision: &str,
     ) -> Result<CommandOutput> {
-        let result = self.ssh.run_command(host, &self.vault, command).await;
+        let result = self.pooled_exec(host, command).await;
         match &result {
             Ok(out) => {
                 let success = out.exit_signal.is_none() && out.exit_status == Some(0);
@@ -275,11 +277,35 @@ impl Services {
         }
     }
 
+    async fn pooled_exec(&self, host: &Host, command: &str) -> Result<CommandOutput> {
+        let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
+        let result = self.ssh.exec_on(&session, host, command, false).await;
+        if result.is_err() && session.is_closed() {
+            let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
+            return self.ssh.exec_on(&session, host, command, false).await;
+        }
+        result
+    }
+
+    async fn pooled_sftp(&self, host: &Host) -> Result<sftp::SftpHandle> {
+        let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
+        match sftp::on_session(session.clone()).await {
+            Err(_) if session.is_closed() => {
+                let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
+                sftp::on_session(session).await
+            }
+            other => other,
+        }
+    }
+
     pub async fn ai_sftp_list(&self, host_id: Uuid, path: &str) -> Result<Vec<FileEntry>> {
         let action = format!("sftp list {path}");
         self.guard_protected(host_id, &action, path).await?;
         let (host, decision) = self.authorize_file(host_id, &action).await?;
-        let result = sftp::one_shot_list(&self.ssh, &self.vault, &host, path).await;
+        let result = match self.pooled_sftp(&host).await {
+            Ok(h) => h.list(path).await,
+            Err(e) => Err(e),
+        };
         match &result {
             Ok(entries) => self.audit.record(
                 host.id.to_string(),
@@ -347,8 +373,10 @@ impl Services {
         if let Some(parent) = local_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let result =
-            sftp::one_shot_download(&self.ssh, &self.vault, &host, remote, &local_path).await;
+        let result = match self.pooled_sftp(&host).await {
+            Ok(h) => h.download(remote, &local_path, &sftp::Xfer::limited(sftp::MAX_AI_DOWNLOAD)).await,
+            Err(e) => Err(e),
+        };
         self.audit_file(&host, &action, decision, &result);
         result
     }
@@ -359,8 +387,10 @@ impl Services {
         let local_path = resolve_local(local);
         self.guard_local(host_id, &action, local, &local_path).await?;
         let (host, decision) = self.authorize_file(host_id, &action).await?;
-        let result =
-            sftp::one_shot_upload(&self.ssh, &self.vault, &host, &local_path, remote).await;
+        let result = match self.pooled_sftp(&host).await {
+            Ok(h) => h.upload(&local_path, remote, &sftp::Xfer::default()).await,
+            Err(e) => Err(e),
+        };
         self.audit_file(&host, &action, decision, &result);
         result
     }

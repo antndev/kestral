@@ -59,14 +59,24 @@ pub async fn vault_unlock(state: State<'_, AppState>, master: String) -> Result<
     let audit = state.services.audit.clone();
     let master = Zeroizing::new(master);
     tokio::task::spawn_blocking(move || -> Result<()> {
+        let started = std::time::Instant::now();
         vault.unlock(master.as_str())?;
+        let kdf = started.elapsed();
         if let Err(e) = hosts.load() {
             tracing::error!("Loading hosts after unlock failed: {e}");
         }
         if let Err(e) = snippets.load() {
             tracing::error!("Loading snippets after unlock failed: {e}");
         }
+        let lists = started.elapsed();
         audit.load();
+        tracing::info!(
+            "unlock took {} ms (vault {} ms, hosts and snippets {} ms, audit {} ms)",
+            started.elapsed().as_millis(),
+            kdf.as_millis(),
+            (lists - kdf).as_millis(),
+            (started.elapsed() - lists).as_millis()
+        );
         Ok(())
     })
     .await
@@ -75,6 +85,7 @@ pub async fn vault_unlock(state: State<'_, AppState>, master: String) -> Result<
 
 #[tauri::command]
 pub async fn vault_lock(state: State<'_, AppState>) -> Result<()> {
+    state.services.ai_pool.clear();
     state.services.vault.lock();
     state.services.hosts.clear();
     state.services.snippets.clear();
@@ -428,6 +439,7 @@ pub async fn host_remove(
     // Stop any running port forwards first, or their listeners and SSH sessions
     // would keep running with no card left to stop them.
     forwards.stop_host(hid).await;
+    state.services.ai_pool.forget(hid).await;
     state.services.hosts.remove(hid)?;
     state.services.snippets.remove_host(hid)?;
     Ok(())
@@ -470,6 +482,7 @@ pub async fn ai_enable(
 #[tauri::command]
 pub async fn ai_disable(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<()> {
     state.services.policy.disable();
+    state.services.ai_pool.clear();
     crate::refresh_tray_ai(&app);
     Ok(())
 }
@@ -509,6 +522,22 @@ pub async fn approval_respond(
 #[tauri::command]
 pub async fn audit_list(state: State<'_, AppState>) -> Result<Vec<AuditEntry>> {
     Ok(state.services.audit.list())
+}
+
+#[derive(serde::Serialize)]
+pub struct AuditDelta {
+    full: bool,
+    entries: Vec<AuditEntry>,
+}
+
+#[tauri::command]
+pub async fn audit_since(
+    state: State<'_, AppState>,
+    after: Option<String>,
+    limit: Option<usize>,
+) -> Result<AuditDelta> {
+    let (full, entries) = state.services.audit.since(after.as_deref(), limit);
+    Ok(AuditDelta { full, entries })
 }
 
 #[tauri::command]

@@ -1,43 +1,21 @@
-import { CSSProperties, FormEvent, RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../../api";
 import type { ForwardKind, Host, PortForward } from "../../api";
 import { MONO, errText } from "../mock";
-import { PlusIcon } from "../icons";
+import { ForwardIcon, PlusIcon, TrashIcon } from "../icons";
 import { ConfirmDialog as SharedConfirm } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import { SegGroup, segItem } from "../SegGroup";
+import { Block, Blocks, DetailHead, EditFooter, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, mono, muted, oneLine, pageBtn, primaryBtn } from "../kit";
 
-const th: CSSProperties = { height: 32, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-const cell: CSSProperties = { height: 40, padding: "0 12px", borderBottom: "1px solid var(--line-soft)" };
 const fieldLabel: CSSProperties = { display: "block", marginBottom: 6, fontSize: 12, fontWeight: 500, color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const input: CSSProperties = { width: "100%", height: 32, padding: "0 10px", borderWidth: 1, borderStyle: "solid", borderColor: "var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
 const monoField: CSSProperties = { ...input, fontFamily: MONO, fontSize: 12 };
-const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
-const btn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box" };
-const btnPrimary: CSSProperties = { ...btn, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
-const ghostBtn: CSSProperties = { height: 32, padding: "0 10px", border: 0, borderRadius: 6, background: "transparent", cursor: "pointer" };
+const dangerBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--err)", background: "transparent", color: "var(--err)" };
 const linkBtn: CSSProperties = { flex: "none", height: 18, padding: 0, border: 0, background: "transparent", color: "var(--link)", fontSize: 12, lineHeight: "18px", textDecoration: "underline", textUnderlineOffset: 2, cursor: "pointer", whiteSpace: "nowrap" };
-
-const PANEL = 300;
-const ACTIVE_W = 76;
-const NAME_MIN = 120;
-type Col = "type" | "listen" | "via" | "dest";
-const COL_ORDER: Col[] = ["type", "listen", "via", "dest"];
-const COL_KEEP: Col[] = ["listen", "via", "dest", "type"];
-const COL_W: Record<Col, number> = { type: 84, listen: 140, via: 120, dest: 160 };
-const COL_LABEL: Record<Col, string> = { type: "Type", listen: "Listen on", via: "Through", dest: "Destination" };
-
-function columnsFor(width: number): Col[] {
-  const keep = new Set<Col>();
-  let room = width - ACTIVE_W - NAME_MIN;
-  for (const c of COL_KEEP) {
-    if (keep.size > 0 && COL_W[c] > room) break;
-    keep.add(c);
-    room -= COL_W[c];
-  }
-  return COL_ORDER.filter((c) => keep.has(c));
-}
+const formGrid: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 };
+const addrPair: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 84px", gap: 10 };
 
 function off(style: CSSProperties, disabled: boolean): CSSProperties {
   return disabled ? { ...style, opacity: 0.5, cursor: "default" } : style;
@@ -81,6 +59,11 @@ const kindOf = (f: PortForward): ForwardKind => f.kind ?? "local";
 const listensHere = (f: PortForward) => kindOf(f) !== "remote";
 const ruleName = (f: PortForward) => (f.name ?? "").trim() || `Port ${kindOf(f) === "remote" ? f.remote_port : f.local_port}`;
 const KIND_LABEL: Record<ForwardKind, string> = { local: "Local", remote: "Remote", dynamic: "Dynamic" };
+const KIND_HINT: Record<ForwardKind, string> = {
+  local: "A port on this computer reaches a service through the host",
+  remote: "A port on the host reaches a service on this computer",
+  dynamic: "A SOCKS proxy on this computer sends any connection through the host",
+};
 
 const WEB_PORTS = new Set([80, 443, 3000, 3001, 4000, 4200, 5000, 5173, 5601, 8000, 8008, 8080, 8081, 8088, 8443, 8888, 9000, 9090, 9443]);
 const TLS_PORTS = new Set([443, 8443, 9443]);
@@ -143,6 +126,13 @@ function destOf(d: Draft): string {
   return port ? withPort(d.destHost.trim() || (d.kind === "remote" ? "127.0.0.1" : "localhost"), port) : "";
 }
 
+function exposureOf(d: Draft): { text: string; title: string } | null {
+  if (isLoopbackBind(d.listenHost.trim() || (d.kind === "remote" ? "localhost" : "127.0.0.1"))) return null;
+  return d.kind === "remote"
+    ? { text: "Reachable from other machines", title: "The server only allows this with GatewayPorts in its sshd_config." }
+    : { text: "Reachable from your network", title: "Use 127.0.0.1 to keep it on this computer." };
+}
+
 type StartMode = "manual" | "open" | "connect" | "both";
 const START_MODES: StartMode[] = ["manual", "open", "connect"];
 const START_LABEL: Record<StartMode, string> = { manual: "Manually", open: "When Kestral opens", connect: "When the host connects", both: "When Kestral opens or the host connects" };
@@ -152,7 +142,7 @@ const startModeOf = (d: Draft): StartMode => (d.autostart ? (d.startOnConnect ? 
 // and leaving the screen.
 let keptDrafts: Record<string, Draft> = {};
 
-function Toggle({ on, busy, disabled, label, onClick }: { on: boolean; busy: boolean; disabled?: boolean; label: string; onClick(): void }) {
+function Toggle({ on, busy, disabled, label, title, onClick }: { on: boolean; busy: boolean; disabled?: boolean; label: string; title?: string; onClick(): void }) {
   return (
     <button
       type="button"
@@ -160,7 +150,7 @@ function Toggle({ on, busy, disabled, label, onClick }: { on: boolean; busy: boo
       aria-label={label}
       aria-busy={busy}
       disabled={busy || disabled}
-      title={disabled ? "Save the rule first" : undefined}
+      title={disabled ? "Save the rule first" : title}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -178,13 +168,22 @@ const Dot = ({ color, label }: { color: string; label: string }) => (
   </span>
 );
 
-const Clip = ({ text, mono }: { text: string; mono?: boolean }) => (
-  <div title={text} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: mono ? MONO : undefined, fontSize: mono ? 12 : undefined }}>
-    {text}
-  </div>
+const At = ({ addr, where }: { addr: string; where: string }) => (
+  <span title={`${addr} on ${where}`}>
+    <span style={mono}>{addr}</span>
+    <span style={muted}> on {where}</span>
+  </span>
 );
 
 type Item = { id: string; row: Row | null; name: string; d: Draft; hostName: string; unsaved: boolean };
+
+function routeOf(it: Item): string {
+  const listen = listenOf(it.d, it.hostName);
+  const dest = it.d.kind === "dynamic" ? "" : destOf(it.d);
+  const path = listen && dest ? `${listen} to ${dest}` : listen || (dest ? `to ${dest}` : "");
+  const rest = [path, it.hostName ? `via ${it.hostName}` : ""].filter(Boolean).join(" ");
+  return rest ? `${KIND_LABEL[it.d.kind]} · ${rest}` : KIND_LABEL[it.d.kind];
+}
 
 export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hosts: Host[]; onHostsChanged(): void }) {
   const [hosts, setHosts] = useState<Host[]>(hostsProp);
@@ -196,11 +195,12 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hos
   const [newDraft, setNewDraft] = useState<{ id: string; draft: Draft } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Row | null>(null);
   const [drafts, setDraftsState] = useState<Record<string, Draft>>(keptDrafts);
-  const [bodyW, setBodyW] = useState(0);
-  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [filter, setFilter] = useState("");
   const alive = useRef(true);
   const focusName = useRef(false);
   const nameRef = useRef<HTMLInputElement | null>(null);
+  const itemRefs = useRef(new Map<string, HTMLButtonElement>());
+  const prevSel = useRef<string | null>(null);
 
   useEffect(() => setHosts(hostsProp), [hostsProp]);
 
@@ -209,15 +209,6 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hos
     return () => {
       alive.current = false;
     };
-  }, []);
-
-  useLayoutEffect(() => {
-    const el = bodyRef.current;
-    if (!el) return;
-    setBodyW(el.clientWidth);
-    const ro = new ResizeObserver(([e]) => setBodyW(e.contentRect.width));
-    ro.observe(el);
-    return () => ro.disconnect();
   }, []);
 
   const refreshActive = useCallback(async () => {
@@ -257,10 +248,12 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hos
   const showingNew = !current && !!newRow && newRow.id === selectedId;
   const detailId = current?.f.id ?? (showingNew && newRow ? newRow.id : null);
   const empty = rows.length === 0 && !newRow;
-  const cols = columnsFor(bodyW - PANEL);
 
   const items: Item[] = rows.map((r) => ({ id: r.f.id, row: r, name: ruleName(r.f), d: draftOf(r), hostName: r.host.name, unsaved: r.f.id in drafts }));
   if (newRow) items.push({ id: newRow.id, row: null, name: newRow.draft.name.trim() || "New rule", d: newRow.draft, hostName: hosts.find((h) => h.id === newRow.draft.hostId)?.name ?? "", unsaved: true });
+
+  const q = filter.trim().toLowerCase();
+  const shown = q ? items.filter((it) => [it.name, routeOf(it)].some((s) => s.toLowerCase().includes(q))) : items;
 
   // Forget drafts of rules that are gone or that match what is stored again.
   useEffect(() => {
@@ -280,6 +273,11 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hos
       nameRef.current?.focus();
     }
   }, [showingNew]);
+
+  function select(id: string) {
+    if (newRow && id === newRow.id && selectedId !== id) prevSel.current = selectedId;
+    setSelId(id);
+  }
 
   async function toggle(r: Row) {
     const id = r.f.id;
@@ -304,15 +302,18 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hos
 
   function startNewRule() {
     if (hosts.length === 0) return;
+    setFilter("");
     if (newRow) {
       if (showingNew) nameRef.current?.focus();
       else {
+        prevSel.current = selectedId;
         focusName.current = true;
         setSelId(newRow.id);
       }
       return;
     }
     const id = crypto.randomUUID();
+    prevSel.current = selectedId;
     focusName.current = true;
     setNewDraft({ id, draft: blankDraft(hosts.length === 1 ? hosts[0].id : "") });
     setSelId(id);
@@ -341,166 +342,136 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hos
     void refreshActive();
   }
 
-  function cellOf(c: Col, it: Item) {
-    if (c === "type") return <span style={{ color: "var(--text-2)" }}>{KIND_LABEL[it.d.kind]}</span>;
-    if (c === "listen") return <Clip text={listenOf(it.d, it.hostName)} mono />;
-    if (c === "via") return <Clip text={it.hostName} />;
-    return <Clip text={destOf(it.d)} mono={it.d.kind !== "dynamic"} />;
-  }
-
   return (
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, height: 66, flex: "none", padding: "20px 28px 14px", boxSizing: "border-box" }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600, whiteSpace: "nowrap" }}>Port forwarding</h1>
-        {rows.length > 0 && (
-          <span style={{ color: "var(--text-2)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-            {activeCount} of {rows.length} active
-          </span>
-        )}
-        <div style={{ flex: 1 }} />
+      <ScreenHeader title="Port forwarding" meta={rows.length > 0 ? <span style={{ fontVariantNumeric: "tabular-nums" }}>{activeCount} of {rows.length} active</span> : undefined}>
         {!empty && (
-          <button type="button" onClick={startNewRule} style={btnPrimary}>
+          <button type="button" onClick={startNewRule} style={primaryBtn}>
             <PlusIcon size={14} sw={1.75} />
             New rule
           </button>
         )}
-      </div>
+      </ScreenHeader>
 
-      <div ref={bodyRef} style={{ display: "flex", flex: 1, minHeight: 0, borderTop: "1px solid var(--line)" }}>
-        {empty ? (
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, padding: 24, textAlign: "center" }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-2)" }}>{hosts.length === 0 ? "Add a host first to forward ports." : "No port forwarding rules yet."}</div>
+      {empty ? (
+        <div style={{ flex: 1, minHeight: 0, display: "flex", borderTop: "1px solid var(--line)" }}>
+          <EmptyState icon={<ForwardIcon size={20} />}>
+            <span>{hosts.length === 0 ? "Add a host first to forward ports" : "No port forwarding rules yet"}</span>
             {hosts.length > 0 && (
-              <button type="button" onClick={startNewRule} style={btn}>
+              <button type="button" onClick={startNewRule} style={primaryBtn}>
                 <PlusIcon size={14} sw={1.75} />
                 New rule
               </button>
             )}
-          </div>
-        ) : (
-          <>
-            <div style={{ flex: "1 1 0", minWidth: 0, overflow: "auto", scrollbarGutter: "stable" }}>
-              <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 12.5 }}>
-                <colgroup>
-                  <col style={{ width: ACTIVE_W }} />
-                  <col />
-                  {cols.map((c) => (
-                    <col key={c} style={{ width: COL_W[c] }} />
-                  ))}
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th scope="col" style={{ ...th, padding: "0 0 0 28px" }}>
-                      <span style={srOnly}>Active</span>
-                    </th>
-                    <th scope="col" style={th}>Name</th>
-                    {cols.map((c) => (
-                      <th key={c} scope="col" style={th}>{COL_LABEL[c]}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((it) => {
+          </EmptyState>
+        </div>
+      ) : (
+        <SplitView
+          detailLabel="Rule details"
+          list={
+            <>
+              <ListFilter value={filter} onChange={setFilter} placeholder="Filter rules" />
+              {shown.length === 0 ? (
+                <p style={{ margin: 8, fontSize: 12, color: "var(--text-2)" }}>No rules match “{filter.trim()}”.</p>
+              ) : (
+                <List label="Rules">
+                  {shown.map((it, i) => {
                     const r = it.row;
                     const err = rowErr[it.id];
-                    const selected = it.id === selectedId;
+                    const on = active.has(it.id);
                     return (
-                      <tr
+                      <ListItem
                         key={it.id}
-                        tabIndex={0}
-                        aria-selected={selected}
-                        onClick={() => setSelId(it.id)}
-                        onKeyDown={(e) => {
-                          if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
-                            e.preventDefault();
-                            setSelId(it.id);
-                          }
+                        buttonRef={(el) => {
+                          if (el) itemRefs.current.set(it.id, el);
+                          else itemRefs.current.delete(it.id);
                         }}
-                        style={{ background: selected ? "var(--accent-tint)" : undefined, cursor: "pointer" }}
-                      >
-                        <td style={{ ...cell, padding: "0 0 0 28px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            {r ? (
-                              <Toggle on={active.has(it.id)} busy={!!pending[it.id]} label={`${it.name} active`} onClick={() => void toggle(r)} />
-                            ) : (
-                              <Toggle on={false} busy={false} disabled label={`${it.name} active`} onClick={() => {}} />
-                            )}
-                            {err && <Dot color="var(--err)" label={`Could not start: ${err}`} />}
-                          </div>
-                        </td>
-                        <td style={{ ...cell, fontWeight: 600 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <span title={it.name} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
-                            <span style={{ display: "flex", width: 14, flex: "none" }}>{it.unsaved && <Dot color="var(--warn)" label="Unsaved changes" />}</span>
-                          </div>
-                        </td>
-                        {cols.map((c) => (
-                          <td key={c} style={cell}>
-                            {cellOf(c, it)}
-                          </td>
-                        ))}
-                      </tr>
+                        icon={<ForwardIcon />}
+                        iconColor={on ? "var(--ok)" : err ? "var(--err)" : undefined}
+                        title={
+                          <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+                            <span title={it.name} style={oneLine}>{it.name}</span>
+                            {it.unsaved && <Dot color="var(--warn)" label="Unsaved changes" />}
+                          </span>
+                        }
+                        sub={<span title={routeOf(it)}>{routeOf(it)}</span>}
+                        selected={it.id === selectedId}
+                        onSelect={() => select(it.id)}
+                        onKeyDown={(e) => arrowNav(shown, i, e, select, (id) => itemRefs.current.get(id)?.focus())}
+                        trailing={
+                          r ? (
+                            <Toggle on={on} busy={!!pending[it.id]} label={`${it.name} active`} title={err ? `Could not start: ${err}` : undefined} onClick={() => void toggle(r)} />
+                          ) : (
+                            <Toggle on={false} busy={false} disabled label={`${it.name} active`} onClick={() => {}} />
+                          )
+                        }
+                      />
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-
-            <aside aria-label="Rule details" style={{ flex: `0 0 ${PANEL}px`, minWidth: 0, display: "flex", flexDirection: "column", borderLeft: "1px solid var(--line)", boxSizing: "border-box" }}>
-              {detailId && (
-                <RuleDetail
-                  key={detailId}
-                  id={detailId}
-                  row={current}
-                  rows={rows}
-                  hosts={hosts}
-                  active={!!current && active.has(current.f.id)}
-                  connections={stats[detailId] ?? 0}
-                  activeIds={active}
-                  pending={pending[detailId]}
-                  error={rowErr[detailId] ?? ""}
-                  draft={current ? drafts[current.f.id] ?? null : newRow?.draft ?? null}
-                  onDraft={(d) => {
-                    if (!current) {
-                      if (d) setNewDraft((n) => (n ? { ...n, draft: d } : n));
-                      return;
-                    }
-                    const id = current.f.id;
-                    const base = draftOf(current);
-                    setDrafts((cur) => {
-                      const next = { ...cur };
-                      if (d && !sameDraft(d, base)) next[id] = d;
-                      else delete next[id];
-                      return next;
-                    });
-                  }}
-                  nameRef={nameRef}
-                  onToggle={() => {
-                    if (current) void toggle(current);
-                  }}
-                  onDelete={() => setConfirmDelete(current)}
-                  onCancel={() => setNewDraft(null)}
-                  onSaved={(id, next, restartErr) => {
-                    onHostsChanged();
-                    setDrafts((cur) => {
-                      if (!(id in cur)) return cur;
-                      const rest = { ...cur };
-                      delete rest[id];
-                      return rest;
-                    });
-                    if (!alive.current) return;
-                    setNewDraft((n) => (n?.id === id ? null : n));
-                    setHosts(next);
-                    setRowErr((e) => ({ ...e, [id]: restartErr }));
-                    void refreshActive();
-                  }}
-                  refreshActive={refreshActive}
-                />
+                </List>
               )}
-            </aside>
-          </>
-        )}
-      </div>
+            </>
+          }
+        >
+          {detailId && (
+            <RuleDetail
+              key={detailId}
+              id={detailId}
+              row={current}
+              rows={rows}
+              hosts={hosts}
+              active={!!current && active.has(current.f.id)}
+              connections={stats[detailId] ?? 0}
+              activeIds={active}
+              pending={pending[detailId]}
+              error={rowErr[detailId] ?? ""}
+              draft={current ? drafts[current.f.id] ?? null : newRow?.draft ?? null}
+              onDraft={(d) => {
+                if (!current) {
+                  if (d) setNewDraft((n) => (n ? { ...n, draft: d } : n));
+                  return;
+                }
+                const id = current.f.id;
+                const base = draftOf(current);
+                setDrafts((cur) => {
+                  const next = { ...cur };
+                  if (d && !sameDraft(d, base)) next[id] = d;
+                  else delete next[id];
+                  return next;
+                });
+              }}
+              nameRef={nameRef}
+              onToggle={() => {
+                if (current) void toggle(current);
+              }}
+              onDelete={() => setConfirmDelete(current)}
+              onCancel={() => {
+                const prev = prevSel.current;
+                const back = prev && rows.some((r) => r.f.id === prev) ? prev : rows[0]?.f.id ?? null;
+                prevSel.current = null;
+                setNewDraft(null);
+                setSelId(back);
+                if (back) requestAnimationFrame(() => itemRefs.current.get(back)?.focus());
+              }}
+              onSaved={(id, next, restartErr) => {
+                onHostsChanged();
+                setDrafts((cur) => {
+                  if (!(id in cur)) return cur;
+                  const rest = { ...cur };
+                  delete rest[id];
+                  return rest;
+                });
+                if (!alive.current) return;
+                setNewDraft((n) => (n?.id === id ? null : n));
+                setHosts(next);
+                setRowErr((e) => ({ ...e, [id]: restartErr }));
+                void refreshActive();
+              }}
+              refreshActive={refreshActive}
+            />
+          )}
+        </SplitView>
+      )}
 
       {confirmDelete && (
         <ConfirmDeleteDialog
@@ -557,6 +528,10 @@ function RuleDetail({
   const [formErr, setFormErr] = useState("");
   const [formWarn, setFormWarn] = useState("");
   const [bad, setBad] = useState<Partial<Record<keyof Draft, boolean>>>({});
+  const [editing, setEditing] = useState(() => !row || !!kept);
+  const editMode = editing || !row;
+  const focusTo = useRef<"name" | "edit" | null>(null);
+  const editRef = useRef<HTMLButtonElement | null>(null);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -565,6 +540,13 @@ function RuleDetail({
       alive.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    const to = focusTo.current;
+    focusTo.current = null;
+    if (to === "name") nameRef.current?.focus();
+    else if (to === "edit") editRef.current?.focus();
+  }, [editMode, nameRef]);
 
   const dirty = !saved || !sameDraft(draft, saved);
   const set = (patch: Partial<Draft>) => {
@@ -577,11 +559,23 @@ function RuleDetail({
     setFormErr("");
     setFormWarn("");
   };
-  const discard = () => {
+  const startEdit = () => {
+    setFormErr("");
+    setFormWarn("");
+    focusTo.current = "name";
+    setEditing(true);
+  };
+  const cancelEdit = () => {
+    if (!row) {
+      onCancel();
+      return;
+    }
     onDraft(null);
     setBad({});
     setFormErr("");
     setFormWarn("");
+    focusTo.current = "edit";
+    setEditing(false);
   };
 
   const throughHost = hosts.find((h) => h.id === draft.hostId) ?? null;
@@ -667,6 +661,10 @@ function RuleDetail({
         }
       }
       onSaved(id, next, restartErr);
+      if (alive.current) {
+        focusTo.current = "edit";
+        setEditing(false);
+      }
     } catch (e) {
       if (stopped && row) await api.forwardStart(row.host.id, id).catch(() => {});
       if (alive.current) setFormErr(errText(e));
@@ -689,11 +687,7 @@ function RuleDetail({
             : { dot: "var(--ring-idle)", text: "Stopped" };
 
   const web = row ? webUrl(row.f) : null;
-  const exposure = isLoopbackBind(draft.listenHost.trim() || listenDefault)
-    ? null
-    : kind === "remote"
-      ? { text: "Reachable from other machines", title: "The server only allows this with GatewayPorts in its sshd_config." }
-      : { text: "Reachable from your network", title: "Use 127.0.0.1 to keep it on this computer." };
+  const exposure = exposureOf(draft);
   const msg: { tone: "err" | "warn" | "muted"; text: string; title?: string } | null = formErr
     ? { tone: "err", text: formErr }
     : formWarn
@@ -735,29 +729,89 @@ function RuleDetail({
   const mode = startModeOf(draft);
   const locked = saving || (!!row && !!pending);
 
-  return (
-    <form onSubmit={(e) => void save(e)} noValidate aria-label={title} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-      <div style={{ flex: "0 1 auto", minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 16, padding: "20px 20px 4px" }}>
-        <div>
-          <h2 title={title} style={{ margin: 0, fontSize: 16, fontWeight: 600, lineHeight: "22px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</h2>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, height: 20, marginTop: 2, color: "var(--text-2)" }}>
-            <span aria-hidden="true" style={{ width: 8, height: 8, flex: "none", borderRadius: "50%", background: status.dot }} />
-            <span title={status.text} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{status.text}</span>
-            {web && (
-              <button type="button" disabled={!active} onClick={() => void openUrl(web).catch((e) => setFormErr(errText(e)))} style={{ ...linkBtn, visibility: active ? "visible" : "hidden" }}>
-                Open in browser
-              </button>
-            )}
-          </div>
-        </div>
+  const sub = (
+    <>
+      <span style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+        <span aria-hidden="true" style={{ width: 8, height: 8, flex: "none", borderRadius: "50%", background: status.dot }} />
+        <span title={status.text} style={oneLine}>{status.text}</span>
+      </span>
+      {web && (
+        <button type="button" disabled={!active} onClick={() => void openUrl(web).catch((e) => setFormErr(errText(e)))} style={{ ...linkBtn, visibility: active ? "visible" : "hidden" }}>
+          Open in browser
+        </button>
+      )}
+    </>
+  );
 
-        <SegGroup label="Type" value={kind} style={{ flex: "none", alignSelf: "flex-start" }}>
+  if (!editMode && row && saved) {
+    const k = saved.kind;
+    const hostName = row.host.name;
+    const listenAddr = withPort(saved.listenHost.trim() || (k === "remote" ? "localhost" : "127.0.0.1"), saved.listenPort);
+    const destAddr = withPort(saved.destHost.trim() || (k === "remote" ? "127.0.0.1" : "localhost"), saved.destPort);
+    const reach = exposureOf(saved);
+    const note = formErr ? { err: true, text: formErr } : formWarn ? { err: false, text: formWarn } : null;
+    const busy = !!pending || saving;
+    return (
+      <>
+        <DetailHead
+          title={title}
+          sub={sub}
+          actions={
+            <>
+              <button type="button" onClick={onToggle} disabled={busy} style={off(primaryBtn, busy)}>
+                <Stable text={pending === "start" ? "Starting…" : pending === "stop" ? "Stopping…" : active ? "Stop" : "Start"} alts={["Start", "Stop", "Starting…", "Stopping…"]} />
+              </button>
+              <button ref={editRef} type="button" aria-label={`Edit ${title}`} onClick={startEdit} style={pageBtn}>
+                Edit
+              </button>
+              <button type="button" aria-label={`Delete ${title}`} onClick={onDelete} disabled={locked} title={pending ? "Wait until the tunnel has started or stopped" : undefined} style={off(pageBtn, locked)}>
+                Delete
+              </button>
+            </>
+          }
+        />
+
+        <Blocks>
+          <Block title="Forwarding">
+            <Facts
+              rows={[
+                ["Type", <span title={KIND_HINT[k]}>{KIND_LABEL[k]}</span>],
+                ["Listen on", <At addr={listenAddr} where={k === "remote" ? hostName : "this computer"} />],
+                ["Through host", hostName],
+                ["Destination", k === "dynamic" ? <span style={muted}>Any (SOCKS proxy)</span> : k === "remote" ? <At addr={destAddr} where="this computer" /> : <span title={destAddr} style={mono}>{destAddr}</span>],
+              ]}
+            />
+          </Block>
+          <Block title="Behaviour">
+            <Facts
+              rows={[
+                ["Start", START_LABEL[startModeOf(saved)]],
+                ["Reachable", reach ? <span title={reach.title} style={{ color: "var(--warn)" }}>{k === "remote" ? "From other machines" : "From your network"}</span> : `Only from ${k === "remote" ? hostName : "this computer"}`],
+              ]}
+            />
+          </Block>
+        </Blocks>
+
+        <p role="status" title={note?.text} style={{ ...oneLine, height: 18, margin: 0, fontSize: 12, lineHeight: "18px", color: note?.err ? "var(--err)" : "var(--warn)" }}>
+          <span key={note?.text} role={note?.err ? "alert" : undefined}>{note?.text}</span>
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <form onSubmit={(e) => void save(e)} noValidate aria-label={title} style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <DetailHead title={title} sub={sub} />
+
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+        <span style={fieldLabel}>Type</span>
+        <SegGroup label="Type" value={kind} style={{ flex: "none" }}>
           {(["local", "remote", "dynamic"] as const).map((k) => (
             <button
               key={k}
               type="button"
               aria-pressed={kind === k}
-              title={k === "local" ? "A port on this computer reaches a service through the host" : k === "remote" ? "A port on the host reaches a service on this computer" : "A SOCKS proxy on this computer sends any connection through the host"}
+              title={KIND_HINT[k]}
               onClick={() => pickKind(k)}
               style={segBtn(kind === k)}
             >
@@ -765,22 +819,14 @@ function RuleDetail({
             </button>
           ))}
         </SegGroup>
+      </div>
 
-        <div>
+      <div style={formGrid}>
+        <div style={{ minWidth: 0 }}>
           <label htmlFor="pf-name" style={fieldLabel}>Name</label>
           <input id="pf-name" ref={nameRef} type="text" value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder={draft.listenPort.trim() ? `Port ${draft.listenPort.trim()}` : "Optional"} style={input} />
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 84px", gap: 10 }}>
-          <div style={{ minWidth: 0 }}>
-            <label htmlFor="pf-listen" style={fieldLabel}>{kind === "remote" ? `Listen on ${throughHost?.name ?? "the host"}` : "Listen on this computer"}</label>
-            <input id="pf-listen" type="text" value={draft.listenHost} onChange={(e) => set({ listenHost: e.target.value })} placeholder={listenDefault} spellCheck={false} aria-invalid={bad.listenHost || undefined} style={field("listenHost", monoField)} />
-          </div>
-          <div>
-            <label htmlFor="pf-lport" style={fieldLabel}>Port</label>
-            <input id="pf-lport" type="text" inputMode="numeric" value={draft.listenPort} onChange={(e) => set({ listenPort: e.target.value })} aria-invalid={bad.listenPort || undefined} style={field("listenPort", monoField)} />
-          </div>
-        </div>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <label htmlFor="pf-via" style={fieldLabel}>Through host</label>
           <select id="pf-via" value={throughHost ? draft.hostId : ""} onChange={(e) => set({ hostId: e.target.value })} aria-invalid={bad.hostId || undefined} style={field("hostId", { ...input, padding: "0 8px" })}>
             {!throughHost && (
@@ -793,7 +839,17 @@ function RuleDetail({
             ))}
           </select>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 84px", gap: 10 }}>
+        <div style={addrPair}>
+          <div style={{ minWidth: 0 }}>
+            <label htmlFor="pf-listen" style={fieldLabel}>{kind === "remote" ? `Listen on ${throughHost?.name ?? "the host"}` : "Listen on this computer"}</label>
+            <input id="pf-listen" type="text" value={draft.listenHost} onChange={(e) => set({ listenHost: e.target.value })} placeholder={listenDefault} spellCheck={false} aria-invalid={bad.listenHost || undefined} style={field("listenHost", monoField)} />
+          </div>
+          <div>
+            <label htmlFor="pf-lport" style={fieldLabel}>Port</label>
+            <input id="pf-lport" type="text" inputMode="numeric" value={draft.listenPort} onChange={(e) => set({ listenPort: e.target.value })} aria-invalid={bad.listenPort || undefined} style={field("listenPort", monoField)} />
+          </div>
+        </div>
+        <div style={addrPair}>
           <div style={{ minWidth: 0 }}>
             <label htmlFor="pf-dest" style={fieldLabel}>{kind === "remote" ? "Destination on this computer" : "Destination"}</label>
             <input
@@ -813,7 +869,7 @@ function RuleDetail({
             <input id="pf-dport" type="text" inputMode="numeric" disabled={dynamic} value={dynamic ? "" : draft.destPort} onChange={(e) => set({ destPort: e.target.value })} aria-invalid={bad.destPort || undefined} style={field("destPort", dynamic ? { ...monoField, opacity: 0.6 } : monoField)} />
           </div>
         </div>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <label htmlFor="pf-start" style={fieldLabel}>Start</label>
           <select
             id="pf-start"
@@ -832,41 +888,29 @@ function RuleDetail({
         </div>
       </div>
 
-      <div style={{ flex: "none", display: "flex", flexDirection: "column", gap: 10, padding: "14px 20px 20px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div role="status" style={{ display: "flex", alignItems: "center", gap: 8, height: 18 }}>
-          <span key={msg?.text} role={msg?.tone === "err" ? "alert" : undefined} title={msg?.title ?? msg?.text} style={{ flex: 1, minWidth: 0, fontSize: 12, lineHeight: "18px", color: msgColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span key={msg?.text} role={msg?.tone === "err" ? "alert" : undefined} title={msg?.title ?? msg?.text} style={{ ...oneLine, flex: 1, fontSize: 12, lineHeight: "18px", color: msgColor }}>
             {msg?.text}
           </span>
-          {row && (
-            <button type="button" onClick={discard} disabled={!dirty || saving} style={{ ...linkBtn, visibility: dirty ? "visible" : "hidden" }}>
-              Discard
-            </button>
-          )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            type="button"
-            onClick={row ? onDelete : onCancel}
-            disabled={locked}
-            title={row && pending ? "Wait until the tunnel has started or stopped" : undefined}
-            style={off({ ...ghostBtn, color: row ? "var(--err)" : "var(--text-2)" }, locked)}
-          >
-            <Stable text={row ? "Delete" : "Cancel"} alts={["Delete", "Cancel"]} />
+        <EditFooter
+          left={
+            row ? (
+              <button type="button" onClick={onDelete} disabled={locked} title={pending ? "Wait until the tunnel has started or stopped" : undefined} style={off(dangerBtn, locked)}>
+                <TrashIcon />
+                Delete rule
+              </button>
+            ) : undefined
+          }
+        >
+          <button type="button" onClick={cancelEdit} disabled={saving} style={off(pageBtn, saving)}>
+            Cancel
           </button>
-          <div style={{ flex: 1 }} />
-          <button
-            type="button"
-            onClick={onToggle}
-            disabled={!row || !!pending || saving}
-            title={!row ? "Save the rule first" : dirty && !active ? "Starts the saved rule without your unsaved changes" : undefined}
-            style={off(btn, !row || !!pending || saving)}
-          >
-            <Stable text={pending === "start" ? "Starting…" : pending === "stop" ? "Stopping…" : active ? "Stop" : "Start"} alts={["Start", "Stop", "Starting…", "Stopping…"]} />
-          </button>
-          <button type="submit" disabled={!dirty || saving || !!pending} title={!dirty ? "No changes to save" : pending ? "Wait until the tunnel has started or stopped" : undefined} style={off(btnPrimary, !dirty || saving || !!pending)}>
+          <button type="submit" disabled={!dirty || saving || !!pending} title={!dirty ? "No changes to save" : pending ? "Wait until the tunnel has started or stopped" : undefined} style={off(primaryBtn, !dirty || saving || !!pending)}>
             <Stable text={saving ? "Saving…" : "Save"} alts={["Save", "Saving…"]} />
           </button>
-        </div>
+        </EditFooter>
       </div>
     </form>
   );

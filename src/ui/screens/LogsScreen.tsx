@@ -4,8 +4,9 @@ import { writeText as clipWrite } from "@tauri-apps/plugin-clipboard-manager";
 import * as api from "../../api";
 import type { AuditEntry } from "../../api";
 import { MONO, errText } from "../mock";
-import { CheckIcon, ChevronIcon, CopyIcon, SearchIcon } from "../icons";
+import { CheckIcon, ChevronIcon, CopyIcon } from "../icons";
 import { Stable } from "../Stable";
+import { EmptyState, ListFilter, ScreenHeader, oneLine, pageBtn, smallBtn, th as baseTh, td } from "../kit";
 
 type Tone = "ok" | "err" | "warn" | "accent" | "muted";
 
@@ -59,16 +60,17 @@ const DECISION_FILTERS: { value: DecisionFilter; label: string }[] = [
   { value: "failed", label: "Failed" },
 ];
 
-const PAGE = 300;
+const PAGE = 100;
 const REFRESH_MS = 5000;
+const MAX_KEEP = 5000;
+const FIRST_BATCH = 150;
 const COLS = 6;
 
 // The header line is an inset shadow so it stays attached to the sticky header while scrolling.
-const th: CSSProperties = { position: "sticky", top: 0, zIndex: 1, height: 32, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", background: "var(--bg)", boxShadow: "inset 0 -1px 0 var(--line)", whiteSpace: "nowrap" };
-const cell: CSSProperties = { height: 40, padding: "10px 12px 9px", lineHeight: "20px", verticalAlign: "top", borderBottom: "1px solid var(--line-soft)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+const th: CSSProperties = { ...baseTh, position: "sticky", top: 0, zIndex: 1, background: "var(--bg)", borderBottom: 0, boxShadow: "inset 0 -1px 0 var(--line)" };
+const cell: CSSProperties = { ...td, padding: "10px 12px 9px", lineHeight: "20px", verticalAlign: "top", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const dayCell: CSSProperties = { padding: "14px 12px 6px 40px", fontSize: 12, fontWeight: 600, color: "var(--text-2)", borderBottom: "1px solid var(--line-soft)" };
 const control: CSSProperties = { height: 32, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
-const secondaryBtn: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
 const linkBtn: CSSProperties = { padding: 0, border: 0, background: "transparent", color: "var(--link)", textDecoration: "underline", textUnderlineOffset: 2, cursor: "pointer" };
 const inline: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, height: 20, verticalAlign: "top" };
 
@@ -195,7 +197,7 @@ function CopyCommand({ text }: { text: string }) {
   }
   const color = state === "ok" ? "var(--ok)" : state === "err" ? "var(--err)" : "var(--text)";
   return (
-    <button type="button" onClick={copy} style={{ display: "inline-flex", alignItems: "center", gap: 6, flex: "none", height: 28, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color, fontSize: 12, cursor: "pointer", boxSizing: "border-box" }}>
+    <button type="button" onClick={copy} style={{ ...smallBtn, flex: "none", color }}>
       {state === "ok" ? <CheckIcon size={14} /> : <CopyIcon />}
       <span aria-live="polite"><Stable text={state === "ok" ? "Copied" : state === "err" ? "Copy failed" : "Copy command"} alts={["Copy command", "Copied", "Copy failed"]} /></span>
     </button>
@@ -222,6 +224,8 @@ export function LogsScreen() {
 
   const reqSeq = useRef(0);
   const inFlight = useRef(false);
+  const lastId = useRef<string | null>(null);
+  const loadedAll = useRef(false);
 
   // Only the newest request may write state, so a slow older snapshot never overwrites newer
   // data. Automatic refreshes are skipped while one is still running.
@@ -230,10 +234,29 @@ export function LogsScreen() {
     const seq = ++reqSeq.current;
     inFlight.current = true;
     try {
-      const list = await api.auditList();
+      const first = lastId.current === null && !loadedAll.current;
+      const delta = await api.auditSince(lastId.current, first ? FIRST_BATCH : undefined);
       if (!alive.current || seq !== reqSeq.current) return;
-      setEntries(list.slice().reverse());
-      setErr(null);
+      const fresh = delta.entries.slice().reverse();
+      if (fresh.length) lastId.current = fresh[0].id;
+      if (delta.full) setEntries(fresh);
+      if (first && delta.full) {
+        loadedAll.current = true;
+        window.setTimeout(() => {
+          api
+            .auditList()
+            .then((all) => {
+              if (!alive.current) return;
+              const list = all.slice().reverse();
+              if (list.length) lastId.current = list[0].id;
+              setEntries(list);
+            })
+            .catch(() => {});
+        }, 0);
+      }
+      else if (fresh.length) setEntries((cur) => [...fresh, ...(cur ?? [])].slice(0, MAX_KEEP));
+      else setEntries((cur) => cur ?? []);
+      setErr((e) => (e === null ? e : null));
     } catch (e) {
       if (alive.current && seq === reqSeq.current) setErr(errText(e));
     } finally {
@@ -308,141 +331,140 @@ export function LogsScreen() {
 
   return (
     <main ref={rootRef} style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "20px 28px 14px", overflow: "hidden", scrollbarGutter: "stable" }}>
-        <div style={{ flex: "1 1 0", minWidth: 140, display: "flex", alignItems: "center", gap: 10 }}>
-          <h1 style={{ margin: 0, flex: "none", fontSize: 20, fontWeight: 600 }}>Logs</h1>
-          <span title={status || undefined} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: err ? "var(--err)" : "var(--text-2)" }}>{status}</span>
-        </div>
-        <label style={{ ...control, flex: "0 1 220px", minWidth: 0, display: "flex", alignItems: "center", gap: 6, padding: "0 10px", color: "var(--text-2)" }}>
-          <SearchIcon size={14} />
-          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter commands" aria-label="Filter by command or host" style={{ flex: 1, minWidth: 0, border: 0, outline: "none", background: "transparent", color: "var(--text)", textOverflow: "ellipsis" }} />
-        </label>
-        <select aria-label="Host" value={hostId} onChange={(e) => setHostId(e.target.value)} style={{ ...control, flex: "none", width: 120, padding: "0 8px" }}>
-          <option value="">All hosts</option>
-          {hostOptions.map(([id, name]) => (
-            <option key={id} value={id}>{name}</option>
-          ))}
-        </select>
-        <select aria-label="Decision" value={decision} onChange={(e) => setDecision(e.target.value as DecisionFilter)} style={{ ...control, flex: "none", width: 144, padding: "0 8px" }}>
-          {DECISION_FILTERS.map((d) => (
-            <option key={d.value} value={d.value}>{d.label}</option>
-          ))}
-        </select>
+      <div style={{ flex: "none", overflow: "hidden", scrollbarGutter: "stable", borderBottom: "1px solid var(--line)" }}>
+        <ScreenHeader title="Logs" meta={<span title={status || undefined} style={{ ...oneLine, display: "block", width: 200, color: err ? "var(--err)" : undefined }}>{status}</span>}>
+          <div style={{ flex: "0 1 220px", minWidth: 120 }}>
+            <ListFilter value={query} onChange={setQuery} placeholder="Filter commands" />
+          </div>
+          <select aria-label="Host" value={hostId} onChange={(e) => setHostId(e.target.value)} style={{ ...control, flex: "none", width: 120, padding: "0 8px" }}>
+            <option value="">All hosts</option>
+            {hostOptions.map(([id, name]) => (
+              <option key={id} value={id}>{name}</option>
+            ))}
+          </select>
+          <select aria-label="Decision" value={decision} onChange={(e) => setDecision(e.target.value as DecisionFilter)} style={{ ...control, flex: "none", width: 144, padding: "0 8px" }}>
+            {DECISION_FILTERS.map((d) => (
+              <option key={d.value} value={d.value}>{d.label}</option>
+            ))}
+          </select>
+        </ScreenHeader>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto", scrollbarGutter: "stable", padding: "0 28px 24px" }}>
-        {entries === null ? (
-          <p data-selectable={err ? true : undefined} style={{ margin: 0, color: err ? "var(--err)" : "var(--text-2)", overflowWrap: "anywhere" }}>{err ? `Could not load logs: ${err}` : "Loading…"}</p>
-        ) : total === 0 && !filtering ? (
-          <div style={{ padding: "40px 0", textAlign: "center" }}>
-            <p style={{ margin: 0, fontWeight: 600 }}>No activity yet</p>
-            <p style={{ margin: "4px 0 0", color: "var(--text-2)" }}>Commands you run and AI actions appear here.</p>
-          </div>
-        ) : (
-          <>
-            <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
-              <colgroup>
-                <col style={{ width: 28 }} />
-                <col style={{ width: 72 }} />
-                <col style={{ width: 110 }} />
-                <col />
-                <col style={{ width: 108 }} />
-                <col style={{ width: 88 }} />
-              </colgroup>
-              <thead>
+      {entries === null ? (
+        <EmptyState>
+          <p data-selectable={err ? true : undefined} style={{ margin: 0, color: err ? "var(--err)" : undefined, overflowWrap: "anywhere" }}>{err ? `Could not load logs: ${err}` : "Loading…"}</p>
+        </EmptyState>
+      ) : total === 0 && !filtering ? (
+        <EmptyState>
+          <p style={{ margin: 0 }}>
+            <span style={{ display: "block", fontWeight: 600, color: "var(--text)" }}>No activity yet</span>
+            <span style={{ display: "block", marginTop: 4 }}>Commands you run and AI actions appear here.</span>
+          </p>
+        </EmptyState>
+      ) : (
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto", scrollbarGutter: "stable", padding: "0 28px 24px" }}>
+          <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+            <colgroup>
+              <col style={{ width: 28 }} />
+              <col style={{ width: 72 }} />
+              <col style={{ width: 110 }} />
+              <col />
+              <col style={{ width: 108 }} />
+              <col style={{ width: 88 }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th style={{ ...th, padding: 0 }} aria-label="Expand" />
+                <th style={th}>Time</th>
+                <th style={th}>Host</th>
+                <th style={th}>Command</th>
+                <th style={th}>Decision</th>
+                <th style={th}>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.length === 0 && (
                 <tr>
-                  <th style={{ ...th, padding: 0 }} aria-label="Expand" />
-                  <th style={th}>Time</th>
-                  <th style={th}>Host</th>
-                  <th style={th}>Command</th>
-                  <th style={th}>Decision</th>
-                  <th style={th}>Result</th>
+                  <td colSpan={COLS} style={{ ...cell, paddingLeft: 40, borderBottom: 0, color: "var(--text-2)" }}>
+                    No entries match.{" "}
+                    <button type="button" onClick={clearFilters} style={linkBtn}>Clear filters</button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {shown.length === 0 && (
-                  <tr>
-                    <td colSpan={COLS} style={{ ...cell, paddingLeft: 40, borderBottom: 0, color: "var(--text-2)" }}>
-                      No entries match.{" "}
-                      <button type="button" onClick={clearFilters} style={linkBtn}>Clear filters</button>
-                    </td>
-                  </tr>
-                )}
-                {shown.map((e, i) => {
-                  const expanded = open.has(e.id);
-                  const day = fmtDay(e.timestamp);
-                  const newDay = day !== "" && (i === 0 || day !== fmtDay(shown[i - 1].timestamp));
-                  const note = e.detail || (untracked(e) ? UNTRACKED : DECISION_HINT[e.decision]);
-                  const joined: CSSProperties | null = expanded ? { borderBottomColor: "transparent" } : null;
-                  return (
-                    <Fragment key={e.id}>
-                      {newDay && (
-                        <tr>
-                          <td colSpan={COLS} style={dayCell}>{day}</td>
-                        </tr>
-                      )}
-                      <tr
-                        onClick={() => {
-                          if (window.getSelection()?.toString()) return;
-                          toggle(e.id);
-                        }}
-                        style={{ cursor: "pointer", background: expanded ? "var(--sel)" : undefined }}
-                      >
-                        <td style={{ ...cell, ...joined, padding: "9px 0 0 4px" }}>
-                          <button
-                            type="button"
-                            aria-expanded={expanded}
-                            aria-label={expanded ? "Hide details" : "Show details"}
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              toggle(e.id);
-                            }}
-                            style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}
-                          >
-                            <span style={{ display: "flex", transform: expanded ? "none" : "rotate(-90deg)", transition: "transform 120ms ease-out" }}>
-                              <ChevronIcon size={12} />
-                            </span>
-                          </button>
-                        </td>
-                        <td style={{ ...cell, ...joined, color: "var(--text-2)", fontVariantNumeric: "tabular-nums" }} title={fmtFull(e.timestamp)}>{fmtTime(e.timestamp)}</td>
-                        <td style={{ ...cell, ...joined, fontWeight: 600 }} title={e.host_name}>{e.host_name}</td>
-                        <td style={{ ...cell, ...joined, fontFamily: MONO, fontSize: 12, whiteSpace: expanded ? "normal" : "nowrap" }} title={expanded ? undefined : e.command}>
-                          {expanded ? (
-                            <div data-selectable onClick={(ev) => ev.stopPropagation()} style={{ maxHeight: 240, overflowY: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }}>
-                              {e.command}
-                            </div>
-                          ) : (
-                            e.command
-                          )}
-                        </td>
-                        <td style={{ ...cell, ...joined }}><Decision decision={e.decision} sel={expanded} /></td>
-                        <td style={{ ...cell, ...joined }}><Result e={e} /></td>
+              )}
+              {shown.map((e, i) => {
+                const expanded = open.has(e.id);
+                const day = fmtDay(e.timestamp);
+                const newDay = day !== "" && (i === 0 || day !== fmtDay(shown[i - 1].timestamp));
+                const note = e.detail || (untracked(e) ? UNTRACKED : DECISION_HINT[e.decision]);
+                const joined: CSSProperties | null = expanded ? { borderBottomColor: "transparent" } : null;
+                return (
+                  <Fragment key={e.id}>
+                    {newDay && (
+                      <tr>
+                        <td colSpan={COLS} style={dayCell}>{day}</td>
                       </tr>
-                      {expanded && (
-                        <tr style={{ background: "var(--sel)" }}>
-                          <td style={{ borderBottom: "1px solid var(--line-soft)" }} />
-                          <td colSpan={COLS - 1} style={{ padding: "0 12px 12px", borderBottom: "1px solid var(--line-soft)" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                              <p data-selectable style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: e.detail ? (isRefused(e) || !e.success ? "var(--err)" : "var(--text)") : "var(--text-2)" }}>{note}</p>
-                              <CopyCommand text={e.command} />
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-            {filtered.length > shown.length && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, paddingTop: 14 }}>
-                <span style={{ color: "var(--text-2)" }}>Showing {shown.length} of {filtered.length}</span>
-                <button type="button" onClick={() => setLimit((l) => l + PAGE)} style={secondaryBtn}>Show more</button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+                    )}
+                    <tr
+                      onClick={() => {
+                        if (window.getSelection()?.toString()) return;
+                        toggle(e.id);
+                      }}
+                      style={{ cursor: "pointer", background: expanded ? "var(--sel)" : undefined }}
+                    >
+                      <td style={{ ...cell, ...joined, padding: "9px 0 0 4px" }}>
+                        <button
+                          type="button"
+                          aria-expanded={expanded}
+                          aria-label={expanded ? "Hide details" : "Show details"}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            toggle(e.id);
+                          }}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}
+                        >
+                          <span style={{ display: "flex", transform: expanded ? "none" : "rotate(-90deg)", transition: "transform 120ms ease-out" }}>
+                            <ChevronIcon size={12} />
+                          </span>
+                        </button>
+                      </td>
+                      <td style={{ ...cell, ...joined, color: "var(--text-2)", fontVariantNumeric: "tabular-nums" }} title={fmtFull(e.timestamp)}>{fmtTime(e.timestamp)}</td>
+                      <td style={{ ...cell, ...joined, fontWeight: 600 }} title={e.host_name}>{e.host_name}</td>
+                      <td style={{ ...cell, ...joined, fontFamily: MONO, fontSize: 12, whiteSpace: expanded ? "normal" : "nowrap" }} title={expanded ? undefined : e.command}>
+                        {expanded ? (
+                          <div data-selectable onClick={(ev) => ev.stopPropagation()} style={{ maxHeight: 240, overflowY: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }}>
+                            {e.command}
+                          </div>
+                        ) : (
+                          e.command
+                        )}
+                      </td>
+                      <td style={{ ...cell, ...joined }}><Decision decision={e.decision} sel={expanded} /></td>
+                      <td style={{ ...cell, ...joined }}><Result e={e} /></td>
+                    </tr>
+                    {expanded && (
+                      <tr style={{ background: "var(--sel)" }}>
+                        <td style={{ borderBottom: "1px solid var(--line-soft)" }} />
+                        <td colSpan={COLS - 1} style={{ padding: "0 12px 12px", borderBottom: "1px solid var(--line-soft)" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                            <p data-selectable style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: e.detail ? (isRefused(e) || !e.success ? "var(--err)" : "var(--text)") : "var(--text-2)" }}>{note}</p>
+                            <CopyCommand text={e.command} />
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+          {filtered.length > shown.length && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, paddingTop: 14 }}>
+              <span style={{ color: "var(--text-2)" }}>Showing {shown.length} of {filtered.length}</span>
+              <button type="button" onClick={() => setLimit((l) => l + PAGE)} style={pageBtn}>Show more</button>
+            </div>
+          )}
+        </div>
+      )}
     </main>
   );
 }
