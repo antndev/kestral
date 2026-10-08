@@ -3,6 +3,16 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.2 - 2026-10-08
+
+### Changed
+- Stop really stops a snippet run: running commands end and waiting hosts are skipped. Clear only clears the output of a finished run.
+- Snippets: Duplicate in the more menu, a shorter Paste to terminal button, and no second run button in the list.
+- The new tab palette offers SFTP for every host (Shift+Enter).
+- Everything in the title bar shares one centre line, and the tab close and new tab buttons use the very same cross.
+- Dragging a host onto the tab strip no longer opens a tab; use the palette or Move to new tab instead.
+- Releases build Windows and macOS in parallel with a shared cache.
+
 ## 0.2.1 - 2026-10-08
 
 ### Security
