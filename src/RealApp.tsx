@@ -175,8 +175,8 @@ function Toasts({ items, onDismiss }: { items: Toast[]; onDismiss: (id: number) 
 
 // ------------------------------------------------------------------ workspace
 
-type Session = { tabId: string; kind: "terminal" | "sftp"; host: Host; status: Status; layout?: Layout; focus?: string; zoom?: string | null; broadcast?: boolean };
-type EditorState = { host: Host | null; prefill?: Partial<NewHost>; connectAfterSave?: boolean };
+type Session = { tabId: string; kind: "terminal" | "sftp"; host: Host; status: Status; layout?: Layout; focus?: string; zoom?: string | null; broadcast?: boolean; openSeq?: number };
+type EditorState = { host: Host | null; prefill?: Partial<NewHost>; connectAfterSave?: boolean; seq?: number };
 type Confirm = { title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void | Promise<void> };
 
 const SESSION_TO_STATUS: Record<SessionStatus, Status> = { connecting: "warn", connected: "ok", reconnecting: "warn", error: "err", closed: "idle" };
@@ -212,13 +212,32 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
     setPaletteOpen(true);
   };
   const toastRef = useRef<(kind: "info" | "error" | "ok", text: string) => void>(() => {});
-  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [editor, setEditorState] = useState<EditorState | null>(null);
+  const editorRef = useRef(editor);
+  const editorDirty = useRef(false);
+  const editorSeq = useRef(0);
+  const setEditor = (st: EditorState | null) => {
+    editorDirty.current = false;
+    editorRef.current = st && { ...st, seq: ++editorSeq.current };
+    setEditorState(editorRef.current);
+  };
+  const onEditorDirty = useCallback((d: boolean) => {
+    editorDirty.current = d;
+  }, []);
+  const discardEditorFirst = (then: () => void) => {
+    if (!editorRef.current || !editorDirty.current) return then();
+    const cur = editorRef.current.host;
+    setConfirm({ title: "Discard changes?", message: cur ? `Your changes to ${cur.name} are not saved.` : "This host is not saved yet.", confirmLabel: "Discard", danger: true, onConfirm: then });
+  };
   const editHost = (st: EditorState) => {
-    setEditor(st);
+    const cur = editorRef.current;
+    const same = !!cur && (cur.host || st.host ? cur.host?.id === st.host?.id : !cur.prefill && !st.prefill);
     setSection("hosts");
     setActiveTab("vault");
+    if (same) return;
+    discardEditorFirst(() => setEditor(st));
   };
-  const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [approvals, setApprovals] = useState<(ApprovalRequest & { receivedAt: number; expired?: boolean })[]>([]);
   const [aiStopped, setAiStopped] = useState<{ host_name: string; path: string } | null>(null);
   const [hostKeyReqs, setHostKeyReqs] = useState<(HostKeyRequest & { receivedAt: number; expired?: boolean; replaced?: boolean })[]>([]);
@@ -426,6 +445,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   const openSftp = useCallback((host: Host) => {
     const open = sessionsRef.current.find((s) => s.kind === "sftp" && s.host.id === host.id);
     if (open) {
+      setSessions((ss) => ss.map((s) => (s.tabId === open.tabId ? { ...s, openSeq: (s.openSeq ?? 0) + 1 } : s)));
       setActiveTab(open.tabId);
       return;
     }
@@ -765,8 +785,15 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   }
 
   function goSection(s: SectionId) {
-    setSection(s);
-    setActiveTab("vault");
+    const go = () => {
+      setSection(s);
+      setActiveTab("vault");
+    };
+    if (s === "hosts") return go();
+    discardEditorFirst(() => {
+      if (editorDirty.current) setEditor(null);
+      go();
+    });
   }
 
   function lock() {
@@ -1103,6 +1130,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
           onQuickConnect={quickConnect}
           onDragHost={(e, id, label) => startDrag(e, { kind: "host", hostId: id }, label)}
           editor={editor}
+          onEditorDirty={onEditorDirty}
           onEditorClose={() => setEditor(null)}
           onEditorSaved={(h, connect) => {
             setEditor(null);
@@ -1174,6 +1202,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
                 hosts={hosts}
                 host={s.host}
                 active={activeTab === s.tabId}
+                openRequest={s.openSeq}
                 onStatus={(st) => {
                   const next: Status = st === "connected" ? "ok" : st === "error" ? "err" : st === "closed" ? "idle" : "warn";
                   patchTab(s.tabId, (x) => (x.status === next ? null : { status: next }));

@@ -620,7 +620,7 @@ export function ApprovalDialog({
   const [openedAt] = useState(() => receivedAt ?? Date.now());
   const left = useSecondsLeft(openedAt + PROMPT_TIMEOUT_MS);
   const timedOut = left === 0 || !!expiredByBackend;
-  const isFile = req.command.startsWith("sftp ");
+  const isFile = req.kind === "file";
   const titleId = useId();
   const descId = useId();
 

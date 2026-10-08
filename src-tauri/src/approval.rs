@@ -6,9 +6,17 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalKind {
+    Command,
+    File,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ApprovalRequest {
     pub id: String,
+    pub kind: ApprovalKind,
     pub host_id: String,
     pub host_name: String,
     pub command: String,
@@ -33,13 +41,14 @@ impl ApprovalBroker {
         }
     }
 
-    pub async fn request(&self, host_id: String, host_name: String, command: String) -> bool {
+    pub async fn request(&self, kind: ApprovalKind, host_id: String, host_name: String, command: String) -> bool {
         let id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id.clone(), tx);
 
         let req = ApprovalRequest {
             id: id.clone(),
+            kind,
             host_id,
             host_name,
             command,

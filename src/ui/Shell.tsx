@@ -237,6 +237,7 @@ function TitleBar({
   const stripRef = useRef<HTMLElement | null>(null);
   const [hoverTab, setHoverTab] = useState<string | null>(null);
   const [tabSlide, setTabSlide] = useState<{ id: string; dx: number; from: number; to: number; w: number; settling: boolean; done?: boolean } | null>(null);
+  const slideAbort = useRef<(() => void) | null>(null);
   const startSlide = (e: React.MouseEvent<HTMLElement>, id: string, name: string) => {
     if (e.button !== 0) return;
     const strip = stripRef.current;
@@ -256,9 +257,19 @@ function TitleBar({
       window.removeEventListener("mousemove", move, true);
       window.removeEventListener("mouseup", up, true);
       window.removeEventListener("keydown", key, true);
+      window.removeEventListener("blur", abort);
+      if (slideAbort.current === abort) slideAbort.current = null;
       document.documentElement.style.cursor = "";
     };
+    const abort = () => {
+      cleanup();
+      if (started) setTabSlide(null);
+    };
     const move = (ev: MouseEvent) => {
+      if ((ev.buttons & 1) === 0) {
+        abort();
+        return;
+      }
       const dx = ev.clientX - sx;
       if (!started) {
         if (Math.abs(dx) < 5 && Math.abs(ev.clientY - sy) < 5) return;
@@ -306,7 +317,11 @@ function TitleBar({
     window.addEventListener("mousemove", move, true);
     window.addEventListener("mouseup", up, true);
     window.addEventListener("keydown", key, true);
+    window.addEventListener("blur", abort);
+    slideAbort.current?.();
+    slideAbort.current = abort;
   };
+  useEffect(() => () => slideAbort.current?.(), []);
   useEffect(() => {
     stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${activeTab}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeTab, tabs.length]);
@@ -443,8 +458,8 @@ function TitleBar({
           );
         })}
       </nav>
-      <div style={{ position: "relative", display: "flex", alignItems: "flex-start", alignSelf: tabs.length ? "flex-end" : "center", height: tabs.length ? 32 : 28, flex: "none", paddingTop: tabs.length ? 4 : 0, boxSizing: "border-box", marginLeft: tabs.length ? -7 : 0 }}>
-        {(tabs.length > 0 || !sidebarOpen) && <NewTabButton onClick={onNewTab} tabSized={tabs.length > 0} />}
+      <div style={{ position: "relative", display: "flex", alignItems: "flex-start", alignSelf: tabs.length ? "flex-end" : "center", height: tabs.length ? 32 : 28, flex: "none", paddingTop: tabs.length ? 4 : 0, boxSizing: "border-box", marginLeft: tabs.length ? -7 : 2 }}>
+        <NewTabButton onClick={onNewTab} tabSized={tabs.length > 0} />
         {stripShown && (
           <div aria-hidden="true" style={{ position: "absolute", left: "100%", top: 3, display: "flex", alignItems: "center", gap: 6, height: 26, padding: "0 10px", marginLeft: 4, border: `1px dashed ${stripLit ? "var(--accent)" : "var(--line)"}`, borderRadius: 6, background: stripLit ? "var(--accent-tint)" : "transparent", color: stripLit ? "var(--text)" : "var(--text-2)", fontSize: 12, whiteSpace: "nowrap", transition: "background 120ms, border-color 120ms, color 120ms" }}>
             <PlusIcon size={12} />
@@ -618,11 +633,6 @@ export function Shell({
       <button type="button" aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} title={sidebarOpen ? "Hide sidebar" : "Show sidebar"} onClick={onToggleSidebar} style={{ ...iconBtn(), position: "absolute", top: (STRIP - 28) / 2, left: inset, zIndex: 3, color: "var(--text-2)" }}>
         <SidebarToggleIcon />
       </button>
-      {sidebarOpen && tabs.length === 0 && (
-        <div data-anim="tab" style={{ position: "absolute", top: (STRIP - 28) / 2, left: SIDEBAR_W - 36, zIndex: 3 }}>
-          <NewTabButton onClick={onNewTab} />
-        </div>
-      )}
       <div style={{ display: "flex", height: STRIP, flex: "none" }}>
         <div data-tauri-drag-region style={{ width: sidebarOpen ? SIDEBAR_W : 0, flex: "none", overflow: "hidden", transition: slide("width") }}>
           <div data-tauri-drag-region style={{ width: SIDEBAR_W, height: "100%", background: "var(--bg-side)", borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)", boxSizing: "border-box" }} />

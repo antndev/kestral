@@ -312,9 +312,10 @@ export function HostsScreen(p: {
   onDelete(h: Host): void;
   onQuickConnect(q: QuickConnect): void;
   onDragHost?: DragHost;
-  editor?: { host: Host | null; prefill?: Partial<NewHost>; connectAfterSave?: boolean } | null;
+  editor?: { host: Host | null; prefill?: Partial<NewHost>; connectAfterSave?: boolean; seq?: number } | null;
   onEditorClose?(): void;
   onEditorSaved?(h: Host, connect: boolean): void;
+  onEditorDirty?(dirty: boolean): void;
 }) {
   const { hosts, statuses } = p;
   const [query, setQuery] = useState("");
@@ -529,13 +530,14 @@ export function HostsScreen(p: {
         >
           {p.editor ? (
             <HostEditor
-              key={p.editor.host?.id ?? "new"}
+              key={p.editor.seq ?? p.editor.host?.id ?? "new"}
               inline
               host={p.editor.host}
               prefill={p.editor.prefill}
               hosts={hosts}
               connectAfterSave={p.editor.connectAfterSave}
               onClose={() => p.onEditorClose?.()}
+              onDirtyChange={p.onEditorDirty}
               onSaved={(h, connect) => {
                 setSel(h.id);
                 p.onEditorSaved?.(h, connect);

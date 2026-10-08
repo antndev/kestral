@@ -84,7 +84,13 @@ pub async fn vault_unlock(state: State<'_, AppState>, master: String) -> Result<
 }
 
 #[tauri::command]
-pub async fn vault_lock(state: State<'_, AppState>) -> Result<()> {
+pub async fn vault_lock(
+    state: State<'_, AppState>,
+    sessions: State<'_, SftpSessions>,
+    transfers: State<'_, crate::sftp::Transfers>,
+) -> Result<()> {
+    transfers.cancel_all();
+    sessions.clear();
     state.services.ai_pool.clear();
     state.services.vault.lock();
     state.services.hosts.clear();
@@ -426,7 +432,19 @@ pub async fn host_add(state: State<'_, AppState>, host: NewHost) -> Result<Host>
 
 #[tauri::command]
 pub async fn host_update(state: State<'_, AppState>, host: Host) -> Result<()> {
-    state.services.hosts.update(host)
+    let id = host.id;
+    let agent = (host.forward_agent, host.agent_keys.clone());
+    let before = state.services.hosts.get(id).ok();
+    state.services.hosts.update(host)?;
+    if before.is_some_and(|b| (b.forward_agent, b.agent_keys) != agent) {
+        let ssh = &state.services.ssh;
+        for h in state.services.hosts.list() {
+            if h.id == id || ssh.jump_chain(&h).is_ok_and(|chain| chain.iter().any(|j| j.id == id)) {
+                state.services.ai_pool.forget(h.id).await;
+            }
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1107,6 +1125,7 @@ pub struct TransferProgress {
 async fn run_transfer<F>(
     transfers: &crate::sftp::Transfers,
     transfer_id: &str,
+    cancel: tokio_util::sync::CancellationToken,
     total: Option<u64>,
     on_progress: tauri::ipc::Channel<TransferProgress>,
     work: impl FnOnce(crate::sftp::Xfer) -> F,
@@ -1114,7 +1133,11 @@ async fn run_transfer<F>(
 where
     F: std::future::Future<Output = Result<u64>>,
 {
-    let x = crate::sftp::Xfer { cancel: transfers.register(transfer_id), ..Default::default() };
+    if cancel.is_cancelled() {
+        transfers.finish(transfer_id);
+        return Err(AppError::Other("Cancelled".into()));
+    }
+    let x = crate::sftp::Xfer { cancel, ..Default::default() };
     let done = x.done.clone();
     let stop = tokio_util::sync::CancellationToken::new();
     let ticker = {
@@ -1155,6 +1178,7 @@ pub async fn sftp_transfer(
     on_progress: tauri::ipc::Channel<TransferProgress>,
 ) -> Result<u64> {
     let h = sftp_handle(&sessions, &id)?;
+    let cancel = transfers.register(&transfer_id);
     let local_path = std::path::PathBuf::from(&local);
     let total = if upload {
         let p = local_path.clone();
@@ -1162,7 +1186,7 @@ pub async fn sftp_transfer(
     } else {
         Some(h.size(&remote, is_dir).await)
     };
-    run_transfer(&transfers, &transfer_id, total, on_progress, |x| async move {
+    run_transfer(&transfers, &transfer_id, cancel, total, on_progress, |x| async move {
         match (upload, is_dir) {
             (true, true) => h.upload_dir(&local_path, &remote, &x).await,
             (true, false) => h.upload(&local_path, &remote, &x).await,
@@ -1188,8 +1212,9 @@ pub async fn sftp_copy_remote(
 ) -> Result<u64> {
     let src = sftp_handle(&sessions, &src_id)?;
     let dst = sftp_handle(&sessions, &dst_id)?;
+    let cancel = transfers.register(&transfer_id);
     let total = Some(src.size(&src_path, is_dir).await);
-    run_transfer(&transfers, &transfer_id, total, on_progress, |x| async move {
+    run_transfer(&transfers, &transfer_id, cancel, total, on_progress, |x| async move {
         src.copy_to(&src_path, &dst, &dst_path, is_dir, &x).await
     })
     .await

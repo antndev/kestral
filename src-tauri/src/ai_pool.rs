@@ -21,19 +21,27 @@ struct Live {
     last_used: Instant,
 }
 
+impl Live {
+    fn idle(&self) -> bool {
+        self.last_used.elapsed() >= IDLE && Arc::strong_count(&self.session) == 1
+    }
+}
+
 #[derive(Default)]
 pub struct AiPool {
     slots: Mutex<HashMap<Uuid, Arc<AsyncMutex<Option<Live>>>>>,
-}
-
-fn target_of(host: &Host) -> String {
-    serde_json::to_string(host).unwrap_or_default()
 }
 
 fn close(session: Session) {
     tokio::spawn(async move {
         let _ = session.disconnect(russh::Disconnect::ByApplication, "", "en").await;
     });
+}
+
+fn retire(session: Session) {
+    if Arc::strong_count(&session) == 1 {
+        close(session);
+    }
 }
 
 impl AiPool {
@@ -44,19 +52,30 @@ impl AiPool {
     pub async fn session(&self, ssh: &SshManager, vault: &Arc<Vault>, host: &Host) -> Result<Session> {
         let slot = self.slot(host.id);
         let mut live = slot.lock().await;
-        let target = target_of(host);
+        let target = ssh.route_key(host);
         if let Some(l) = live.as_mut() {
-            if l.target == target && !l.session.is_closed() && l.last_used.elapsed() < IDLE {
+            if l.target == target && !l.session.is_closed() && !l.idle() {
                 l.last_used = Instant::now();
                 return Ok(l.session.clone());
             }
         }
         if let Some(old) = live.take() {
-            close(old.session);
+            retire(old.session);
         }
         let session = Arc::new(ssh.connect(host, vault).await?);
         *live = Some(Live { session: session.clone(), target, last_used: Instant::now() });
         Ok(session)
+    }
+
+    pub async fn discard(&self, id: Uuid, session: Session) {
+        let slot = self.slots.lock().unwrap().get(&id).cloned();
+        if let Some(slot) = slot {
+            let mut live = slot.lock().await;
+            if live.as_ref().is_some_and(|l| Arc::ptr_eq(&l.session, &session)) {
+                *live = None;
+            }
+        }
+        retire(session);
     }
 
     pub async fn forget(&self, id: Uuid) {
@@ -96,7 +115,7 @@ impl AiPool {
             let Ok(mut live) = slot.try_lock() else {
                 return true;
             };
-            let stale = live.as_ref().is_none_or(|l| l.session.is_closed() || l.last_used.elapsed() >= IDLE);
+            let stale = live.as_ref().is_none_or(|l| l.session.is_closed() || l.idle());
             if stale {
                 if let Some(l) = live.take() {
                     close(l.session);

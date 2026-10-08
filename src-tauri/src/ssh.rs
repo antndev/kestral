@@ -354,6 +354,13 @@ impl SshManager {
         Ok(chain)
     }
 
+    pub fn route_key(&self, host: &Host) -> String {
+        let mut hops = self.jump_chain(host).unwrap_or_default();
+        hops.push(host.clone());
+        let route: Vec<_> = hops.iter().map(|h| (h, self.identities.resolve(h).ok())).collect();
+        serde_json::to_string(&route).unwrap_or_default()
+    }
+
     async fn preferred_for(&self, host: &Host) -> russh::Preferred {
         let mut preferred = russh::Preferred::default();
         let (h, port) = (host.hostname.clone(), host.port);
@@ -639,6 +646,8 @@ impl SshManager {
             .is_err()
         {
             exit_signal.get_or_insert_with(|| "timed out after 300s".to_string());
+            let _ = channel.signal(russh::Sig::KILL).await;
+            let _ = channel.close().await;
         }
 
         let mut stdout = String::from_utf8_lossy(&stdout).into_owned();

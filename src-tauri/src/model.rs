@@ -10,7 +10,7 @@ pub enum AiPolicy {
     Free,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum AuthMethod {
     Password { secret_id: String },

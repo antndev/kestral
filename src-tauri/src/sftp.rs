@@ -66,7 +66,7 @@ async fn list(sftp: &SftpSession, path: &str) -> Result<Vec<FileEntry>> {
     let mut out = Vec::new();
     for entry in dir {
         let name = entry.file_name();
-        if name == "." || name == ".." {
+        if name.is_empty() || name == "." || name == ".." || name.contains('/') {
             continue;
         }
         let meta = entry.metadata();
@@ -429,6 +429,10 @@ impl SftpSessions {
     pub fn remove(&self, id: &str) -> Option<Arc<SftpHandle>> {
         self.0.lock().unwrap().remove(id)
     }
+    pub fn clear(&self) {
+        let all: Vec<_> = self.0.lock().unwrap().drain().collect();
+        drop(all);
+    }
 }
 
 #[derive(Default)]
@@ -445,6 +449,12 @@ impl Transfers {
     }
     pub fn cancel(&self, id: &str) {
         if let Some(t) = self.0.lock().unwrap().remove(id) {
+            t.cancel();
+        }
+    }
+    pub fn cancel_all(&self) {
+        let all: Vec<_> = self.0.lock().unwrap().drain().collect();
+        for (_, t) in all {
             t.cancel();
         }
     }

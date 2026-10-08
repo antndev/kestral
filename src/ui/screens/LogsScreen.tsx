@@ -239,20 +239,22 @@ export function LogsScreen() {
       if (!alive.current || seq !== reqSeq.current) return;
       const fresh = delta.entries.slice().reverse();
       if (fresh.length) lastId.current = fresh[0].id;
-      if (delta.full) setEntries(fresh);
-      if (first && delta.full) {
-        loadedAll.current = true;
-        window.setTimeout(() => {
-          api
-            .auditList()
-            .then((all) => {
-              if (!alive.current) return;
-              const list = all.slice().reverse();
-              if (list.length) lastId.current = list[0].id;
-              setEntries(list);
-            })
-            .catch(() => {});
-        }, 0);
+      if (delta.full) {
+        setEntries(fresh);
+        if (first) {
+          loadedAll.current = true;
+          window.setTimeout(() => {
+            api
+              .auditList()
+              .then((all) => {
+                if (!alive.current) return;
+                const list = all.slice().reverse();
+                if (list.length) lastId.current = list[0].id;
+                setEntries(list);
+              })
+              .catch(() => {});
+          }, 0);
+        }
       }
       else if (fresh.length) setEntries((cur) => [...fresh, ...(cur ?? [])].slice(0, MAX_KEEP));
       else setEntries((cur) => cur ?? []);

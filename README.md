@@ -80,9 +80,8 @@ npm run build
   `~/`-relative); a protected path on either the local or remote side is refused and
   trips the kill switch.
 - **Host keys.** Trust-on-first-use with the SHA256 fingerprint logged; a changed key
-  is refused with a distinct error. Note: entries currently live in the OpenSSH
-  `~/.ssh/known_hosts`, not yet in the app's own encrypted store (`KESTRAL_DATA_DIR`
-  does not relocate it). This is an open item.
+  is refused with a distinct error. Entries live in the app's own store, encrypted in
+  the vault; an unreadable store blocks every connection.
 
 See [SECURITY.md](SECURITY.md) for the threat model and how to report issues.
 

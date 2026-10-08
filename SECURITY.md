@@ -27,12 +27,21 @@ you set. What it defends against, and what it does not:
   Origin. It is not exposed to the network or to browsers.
 - **AI is gated.** AI access is off by default and every host has a policy:
   `locked`, `confirm` (per-command approval) or `free`. Commands and file transfer
-  have separate policies. If the AI repoints a host to a new address, its policy is
-  reset to `locked`. AI file transfer is confined to `~/.kestral/ai-transfers`.
-- **Host keys.** First contact is trust-on-first-use: the key is recorded and the
-  SHA256 fingerprint is logged. A **changed** host key is refused with a distinct
-  error, never silently accepted.
+  have separate policies. If the AI repoints a host to a new address, port or user,
+  its policies are reset to `locked`.
+- **AI file transfer is not confined to a folder.** On a host whose file policy
+  allows it, an AI upload can read and an AI download can write any local path your
+  OS account can reach, for example `~/.aws/credentials` or a shell profile. The
+  safety net is the protected path list (by default `.ssh/authorized_keys` and
+  `.ssh/config`): any AI command or file transfer that touches a protected path, on
+  the local or the remote side, is refused and turns AI access off completely until
+  you turn it back on by hand. Keep the file policy at `locked` or `confirm` for
+  hosts where that is too much.
+- **Host keys.** Trusted host keys are kept encrypted in the vault; on first use the
+  entries of `~/.ssh/known_hosts` are copied in. A new host is trusted only after
+  you accept its SHA256 fingerprint. A **changed** host key is refused with a
+  distinct error, never silently accepted, and a host key store that cannot be read
+  refuses every connection.
 - **Not defended:** an attacker who already has your unlocked machine or your OS
   account. Secret wiping in memory is best effort and does not defend against swap,
-  hibernation or a core dump. `known_hosts` is currently the OpenSSH file in
-  `~/.ssh`, not yet app-owned and encrypted (tracked as an open item).
+  hibernation or a core dump.

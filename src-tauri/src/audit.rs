@@ -27,6 +27,7 @@ const MAX_LINES: usize = 20_000;
 
 pub struct AuditLog {
     entries: Mutex<Vec<AuditEntry>>,
+    pending: Mutex<Vec<AuditEntry>>,
     path: PathBuf,
     vault: Arc<Vault>,
     // Approximate on-disk line count, so we can compact a long-running session
@@ -41,6 +42,7 @@ impl AuditLog {
     pub fn new(path: PathBuf, vault: Arc<Vault>) -> Self {
         Self {
             entries: Mutex::new(Vec::new()),
+            pending: Mutex::new(Vec::new()),
             path,
             vault,
             line_count: AtomicUsize::new(0),
@@ -49,9 +51,10 @@ impl AuditLog {
     }
 
     pub fn load(&self) {
+        let _disk = self.disk_lock.lock().unwrap();
         let raw = match std::fs::read_to_string(&self.path) {
             Ok(r) => r,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => {
                 tracing::error!("Audit log not readable: {e}");
                 return;
@@ -76,11 +79,26 @@ impl AuditLog {
         }
 
         tracing::info!("{} audit entries loaded", out.len());
+
+        let pending = std::mem::take(&mut *self.pending.lock().unwrap());
+        let mut total = total;
+        for entry in pending {
+            if self.append(&entry) {
+                total += 1;
+            } else {
+                self.defer(entry.clone());
+            }
+            out.push(entry);
+        }
+        let len = out.len();
+        if len > MAX_ENTRIES {
+            out.drain(0..len - MAX_ENTRIES);
+        }
         *self.entries.lock().unwrap() = out;
 
         self.line_count.store(total, Ordering::SeqCst);
         if total > MAX_LINES {
-            self.compact();
+            self.compact_locked();
         }
     }
 
@@ -122,7 +140,10 @@ impl AuditLog {
         // Hold the disk lock across the append and any compaction, so no other
         // thread's append lands between a compaction's snapshot and its rename.
         let _disk = self.disk_lock.lock().unwrap();
-        self.append(&entry);
+        let written = self.append(&entry);
+        if !written {
+            self.defer(entry.clone());
+        }
 
         {
             let mut entries = self.entries.lock().unwrap();
@@ -135,16 +156,25 @@ impl AuditLog {
 
         // Keep the on-disk file bounded during a long-running session, not only
         // at the next startup.
-        if self.line_count.fetch_add(1, Ordering::SeqCst) + 1 > MAX_LINES {
+        if written && self.line_count.fetch_add(1, Ordering::SeqCst) + 1 > MAX_LINES {
             self.compact_locked();
         }
     }
 
-    fn append(&self, entry: &AuditEntry) {
+    fn defer(&self, entry: AuditEntry) {
+        let mut pending = self.pending.lock().unwrap();
+        pending.push(entry);
+        let len = pending.len();
+        if len > MAX_ENTRIES {
+            pending.drain(0..len - MAX_ENTRIES);
+        }
+    }
+
+    fn append(&self, entry: &AuditEntry) -> bool {
         use std::io::Write;
         let line = match self.seal_line(entry) {
             Some(l) => l,
-            None => return,
+            None => return false,
         };
         let mut opts = std::fs::OpenOptions::new();
         opts.create(true).append(true);
@@ -159,9 +189,14 @@ impl AuditLog {
                 let _ = crate::util::restrict(&f);
                 if let Err(e) = f.write_all(line.as_bytes()) {
                     tracing::error!("Audit entry not written: {e}");
+                    return false;
                 }
+                true
             }
-            Err(e) => tracing::error!("Audit log could not be opened: {e}"),
+            Err(e) => {
+                tracing::error!("Audit log could not be opened: {e}");
+                false
+            }
         }
     }
 
@@ -175,31 +210,33 @@ impl AuditLog {
                 Some(format!("{compact}\n"))
             }
             Err(e) => {
-                tracing::warn!("Audit entry could not be encrypted ({e}), kept in memory only");
+                tracing::warn!("Audit entry could not be encrypted ({e}), written after the next unlock");
                 None
             }
         }
     }
 
-    fn compact(&self) {
-        let _disk = self.disk_lock.lock().unwrap();
-        self.compact_locked();
-    }
-
     // Caller must hold disk_lock.
     fn compact_locked(&self) {
-        let entries = self.entries.lock().unwrap().clone();
-        let mut buf = String::new();
-        for e in &entries {
-            if let Some(line) = self.seal_line(e) {
-                buf.push_str(&line);
+        let raw = match std::fs::read_to_string(&self.path) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Compacting the audit log failed: {e}");
+                return;
             }
+        };
+        let lines: Vec<&str> = raw.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        let keep = &lines[lines.len().saturating_sub(MAX_ENTRIES)..];
+        let mut buf = String::with_capacity(raw.len());
+        for line in keep {
+            buf.push_str(line);
+            buf.push('\n');
         }
         if let Err(e) = crate::util::atomic_write(&self.path, buf.as_bytes()) {
             tracing::error!("Compacting the audit log failed: {e}");
         } else {
-            self.line_count.store(entries.len(), Ordering::SeqCst);
-            tracing::info!("audit log compacted to {} entries", entries.len());
+            self.line_count.store(keep.len(), Ordering::SeqCst);
+            tracing::info!("audit log compacted to {} entries", keep.len());
         }
     }
 
@@ -260,6 +297,45 @@ mod tests {
 
         third.clear();
         assert!(third.list().is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn locked_vault_never_loses_or_truncates_entries() {
+        let dir = std::env::temp_dir().join(format!("kestral_audit_{}", random_token()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log_path = dir.join("audit.log");
+        let vault = Arc::new(crate::vault::Vault::new(dir.join("vault.json")));
+        vault.create("pw").unwrap();
+        let lines = || std::fs::read_to_string(&log_path).unwrap().lines().count();
+
+        let log = AuditLog::new(log_path.clone(), vault.clone());
+        log.record("h1".into(), "homelab".into(), "uptime".into(), "allowed", Some(0), true, None);
+        log.record("h1".into(), "homelab".into(), "df -h".into(), "allowed", Some(0), true, None);
+        assert_eq!(lines(), 2);
+
+        vault.lock();
+        log.clear();
+        log.compact_locked();
+        assert_eq!(lines(), 2, "compaction while locked keeps the file");
+
+        log.line_count.store(MAX_LINES, Ordering::SeqCst);
+        log.record("h1".into(), "homelab".into(), "reboot".into(), "agent", None, true, None);
+        assert_eq!(lines(), 2, "nothing written while locked");
+        assert_eq!(log.line_count.load(Ordering::SeqCst), MAX_LINES, "no count for an unwritten line");
+
+        vault.unlock("pw").unwrap();
+        log.load();
+        assert_eq!(lines(), 3, "written after the unlock");
+        assert_eq!(log.list().len(), 3);
+        assert_eq!(log.list()[2].command, "reboot");
+        assert!(log.pending.lock().unwrap().is_empty());
+
+        let again = AuditLog::new(log_path.clone(), vault.clone());
+        again.load();
+        assert_eq!(again.list().len(), 3);
+        assert_eq!(again.list()[2].command, "reboot");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -231,11 +231,28 @@ async fn bind_local(fwd: &PortForward) -> Result<TcpListener> {
 fn watch_closed(session: &Session, active: &ActiveMap, key: (Uuid, Uuid)) -> bool {
     if session.is_closed() {
         tracing::info!("forward SSH session closed; freeing the forward");
-        active.lock().unwrap().remove(&key);
+        release(session, active, key);
         true
     } else {
         false
     }
+}
+
+fn release(session: &Session, active: &ActiveMap, key: (Uuid, Uuid)) {
+    let mut map = active.lock().unwrap();
+    if matches!(map.get(&key), Some(Some(a)) if Arc::ptr_eq(&a.session, session)) {
+        map.remove(&key);
+    }
+}
+
+async fn accept_failed(e: std::io::Error) {
+    tracing::warn!("accepting a forwarded connection failed: {e}");
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+}
+
+fn watch_interval() -> tokio::time::Interval {
+    let every = std::time::Duration::from_secs(15);
+    tokio::time::interval_at(tokio::time::Instant::now() + every, every)
 }
 
 fn spawn_local(
@@ -248,10 +265,17 @@ fn spawn_local(
     key: (Uuid, Uuid),
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let mut watch = watch_interval();
         loop {
             tokio::select! {
                 accepted = listener.accept() => {
-                    let Ok((mut socket, peer)) = accepted else { break };
+                    let (mut socket, peer) = match accepted {
+                        Ok(a) => a,
+                        Err(e) => {
+                            accept_failed(e).await;
+                            continue;
+                        }
+                    };
                     let session = session.clone();
                     let rhost = remote_host.clone();
                     let guard = ConnGuard::new(&conns);
@@ -271,7 +295,7 @@ fn spawn_local(
                         let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
                     });
                 }
-                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                _ = watch.tick() => {
                     if watch_closed(&session, &active, key) {
                         break;
                     }
@@ -350,10 +374,17 @@ fn spawn_dynamic(
     key: (Uuid, Uuid),
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let mut watch = watch_interval();
         loop {
             tokio::select! {
                 accepted = listener.accept() => {
-                    let Ok((mut socket, peer)) = accepted else { break };
+                    let (mut socket, peer) = match accepted {
+                        Ok(a) => a,
+                        Err(e) => {
+                            accept_failed(e).await;
+                            continue;
+                        }
+                    };
                     let session = session.clone();
                     let guard = ConnGuard::new(&conns);
                     tokio::spawn(async move {
@@ -382,7 +413,7 @@ fn spawn_dynamic(
                         let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
                     });
                 }
-                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                _ = watch.tick() => {
                     if watch_closed(&session, &active, key) {
                         break;
                     }
@@ -402,10 +433,15 @@ fn spawn_remote(
     key: (Uuid, Uuid),
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        let mut watch = watch_interval();
         loop {
             tokio::select! {
                 incoming = rx.recv() => {
-                    let Some(fc) = incoming else { break };
+                    let Some(fc) = incoming else {
+                        tracing::info!("forward SSH session ended; freeing the forward");
+                        release(&session, &active, key);
+                        break;
+                    };
                     let host = target_host.clone();
                     let guard = ConnGuard::new(&conns);
                     tokio::spawn(async move {
@@ -422,7 +458,7 @@ fn spawn_remote(
                         let _ = tokio::io::copy_bidirectional(&mut local, &mut stream).await;
                     });
                 }
-                _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {
+                _ = watch.tick() => {
                     if watch_closed(&session, &active, key) {
                         break;
                     }

@@ -313,6 +313,7 @@ function usePane(side: Side, initial: Loc, opts: { active: boolean; autoRefresh:
   // `epoch` changes with every location switch so late results from the old location are dropped.
   const epoch = useRef(0);
   const reqRef = useRef(0);
+  const openSid = useRef<string | null>(null);
   const resumeRef = useRef("");
   const busyRef = useRef(false);
   const countState = useRef({ seen: new Set<string>(), queue: [] as { key: string; path: string }[], inFlight: 0 });
@@ -432,6 +433,7 @@ function usePane(side: Side, initial: Loc, opts: { active: boolean; autoRefresh:
           void api.sftpClose(id).catch(() => {});
           return;
         }
+        openSid.current = id;
         const start = h || "/";
         setHome(start);
         const [path, list] = await firstList((p) => api.sftpList(id, p), start);
@@ -444,7 +446,10 @@ function usePane(side: Side, initial: Loc, opts: { active: boolean; autoRefresh:
       .catch(fail);
     return () => {
       alive = false;
-      if (opened) void api.sftpClose(id).catch(() => {});
+      if (opened) {
+        void api.sftpClose(openSid.current ?? id).catch(() => {});
+        openSid.current = null;
+      }
     };
   }, [loc, gen, side]);
 
@@ -778,7 +783,7 @@ function usePane(side: Side, initial: Loc, opts: { active: boolean; autoRefresh:
   }
   async function reopenAndSave() {
     if (loc.kind !== "remote" || !editing || editing.saving) return;
-    const old = sid;
+    const ep = epoch.current;
     const id = `sftp-${side}-${crypto.randomUUID()}`;
     setEditing((s) => (s ? { ...s, saving: true, error: "" } : s));
     try {
@@ -787,10 +792,12 @@ function usePane(side: Side, initial: Loc, opts: { active: boolean; autoRefresh:
       if (mounted.current) setEditing((s) => (s ? { ...s, saving: false, error: errText(e) } : s));
       return;
     }
-    if (!mounted.current) {
+    if (!mounted.current || ep !== epoch.current) {
       void api.sftpClose(id).catch(() => {});
       return;
     }
+    const old = openSid.current;
+    openSid.current = id;
     if (old) void api.sftpClose(old).catch(() => {});
     setSid(id);
     const { path, content, eol } = editing;
@@ -2097,6 +2104,13 @@ export function SftpScreen({
   // ---- transfer queue, run one at a time
 
   const runningRef = useRef(false);
+  const runningId = useRef<string | null>(null);
+  useEffect(
+    () => () => {
+      if (runningId.current) void api.sftpCancel(runningId.current).catch(() => {});
+    },
+    [],
+  );
   const enqueue = useCallback((jobs: Transfer[]) => {
     if (jobs.length === 0) return;
     setTransfers((ts) => [...ts, ...jobs]);
@@ -2124,6 +2138,7 @@ export function SftpScreen({
     if (!next) return;
     const settle = (patch: Partial<Transfer>) => {
       runningRef.current = false;
+      runningId.current = null;
       if (!mounted.current) return;
       setTransfers((ts) => ts.map((t) => (t.id === next.id ? { ...t, ...patch } : t)));
       // Also after a failure: a folder transfer may have copied part of its contents.
@@ -2145,6 +2160,7 @@ export function SftpScreen({
       return;
     }
     canceledIds.current.delete(next.id);
+    runningId.current = next.id;
     setTransfers((ts) => ts.map((t) => (t.id === next.id ? { ...t, state: "running", done: 0, total: null, speed: 0 } : t)));
     const channel = new Channel<api.TransferProgress>();
     let last = { at: performance.now(), done: 0 };
@@ -2330,7 +2346,16 @@ export function SftpScreen({
     const srcHostId = src.loc.hostId;
     const dstHostId = dst.loc.hostId;
     if (srcHostId === dstHostId && dir === src.cwd) return src.setError("Source and target are the same folder.");
-    const jobs = items.map((e) => mkJob("copy", dstHostId, { name: e.name, local: e.path, remote: joinPath(dir, e.name, true), isDir: e.is_dir }, dir, srcHostId));
+    const skipped: string[] = [];
+    const jobs: Transfer[] = [];
+    for (const e of items) {
+      if (!e.name || invalidName(e.name, true)) {
+        skipped.push(e.name);
+        continue;
+      }
+      jobs.push(mkJob("copy", dstHostId, { name: e.name, local: e.path, remote: joinPath(dir, e.name, true), isDir: e.is_dir }, dir, srcHostId));
+    }
+    if (skipped.length) src.setError(`Skipped unsafe names: ${skipped.join(", ")}`);
     const existing = dir === dst.cwd ? dst.entries : await api.sftpList(dst.sid, dir).catch(() => [] as FileEntry[]);
     queueChecked(jobs, existing, dir, true);
   };

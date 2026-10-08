@@ -306,7 +306,7 @@ impl KestralMcp {
     }
 
     #[tool(
-        description = "Update an existing host's connection fields. If the hostname, port or username changes, the per-host AI policies are reset to locked so the user has to re-grant access to the new destination. The AI can never widen a policy."
+        description = "Update an existing host's connection fields. If the hostname, port, username or sign-in (auth_kind, secret_id, identity) changes, the per-host AI policies are reset to locked so the user has to re-grant access. The AI can never widen a policy."
     )]
     async fn update_host(
         &self,
@@ -337,7 +337,8 @@ impl KestralMcp {
         };
         let target_changed = a.hostname != existing.hostname
             || a.port != existing.port
-            || a.username != existing.username;
+            || a.username != existing.username
+            || auth != existing.auth;
         let updated = Host {
             id,
             name: a.name,
@@ -383,7 +384,7 @@ impl KestralMcp {
             Ok(()) => {
                 crate::events::data_changed("hosts");
                 let note = if target_changed {
-                    " Connection target changed, so AI access was reset to locked; the user must re-enable it."
+                    " Connection target or sign-in changed, so AI access was reset to locked; the user must re-enable it."
                 } else {
                     ""
                 };

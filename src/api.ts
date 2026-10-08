@@ -154,6 +154,7 @@ export interface CommandOutput {
 
 export interface ApprovalRequest {
   id: string;
+  kind: "command" | "file";
   host_id: string;
   host_name: string;
   command: string;

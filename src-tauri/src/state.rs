@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::approval::ApprovalBroker;
+use crate::approval::{ApprovalBroker, ApprovalKind};
 use crate::audit::AuditLog;
 use crate::error::{AppError, Result};
 use crate::hosts::HostStore;
@@ -56,7 +56,7 @@ fn resolve_local(path: &str) -> PathBuf {
 }
 
 fn effective_local(path: &std::path::Path) -> PathBuf {
-    let mut base = path.to_path_buf();
+    let mut base = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
     if cfg!(windows) {
         if let Some(name) = base.file_name().map(|n| n.to_string_lossy().into_owned()) {
             let clean = name
@@ -70,21 +70,35 @@ fn effective_local(path: &std::path::Path) -> PathBuf {
             }
         }
     }
-    let mut tail = Vec::new();
-    while std::fs::symlink_metadata(&base).is_err() {
-        match (base.parent().map(|p| p.to_path_buf()), base.file_name().map(|n| n.to_os_string())) {
-            (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
-                tail.push(name);
-                base = parent;
+    loop {
+        let mut tail = Vec::new();
+        while std::fs::symlink_metadata(&base).is_err() {
+            match (
+                base.parent().map(|p| p.to_path_buf()),
+                base.components().next_back().map(|c| c.as_os_str().to_os_string()),
+            ) {
+                (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+                    tail.push(name);
+                    base = parent;
+                }
+                _ => break,
             }
-            _ => break,
         }
+        let mut out = std::fs::canonicalize(&base).unwrap_or(base);
+        let mut lexical = false;
+        for name in tail.into_iter().rev() {
+            if name == ".." {
+                out.pop();
+                lexical = true;
+            } else {
+                out.push(name);
+            }
+        }
+        if !lexical {
+            return out;
+        }
+        base = out;
     }
-    let mut out = std::fs::canonicalize(&base).unwrap_or(base);
-    for name in tail.into_iter().rev() {
-        out.push(name);
-    }
-    out
 }
 
 impl Services {
@@ -111,7 +125,7 @@ impl Services {
             Gate::NeedsApproval => {
                 let approved = self
                     .approval
-                    .request(host_id_s.clone(), host.name.clone(), command.to_string())
+                    .request(ApprovalKind::Command, host_id_s.clone(), host.name.clone(), command.to_string())
                     .await;
                 if !approved {
                     self.audit.record(
@@ -230,7 +244,7 @@ impl Services {
         }
         let approved = self
             .approval
-            .request(hid.clone(), host.name.clone(), action.to_string())
+            .request(ApprovalKind::File, hid.clone(), host.name.clone(), action.to_string())
             .await;
         if !approved {
             self.audit.record(
@@ -280,11 +294,16 @@ impl Services {
     async fn pooled_exec(&self, host: &Host, command: &str) -> Result<CommandOutput> {
         let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
         let result = self.ssh.exec_on(&session, host, command, false).await;
-        if result.is_err() && session.is_closed() {
-            let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
-            return self.ssh.exec_on(&session, host, command, false).await;
+        let Err(e) = &result else {
+            return result;
+        };
+        let never_started = matches!(e, AppError::Ssh(m) if m.starts_with("Channel:"));
+        self.ai_pool.discard(host.id, session).await;
+        if !never_started {
+            return result;
         }
-        result
+        let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
+        self.ssh.exec_on(&session, host, command, false).await
     }
 
     async fn pooled_sftp(&self, host: &Host) -> Result<sftp::SftpHandle> {
@@ -428,5 +447,17 @@ mod tests {
         // Anything without a leading ~ is taken verbatim, absolute or relative.
         assert_eq!(resolve_local("/etc/hosts"), PathBuf::from("/etc/hosts"));
         assert_eq!(resolve_local("relative/x"), PathBuf::from("relative/x"));
+    }
+
+    #[test]
+    fn effective_local_resolves_parent_dirs_after_missing_dirs() {
+        let base = std::env::temp_dir().join(format!("kestral_effective_{}", Uuid::new_v4()));
+        std::fs::create_dir_all(base.join("data")).unwrap();
+        let real = std::fs::canonicalize(&base).unwrap();
+        let sneaky = base.join("missing").join("..").join("data").join("x.json");
+        assert_eq!(effective_local(&sneaky), real.join("data").join("x.json"));
+        let deeper = base.join("a").join("b").join("..").join("..").join("data");
+        assert_eq!(effective_local(&deeper), real.join("data"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

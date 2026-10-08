@@ -70,8 +70,52 @@ pub struct PolicyEngine {
 fn default_protected() -> Vec<String> {
     vec![
         ".ssh/authorized_keys".to_string(),
+        ".ssh/authorized_keys2".to_string(),
+        "administrators_authorized_keys".to_string(),
         ".ssh/config".to_string(),
     ]
+}
+
+const PROTECTED_VERSION: u32 = 2;
+const ADDED_IN_V2: [&str; 2] = [".ssh/authorized_keys2", "administrators_authorized_keys"];
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum StoredProtected {
+    Versioned { version: u32, paths: Vec<String> },
+    Legacy(Vec<String>),
+}
+
+#[derive(Serialize)]
+struct SavedProtected<'a> {
+    version: u32,
+    paths: &'a [String],
+}
+
+fn load_protected(path: &std::path::Path) -> Vec<String> {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return default_protected();
+    };
+    let (version, mut paths) = match serde_json::from_str::<StoredProtected>(&raw) {
+        Ok(StoredProtected::Versioned { version, paths }) => (version, paths),
+        Ok(StoredProtected::Legacy(paths)) => (1, paths),
+        Err(_) => return default_protected(),
+    };
+    if version < PROTECTED_VERSION {
+        for added in ADDED_IN_V2 {
+            if !paths.iter().any(|p| p.trim().eq_ignore_ascii_case(added)) {
+                paths.push(added.to_string());
+            }
+        }
+        save_protected(path, &paths);
+    }
+    paths
+}
+
+fn save_protected(path: &std::path::Path, paths: &[String]) {
+    if let Ok(json) = serde_json::to_string_pretty(&SavedProtected { version: PROTECTED_VERSION, paths }) {
+        let _ = std::fs::write(path, json);
+    }
 }
 
 /// Canonicalize a path the way the SFTP/OpenSSH server would before it opens the
@@ -160,10 +204,7 @@ impl PolicyEngine {
         } else {
             (false, None)
         };
-        let protected = match std::fs::read_to_string(&protected_path) {
-            Ok(s) => serde_json::from_str::<Vec<String>>(&s).unwrap_or_else(|_| default_protected()),
-            Err(_) => default_protected(),
-        };
+        let protected = load_protected(&protected_path);
         // Persisted like the rest of the policy, so a user narrowing what the AI
         // may read is not silently widened back to the permissive defaults on
         // the next restart.
@@ -195,10 +236,8 @@ impl PolicyEngine {
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty())
             .collect();
-        self.inner.lock().unwrap().protected = cleaned.clone();
-        if let Ok(json) = serde_json::to_string_pretty(&cleaned) {
-            let _ = std::fs::write(&self.protected_path, json);
-        }
+        save_protected(&self.protected_path, &cleaned);
+        self.inner.lock().unwrap().protected = cleaned;
     }
 
     /// True if AI writes to `path` are blocked by the protection list.
@@ -223,14 +262,14 @@ impl PolicyEngine {
     /// slash-normalised first so `//` and `/./` variants (which the SFTP guard
     /// already blocks) cannot slip a protected path past it.
     pub fn mentions_protected(&self, text: &str) -> bool {
-        let normalized = collapse_slashes(text);
+        let normalized = collapse_slashes(text).to_lowercase();
         let inner = self.inner.lock().unwrap();
         inner
             .protected
             .iter()
             .map(|p| p.trim())
             .filter(|p| !p.is_empty())
-            .any(|p| normalized.contains(&collapse_slashes(p)))
+            .any(|p| normalized.contains(&collapse_slashes(p).to_lowercase()))
     }
 
     fn persist_state(&self, inner: &Inner) {
@@ -341,6 +380,20 @@ mod tests {
     }
 
     #[test]
+    fn legacy_list_gains_new_defaults_once() {
+        let dir = std::env::temp_dir().join(format!("kestral_pol_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pp = dir.join("protected.json");
+        std::fs::write(&pp, r#"[".ssh/authorized_keys", "/srv/secret"]"#).unwrap();
+        let p = PolicyEngine::new(dir.join("ai_state"), pp.clone(), dir.join("caps.json"));
+        assert!(p.is_protected("/home/x/.ssh/authorized_keys2"));
+        assert!(p.is_protected("/srv/secret"));
+        p.set_protected_paths(vec![".ssh/authorized_keys".into()]);
+        let p2 = PolicyEngine::new(dir.join("ai_state"), pp, dir.join("caps.json"));
+        assert_eq!(p2.protected_paths(), vec![".ssh/authorized_keys".to_string()]);
+    }
+
+    #[test]
     fn protects_ssh_files_across_home_directories() {
         let p = engine(&[".ssh/authorized_keys", ".ssh/config"]);
         assert!(p.is_protected("/home/anton/.ssh/authorized_keys"));
@@ -444,5 +497,18 @@ mod tests {
         let p = PolicyEngine::new(dir.join("ai_state"), dir.join("missing.json"), dir.join("caps.json"));
         assert!(p.is_protected("/root/.ssh/authorized_keys"));
         assert!(p.is_protected("/home/u/.ssh/config"));
+    }
+
+    #[test]
+    fn defaults_cover_alternate_key_files() {
+        let dir = std::env::temp_dir().join(format!("kestral_pol_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = PolicyEngine::new(dir.join("ai_state"), dir.join("missing.json"), dir.join("caps.json"));
+        assert!(p.is_protected("/root/.ssh/authorized_keys2"));
+        assert!(p.is_protected("~/.ssh/authorized_keys2"));
+        assert!(p.is_protected("/C:/ProgramData/ssh/administrators_authorized_keys"));
+        assert!(p.is_protected(r"C:\PROGRA~3\ssh\Administrators_Authorized_Keys"));
+        assert!(p.mentions_protected(r"Add-Content C:\ProgramData\ssh\Administrators_Authorized_Keys key"));
+        assert!(!p.is_protected("/home/u/.ssh/known_hosts"));
     }
 }

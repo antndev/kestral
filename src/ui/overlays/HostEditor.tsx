@@ -341,6 +341,7 @@ export function HostEditor(p: {
   inline?: boolean;
   onClose(): void;
   onSaved(h: Host, connect: boolean): void;
+  onDirtyChange?(dirty: boolean): void;
 }) {
   const { host, hosts } = p;
   const src: Partial<NewHost> = host ?? p.prefill ?? {};
@@ -997,6 +998,11 @@ export function HostEditor(p: {
     if (authKind === "identity") return identitySel !== b.identity;
     return false;
   };
+  const dirty = isDirty();
+  const onDirtyChange = p.onDirtyChange;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
   const leave = () => {
     if (saved) p.onSaved(saved, false);
     else p.onClose();
