@@ -3,6 +3,12 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.3 - 2026-10-08
+
+### Fixed
+- The Windows taskbar shows the current app icon. Kestral now sets the large window icon itself, so Windows no longer falls back to an old cached one.
+- Check for updates shows Checking for at least half a second instead of flickering.
+
 ## 0.2.2 - 2026-10-08
 
 ### Changed
