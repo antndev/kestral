@@ -706,9 +706,6 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       if (target.kind !== "terminal" || (p.kind === "pane" && p.tabId === tabId)) return NO_DROP;
       return { hint: { kind: "tab", tabId, mode: "into", ok: count(tabId) + 1 <= MAX_PANES }, spring: tabId };
     }
-    if (el?.closest?.("[data-tab-strip]")) {
-      if (p.kind === "host" || (p.kind === "pane" && count(p.tabId) > 1)) return { hint: { kind: "strip" }, spring: null };
-    }
     return NO_DROP;
   }
 
@@ -731,12 +728,6 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       }
       if (p.kind === "pane") movePane(p.paneId, h.tabId, null, null);
       else if (splitPane(h.tabId, { hostId: p.hostId })) selectTab(h.tabId);
-      return;
-    }
-    if (p.kind === "pane") popOut(p.paneId);
-    else if (p.kind === "host") {
-      const host = hostsRef.current.find((x) => x.id === p.hostId);
-      if (host) openTerminal(host);
     }
   }
 

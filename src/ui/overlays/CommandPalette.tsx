@@ -262,8 +262,8 @@ export function CommandPalette({
     listRef.current?.scrollTo({ top: 0 });
   }, [query, filter]);
 
-  function run(item: Item, mod: boolean) {
-    const action: PaletteAction = mod && item.host ? { kind: canSplit ? "split" : "sftp", host: item.host } : item.action;
+  function run(item: Item, mod: boolean, sftp = false) {
+    const action: PaletteAction = sftp && item.host ? { kind: "sftp", host: item.host } : mod && item.host ? { kind: canSplit ? "split" : "sftp", host: item.host } : item.action;
     onClose();
     onAction(action);
   }
@@ -284,7 +284,7 @@ export function CommandPalette({
       move(-1);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (selIdx >= 0) run(flat[selIdx], IS_MAC ? e.metaKey : e.ctrlKey);
+      if (selIdx >= 0) run(flat[selIdx], IS_MAC ? e.metaKey : e.ctrlKey, e.shiftKey);
     } else if (e.key === "Backspace" && query === "" && filter !== "all") {
       e.preventDefault();
       setFilter("all");
@@ -402,8 +402,21 @@ export function CommandPalette({
                       <span style={{ ...ellipsis, flex: 1, minWidth: 0, lineHeight: "18px" }}>{item.title}</span>
                     )}
                     {active && item.host && (
-                      <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-2)" }}>
-                        Connect<kbd style={{ ...kbd, color: undefined }}>↵</kbd>
+                      <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: "var(--text-2)" }}>
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            run(item, false, true);
+                          }}
+                          style={{ display: "flex", alignItems: "center", gap: 6, height: 24, padding: "0 6px", border: 0, borderRadius: 6, background: "transparent", color: "inherit", fontSize: 12, cursor: "pointer" }}
+                        >
+                          SFTP<kbd style={{ ...kbd, color: undefined }}>{IS_MAC ? "⇧↵" : "Shift+↵"}</kbd>
+                        </button>
+                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          Connect<kbd style={{ ...kbd, color: undefined }}>↵</kbd>
+                        </span>
                       </span>
                     )}
                     {item.hint}
@@ -417,7 +430,8 @@ export function CommandPalette({
         <div style={{ flex: "none", display: "flex", flexWrap: "wrap", gap: 16, padding: "10px 16px", borderTop: "1px solid var(--line)", background: "var(--bg-side)", fontSize: 12, color: "var(--text-2)" }}>
           <span><kbd style={kbd}>↑</kbd> <kbd style={kbd}>↓</kbd> move</span>
           <span><kbd style={kbd}>↵</kbd> open</span>
-          <span><kbd style={kbd}>{KEYS.enter}</kbd> {canSplit ? "open in split" : "open SFTP"}</span>
+          <span><kbd style={kbd}>{IS_MAC ? "⇧↵" : "Shift+↵"}</kbd> SFTP</span>
+          {canSplit && <span><kbd style={kbd}>{KEYS.enter}</kbd> open in split</span>}
           {!hostsOnly && <span><kbd style={kbd}>Tab</kbd> filter by type</span>}
         </div>
       </section>

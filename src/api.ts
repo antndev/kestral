@@ -520,4 +520,6 @@ export const runCommandStream = (
   hostId: string,
   command: string,
   onOutput: Channel<ArrayBuffer>,
-) => invoke<StreamExit>("run_command_stream", { hostId, command, onOutput });
+  runId?: string,
+) => invoke<StreamExit>("run_command_stream", { hostId, command, onOutput, runId });
+export const runCommandCancel = (runId: string) => invoke<void>("run_command_cancel", { runId });

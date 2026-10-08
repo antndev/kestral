@@ -332,7 +332,7 @@ async function startRun(snippetId: string, script: string, targets: Host[], para
     const channel = new Channel<ArrayBuffer>();
     channel.onmessage = (buf) => appendOutput(runId, h.id, decoder.decode(new Uint8Array(buf), { stream: true }));
     try {
-      const exit = await api.runCommandStream(h.id, script, channel);
+      const exit = await api.runCommandStream(h.id, script, channel, `${runId}:${h.id}`);
       flushOutput();
       patchHost(runId, h.id, (x) => ({
         ...x,
@@ -355,6 +355,12 @@ async function startRun(snippetId: string, script: string, targets: Host[], para
     if (!run || run.cancelled) break;
     await runOne(h);
   }
+}
+
+function stopRun(runId: string) {
+  const run = runStore.find((r) => r.runId === runId);
+  cancelQueued(runId);
+  for (const x of run?.results ?? []) if (x.status === "running") void api.runCommandCancel(`${runId}:${x.hostId}`).catch(() => {});
 }
 
 function cancelQueued(runId: string) {
@@ -695,6 +701,20 @@ export function SnippetsScreen({
     }
   }
 
+  async function duplicateSnippet(src: Snippet) {
+    setActionErr("");
+    try {
+      await flush();
+      const created = await api.snippetAdd({ label: `${src.label.trim() || "Untitled"} copy`, script: src.script, target_host_ids: src.target_host_ids, folder: src.folder, vars: src.vars, parallel: src.parallel, open_tabs: src.open_tabs });
+      changedRef.current?.();
+      if (!alive.current) return;
+      commitSnippets([...snippetsRef.current, normalize(created)]);
+      setSelId(created.id);
+    } catch (e) {
+      if (alive.current) setActionErr(errText(e));
+    }
+  }
+
   async function deleteSnippet(target: Snippet) {
     const id = target.id;
     await api.snippetDelete(id);
@@ -792,13 +812,12 @@ export function SnippetsScreen({
   const busyIds = new Set(runs.filter((r) => r.results.some((x) => isLive(x.status))).map((r) => r.snippetId));
   const liveRuns = snippetRuns.filter((r) => r.results.some((x) => isLive(x.status)));
   const selBusy = liveRuns.length > 0;
-  const canStop = liveRuns.some((r) => r.results.some((x) => x.status === "queued"));
   const busyRef = useRef(selBusy);
   busyRef.current = selBusy;
 
   function stopRuns() {
     if (selId && Date.now() - (lastRun.current[selId] ?? 0) < RUN_DEBOUNCE_MS) return;
-    for (const r of liveRuns) if (r.results.some((x) => x.status === "queued")) cancelQueued(r.runId);
+    for (const r of liveRuns) stopRun(r.runId);
   }
   const promptSnippet = varPrompt ? snippets.find((s) => s.id === varPrompt.snippetId) ?? null : null;
   useEffect(() => {
@@ -844,11 +863,6 @@ export function SnippetsScreen({
       return;
     }
     execute(mode, s, applyVars(s.script, Object.fromEntries(vars.map((v) => [v, p.vars[v]?.value ?? ""]))));
-  }
-
-  function runFromList(s: Snippet) {
-    select(s.id);
-    begin("run", s);
   }
 
   const beginRef = useRef(begin);
@@ -943,7 +957,6 @@ export function SnippetsScreen({
                       {g.items.map((s) => {
                         const name = s.label.trim();
                         const busy = busyIds.has(s.id);
-                        const rowPlan = blockFor(s);
                         return (
                           <ListItem
                             key={s.id}
@@ -968,14 +981,6 @@ export function SnippetsScreen({
                               if (el) rowRefs.current.set(s.id, el);
                               else rowRefs.current.delete(s.id);
                             }}
-                            trailing={
-                              <RowRun
-                                name={name || "Untitled"}
-                                title={rowPlan.runBlocked || rowPlan.runTitle}
-                                disabled={!!rowPlan.runBlocked}
-                                onRun={() => runFromList(s)}
-                              />
-                            }
                           />
                         );
                       })}
@@ -999,8 +1004,8 @@ export function SnippetsScreen({
                       <RunButton
                         stop={selBusy}
                         label={plan.runLabel}
-                        disabled={selBusy ? !canStop : !!plan.runBlocked}
-                        title={selBusy ? (canStop ? "Skip the hosts that have not started yet" : "A command that already started keeps running on the server until it finishes") : plan.runBlocked || plan.runTitle}
+                        disabled={!selBusy && !!plan.runBlocked}
+                        title={selBusy ? "Stop the run: running commands end, waiting hosts are skipped" : plan.runBlocked || plan.runTitle}
                         onClick={selBusy ? stopRuns : () => begin("run")}
                       />
                       <button
@@ -1010,12 +1015,12 @@ export function SnippetsScreen({
                         title={plan.pasteBlocked || (pasteTo?.name ? `Paste into ${pasteTo.name}` : undefined)}
                         style={{ ...off(pageBtn, !!plan.pasteBlocked), flex: "none" }}
                       >
-                        Paste into active terminal
+                        Paste to terminal
                       </button>
                       <button ref={editBtnRef} type="button" onClick={startEdit} style={{ ...pageBtn, flex: "none" }}>
                         Edit
                       </button>
-                      <SnippetMenu name={selected.label.trim() || "Untitled"} onDelete={() => setConfirmDelete(selected)} />
+                      <SnippetMenu name={selected.label.trim() || "Untitled"} canDuplicate={!selected.ai_edited} onDuplicate={() => void duplicateSnippet(selected)} onDelete={() => setConfirmDelete(selected)} />
                       <div style={{ flex: "1 1 0", minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
                         <SaveIndicator status={saveStatus} selId={selId} otherLabel={labelOf(saveStatus.id)} onRetry={() => void flush()} />
                       </div>
@@ -1284,43 +1289,6 @@ function RunButton({ stop, label, disabled, title, onClick }: { stop: boolean; l
   );
 }
 
-function RowRun({ name, title, disabled, onRun }: { name: string; title: string; disabled: boolean; onRun(): void }) {
-  const ref = useRef<HTMLButtonElement | null>(null);
-  const [hot, setHot] = useState(false);
-  useEffect(() => {
-    const row = ref.current?.closest("li");
-    if (!row) return;
-    const show = () => setHot(true);
-    const hide = () => setHot(false);
-    const blur = (e: FocusEvent) => {
-      if (!row.contains(e.relatedTarget as Node | null)) setHot(false);
-    };
-    row.addEventListener("mouseenter", show);
-    row.addEventListener("mouseleave", hide);
-    row.addEventListener("focusin", show);
-    row.addEventListener("focusout", blur);
-    return () => {
-      row.removeEventListener("mouseenter", show);
-      row.removeEventListener("mouseleave", hide);
-      row.removeEventListener("focusin", show);
-      row.removeEventListener("focusout", blur);
-    };
-  }, []);
-  return (
-    <button
-      ref={ref}
-      type="button"
-      aria-label={`Run ${name}`}
-      title={title}
-      disabled={disabled}
-      onClick={onRun}
-      style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: disabled ? "default" : "pointer", opacity: hot ? (disabled ? 0.5 : 1) : 0, pointerEvents: hot ? "auto" : "none", boxSizing: "border-box", transition: "opacity 120ms, transform 160ms var(--ease-out)" }}
-    >
-      <PlayIcon size={12} />
-    </button>
-  );
-}
-
 function FolderHeader({ name, onRename, onRemove }: { name: string; onRename(): void; onRemove(): void }) {
   const [hover, setHover] = useState(false);
   const [open, setOpen] = useState(false);
@@ -1444,9 +1412,9 @@ function varFact(name: string, setting: VarSetting | undefined): Fact {
   return [name, <span title={setting.value} style={mono}>{setting.value}</span>];
 }
 
-function SnippetMenu({ name, onDelete }: { name: string; onDelete(): void }) {
+function SnippetMenu({ name, canDuplicate, onDuplicate, onDelete }: { name: string; canDuplicate: boolean; onDuplicate(): void; onDelete(): void }) {
   const [open, setOpen] = useState(false);
-  const [hot, setHot] = useState(false);
+  const [hot, setHot] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const itemRef = useRef<HTMLButtonElement | null>(null);
@@ -1498,23 +1466,33 @@ function SnippetMenu({ name, onDelete }: { name: string; onDelete(): void }) {
           }}
           style={{ position: "absolute", top: 36, left: 0, zIndex: 20, minWidth: 160, padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", boxSizing: "border-box" }}
         >
-          <button
-            ref={itemRef}
-            type="button"
-            role="menuitem"
-            onMouseEnter={() => setHot(true)}
-            onMouseLeave={() => setHot(false)}
-            onFocus={(e) => e.currentTarget.matches(":focus-visible") && setHot(true)}
-            onBlur={() => setHot(false)}
-            onClick={() => {
-              setOpen(false);
-              btnRef.current?.focus();
-              onDelete();
-            }}
-            style={{ display: "flex", alignItems: "center", width: "100%", height: 28, padding: "0 10px", border: 0, borderRadius: 4, background: hot ? "var(--sel)" : "transparent", color: "var(--err)", textAlign: "left", cursor: "pointer", fontSize: 13, outline: "none" }}
-          >
-            Delete snippet
-          </button>
+          {(
+            [
+              { id: "dup", label: "Duplicate", color: "var(--text)", disabled: !canDuplicate, title: canDuplicate ? undefined : "Review the AI change first: run it once or edit it", run: onDuplicate },
+              { id: "del", label: "Delete snippet", color: "var(--err)", disabled: false, title: undefined, run: onDelete },
+            ] as const
+          ).map((it, i) => (
+            <button
+              key={it.id}
+              ref={i === (canDuplicate ? 0 : 1) ? itemRef : undefined}
+              type="button"
+              role="menuitem"
+              disabled={it.disabled}
+              title={it.title}
+              onMouseEnter={() => setHot(it.id)}
+              onMouseLeave={() => setHot(null)}
+              onFocus={(e) => e.currentTarget.matches(":focus-visible") && setHot(it.id)}
+              onBlur={() => setHot(null)}
+              onClick={() => {
+                setOpen(false);
+                btnRef.current?.focus();
+                it.run();
+              }}
+              style={{ display: "flex", alignItems: "center", width: "100%", height: 28, padding: "0 10px", border: 0, borderRadius: 4, background: hot === it.id && !it.disabled ? "var(--sel)" : "transparent", color: it.color, opacity: it.disabled ? 0.45 : 1, textAlign: "left", cursor: it.disabled ? "default" : "pointer", fontSize: 13, outline: "none" }}
+            >
+              {it.label}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -1750,7 +1728,7 @@ function RunBlock({ run, latest }: { run: ScriptRun; latest: boolean }) {
             {run.results.length > 1 ? (run.parallel ? ", at the same time" : ", one after another") : ""}
           </span>
         </h3>
-        <button type="button" onClick={() => clearRun(run.runId)} title={queued ? "Hide this output. Hosts that have not started are skipped." : running ? "Hide this output. The command keeps running on the server." : "Remove this output"} style={smallBtn}>
+        <button type="button" onClick={() => clearRun(run.runId)} disabled={queued || running} title={queued || running ? "Stop the run before you clear its output" : "Remove this output"} style={{ ...smallBtn, opacity: queued || running ? 0.45 : 1, cursor: queued || running ? "default" : "pointer" }}>
           Clear
         </button>
       </div>
@@ -1772,6 +1750,7 @@ function statusChip(r: HostRun): { text: string; color: string; bg: string } {
     case "cancelled":
       return { text: "Skipped", color: "var(--text-2)", bg: "var(--bg-raised)" };
     case "error":
+      if (r.signal === "cancelled") return { text: "Stopped", color: "var(--text-2)", bg: "var(--bg-raised)" };
       return { text: r.signal ? `Stopped: ${r.signal}` : "Failed", color: "var(--err)", bg: "var(--err-tint)" };
     default:
       if (r.exit == null) return { text: "Finished", color: "var(--text-2)", bg: "var(--bg-raised)" };

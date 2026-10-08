@@ -1,9 +1,14 @@
 name: Release
 
+# One workflow for everything. A push to main that changes the version in
+# package.json builds Windows and macOS in parallel and publishes v<version>.
+# Builds run on main, so the Rust cache they save is reused by the next release
+# and no separate cache warming is needed.
+
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths: [package.json]
   workflow_dispatch:
 
 permissions:
@@ -14,13 +19,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      build: ${{ steps.v.outputs.build }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: package.json
+          sparse-checkout-cone-mode: false
+
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh api "repos/${{ github.repository }}/git/ref/tags/v$version" > /dev/null 2>&1; then
+            echo "v$version already exists, nothing to build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: version
+    if: needs.version.outputs.build == 'true'
     strategy:
-      fail-fast: false
-      # Serialise so the two platforms update the release's updater latest.json
-      # one after another instead of racing to overwrite it.
-      max-parallel: 1
+      fail-fast: true
       matrix:
         include:
           - platform: windows-latest
@@ -42,45 +70,62 @@ jobs:
         with:
           toolchain: stable
 
-      # Restore the dependency cache warmed on main. Tag builds cannot share
-      # caches with each other, so without this every release rebuilds the whole
-      # dependency tree from scratch. save-if is off here: main owns the cache.
-      # The macOS runner has no warmed cache and builds cold; that is expected.
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: src-tauri -> target
-          shared-key: release-build
-          save-if: false
+          shared-key: release-${{ runner.os }}
+          cache-on-failure: true
 
-      - name: Install frontend dependencies
-        run: npm ci
+      - run: npm ci --no-audit --no-fund
 
-      # Upload into a DRAFT release. The Windows leg finishes long before the cold
-      # macOS leg, so publishing eagerly would show a release with only the .exe
-      # for ~20 minutes. Keeping it a draft means nobody sees a half-built release
-      # and the updater's latest.json stays pointed at the previous version until
-      # both platforms are attached and the publish job flips the draft off.
+      # Each platform uploads its bundles into a draft release. latest.json is
+      # written once by the publish job, so the parallel builds never race on it.
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Kestral ${{ github.ref_name }}
+          tagName: v${{ needs.version.outputs.version }}
+          releaseName: Kestral v${{ needs.version.outputs.version }}
+          releaseCommitish: ${{ github.sha }}
           releaseDraft: true
           prerelease: false
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
 
-  # Only once BOTH platform builds succeeded does the release go live. If either
-  # leg fails the release stays a draft, so a Windows-only or macOS-only release
-  # is never published.
   publish:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, build]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v${{ needs.version.outputs.version }}
+      REPO: ${{ github.repository }}
     steps:
-      - name: Publish the release now that both platforms are attached
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false
+      - name: Write latest.json from both platforms and publish
+        run: |
+          mkdir sig && cd sig
+          gh release download "$TAG" --repo "$REPO" --pattern "*.sig"
+          node - <<'EOF'
+          const fs = require("fs");
+          const { TAG, REPO } = process.env;
+          const base = `https://github.com/${REPO}/releases/download/${TAG}/`;
+          const files = fs.readdirSync(".");
+          const pick = (end) => {
+            const f = files.find((n) => n.endsWith(end));
+            if (!f) throw new Error(`missing ${end}`);
+            return { signature: fs.readFileSync(f, "utf8").trim(), url: base + encodeURIComponent(f.slice(0, -4)) };
+          };
+          const win = pick("-setup.exe.sig");
+          const mac = pick(".app.tar.gz.sig");
+          const json = {
+            version: TAG.slice(1),
+            notes: "",
+            pub_date: new Date().toISOString(),
+            platforms: { "windows-x86_64": win, "windows-x86_64-nsis": win, "darwin-aarch64": mac, "darwin-aarch64-app": mac },
+          };
+          fs.writeFileSync("../latest.json", JSON.stringify(json, null, 2));
+          EOF
+          cd ..
+          gh release upload "$TAG" latest.json --repo "$REPO" --clobber
+          gh release edit "$TAG" --repo "$REPO" --draft=false --latest

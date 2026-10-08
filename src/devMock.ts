@@ -351,12 +351,16 @@ async function streamCommand(p: Any) {
   let idx = 0;
   const out = (t: string) => (window as Any).__TAURI_INTERNALS__.runCallback(ch.id, { index: idx++, message: enc.encode(t).buffer });
   const fake: Shell = { id: "", host: host ?? { username: "user", name: "host" }, channel: ch, idx: 0, line: "", cwd: "~" };
+  if (p.runId) mockRuns.add(p.runId);
   for (const line of String(p.command).split("\n")) {
     await sleep(250);
+    if (p.runId && !mockRuns.has(p.runId)) return { exit_status: null, exit_signal: "cancelled" };
     out(`$ ${line}\r\n` + runLine(fake, line));
   }
+  mockRuns.delete(p.runId);
   return { exit_status: 0, exit_signal: null };
 }
+const mockRuns = new Set<string>();
 
 // ---------------------------------------------------------------- dispatcher
 export function installDevMock() {
@@ -470,6 +474,7 @@ export function installDevMock() {
       case "snippet_delete": { const i = snippets.findIndex((s) => s.id === p.id); if (i >= 0) snippets.splice(i, 1); return null; }
       case "run_command_ui": { await sleep(400); const fake: Shell = { id: "", host: hosts.find((h) => h.id === p.hostId) ?? {}, channel: null, idx: 0, line: "", cwd: "~" }; return { stdout: String(p.command).split("\n").map((l: string) => runLine(fake, l)).join("").replace(/\r\n/g, "\n"), stderr: "", exit_status: 0 }; }
       case "run_command_stream": return streamCommand(p);
+      case "run_command_cancel": mockRuns.delete(p.runId); return null;
       // ai / mcp / audit
       case "ai_status": return { active: aiActive, expires_at: aiExpires, default_minutes: 30 };
       case "ai_enable": aiActive = true; aiExpires = p.minutes ? new Date(Date.now() + p.minutes * 60000).toISOString() : null; return null;

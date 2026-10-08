@@ -243,8 +243,7 @@ export type DragPayload = { kind: "tab"; tabId: string } | { kind: "pane"; tabId
 
 export type DropHint =
   | { kind: "pane"; tabId: string; paneId: string; zone: Zone; ok: boolean }
-  | { kind: "tab"; tabId: string; mode: "reorder" | "into"; ok: boolean }
-  | { kind: "strip" };
+  | { kind: "tab"; tabId: string; mode: "reorder" | "into"; ok: boolean };
 
 export type StartDrag = (e: ReactMouseEvent, payload: DragPayload, label: string) => void;
 

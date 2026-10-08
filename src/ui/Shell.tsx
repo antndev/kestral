@@ -4,14 +4,12 @@ import { ContextMenu, type ContextItem } from "./ContextMenu";
 import { dnd } from "./panes";
 import { windowAction } from "./win";
 import {
-  CloseIcon,
   CpuIcon,
   ForwardIcon,
   HostsIcon,
   KeyIcon,
   LockIcon,
   LogsIcon,
-  PlusIcon,
   SearchIcon,
   SettingsIcon,
   SftpIcon,
@@ -47,6 +45,7 @@ const NAV: { id: SectionId; label: string; icon: ReactNode }[] = [
   { id: "settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 const STRIP = 40;
+const TAB_H = 36;
 const SIDEBAR_W = 240;
 const SLIDE_MS = 240;
 const slide = (prop: string) => `${prop} ${SLIDE_MS}ms var(--ease-out)`;
@@ -177,6 +176,14 @@ export function WindowControls() {
   );
 }
 
+function Cross({ turned }: { turned?: boolean }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinecap="round" aria-hidden="true" style={{ display: "block", transform: turned ? "rotate(45deg)" : undefined }}>
+      <path d="M6.5 2.5v8M2.5 6.5h8" />
+    </svg>
+  );
+}
+
 function NewTabButton({ onClick, tabSized }: { onClick: () => void; tabSized?: boolean }) {
   return (
     <button
@@ -185,11 +192,9 @@ function NewTabButton({ onClick, tabSized }: { onClick: () => void; tabSized?: b
       aria-label="New tab"
       title={`New tab (${KEYS.newTab})`}
       onClick={onClick}
-      style={{ ...iconBtn(28), width: tabSized ? 25 : 28, height: tabSized ? 25 : 28, borderRadius: 6, background: undefined, flex: "none", color: "var(--text-2)" }}
+      style={{ ...iconBtn(28), width: tabSized ? 22 : 28, height: tabSized ? 22 : 28, borderRadius: 6, background: undefined, flex: "none", color: "var(--text-2)" }}
     >
-      <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinecap="round" aria-hidden="true">
-        <path d="M6.5 2.5v8M2.5 6.5h8" />
-      </svg>
+      <Cross />
     </button>
   );
 }
@@ -326,12 +331,10 @@ function TitleBar({
     stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${activeTab}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeTab, tabs.length]);
   const { payload, hint } = useSyncExternalStore(dnd.subscribe, dnd.get);
-  const stripLit = hint?.kind === "strip";
   const inset = useMacInset();
-  const stripShown = !!payload && (payload.kind === "host" || (payload.kind === "pane" && (tabs.find((t) => t.id === payload.tabId)?.panes ?? 1) > 1));
 
   return (
-    <header data-tauri-drag-region data-tab-strip style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, height: STRIP, paddingLeft: sidebarOpen ? 0 : inset + 36, background: stripLit ? "color-mix(in srgb, var(--accent) 10%, var(--bg-chrome))" : "var(--bg-chrome)", boxSizing: "border-box", transition: `background 120ms, ${slide("padding-left")}` }}>
+    <header data-tauri-drag-region data-tab-strip style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, height: STRIP, paddingLeft: sidebarOpen ? 0 : inset + 36, background: "var(--bg-chrome)", boxSizing: "border-box", transition: slide("padding-left") }}>
       <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 1, background: "var(--line)", pointerEvents: "none" }} />
       <nav
         ref={stripRef}
@@ -402,8 +405,8 @@ function TitleBar({
                 gap: 6,
                 minWidth: 88,
                 flex: "0 1 auto",
-                height: 32,
-                padding: "0 6px 0 10px",
+                height: TAB_H,
+                padding: `0 6px ${STRIP - TAB_H + 1}px 10px`,
                 background: into ? (here?.ok ? "var(--accent-tint)" : "var(--err-tint)") : active ? "var(--tab)" : "transparent",
                 borderWidth: "1px 1px 0",
                 borderStyle: "solid",
@@ -420,7 +423,7 @@ function TitleBar({
               }}
             >
               {!active && !into && (
-                <span aria-hidden="true" style={{ position: "absolute", inset: "3px 1px 5px", zIndex: -1, borderRadius: 7, background: t.attention ? "var(--accent-tint)" : "var(--hover)", opacity: hovered || t.attention ? 1 : 0, transition: "opacity 120ms", pointerEvents: "none" }} />
+                <span aria-hidden="true" style={{ position: "absolute", inset: `3px 1px ${3 + STRIP - TAB_H}px`, zIndex: -1, borderRadius: 7, background: t.attention ? "var(--accent-tint)" : "var(--hover)", opacity: hovered || t.attention ? 1 : 0, transition: "opacity 120ms", pointerEvents: "none" }} />
               )}
               {active && !into && (
                 <>
@@ -452,20 +455,14 @@ function TitleBar({
                 data-icon-btn
                 style={{ ...iconBtn(22), background: undefined, flex: "none", color: "var(--text-2)" }}
               >
-                <CloseIcon sw={1.67} />
+                <Cross turned />
               </button>
             </div>
           );
         })}
       </nav>
-      <div style={{ position: "relative", display: "flex", alignItems: "flex-start", alignSelf: tabs.length ? "flex-end" : "center", height: tabs.length ? 32 : 28, flex: "none", paddingTop: tabs.length ? 4 : 0, boxSizing: "border-box", marginLeft: tabs.length ? -7 : 2 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", alignSelf: "center", height: 28, flex: "none", boxSizing: "border-box", marginLeft: tabs.length ? -7 : 2 }}>
         <NewTabButton onClick={onNewTab} tabSized={tabs.length > 0} />
-        {stripShown && (
-          <div aria-hidden="true" style={{ position: "absolute", left: "100%", top: 3, display: "flex", alignItems: "center", gap: 6, height: 26, padding: "0 10px", marginLeft: 4, border: `1px dashed ${stripLit ? "var(--accent)" : "var(--line)"}`, borderRadius: 6, background: stripLit ? "var(--accent-tint)" : "transparent", color: stripLit ? "var(--text)" : "var(--text-2)", fontSize: 12, whiteSpace: "nowrap", transition: "background 120ms, border-color 120ms, color 120ms" }}>
-            <PlusIcon size={12} />
-            New tab
-          </div>
-        )}
       </div>
       <div data-tauri-drag-region style={{ flex: 1, alignSelf: "stretch", minWidth: 24 }} />
       {updateReady && (

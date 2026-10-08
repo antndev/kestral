@@ -388,6 +388,7 @@ pub fn run() {
             commands::mcp_remove_registration,
             commands::run_command_ui,
             commands::run_command_stream,
+            commands::run_command_cancel,
             commands::forward_start,
             commands::forward_stop,
             commands::forward_active,

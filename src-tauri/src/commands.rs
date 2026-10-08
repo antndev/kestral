@@ -867,6 +867,17 @@ pub struct StreamExit {
     pub exit_signal: Option<String>,
 }
 
+type StreamRuns = std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Notify>>>;
+static STREAM_RUNS: std::sync::LazyLock<StreamRuns> = std::sync::LazyLock::new(Default::default);
+
+#[tauri::command]
+pub async fn run_command_cancel(run_id: String) -> Result<()> {
+    if let Some(n) = STREAM_RUNS.lock().unwrap().get(&run_id) {
+        n.notify_one();
+    }
+    Ok(())
+}
+
 /// Run a command and stream its output live to the frontend over `on_output`,
 /// the same way the interactive terminal does, then return the exit status. A
 /// PTY is requested so output looks exactly like a normal session.
@@ -876,8 +887,27 @@ pub async fn run_command_stream(
     host_id: String,
     command: String,
     on_output: Channel<InvokeResponseBody>,
+    run_id: Option<String>,
 ) -> Result<StreamExit> {
-    let host = state.services.hosts.get(parse_id(&host_id)?)?;
+    let stop = Arc::new(tokio::sync::Notify::new());
+    if let Some(id) = &run_id {
+        STREAM_RUNS.lock().unwrap().insert(id.clone(), stop.clone());
+    }
+    let result = stream_command(&state, &host_id, &command, &on_output, &stop).await;
+    if let Some(id) = &run_id {
+        STREAM_RUNS.lock().unwrap().remove(id);
+    }
+    result
+}
+
+async fn stream_command(
+    state: &State<'_, AppState>,
+    host_id: &str,
+    command: &str,
+    on_output: &Channel<InvokeResponseBody>,
+    stop: &tokio::sync::Notify,
+) -> Result<StreamExit> {
+    let host = state.services.hosts.get(parse_id(host_id)?)?;
     let session = state
         .services
         .ssh
@@ -891,7 +921,7 @@ pub async fn run_command_stream(
         .request_pty(true, "xterm-256color", 120, 34, 0, 0, &[])
         .await;
     channel
-        .exec(true, command.as_str())
+        .exec(true, command)
         .await
         .map_err(|e| AppError::Ssh(format!("exec: {e}")))?;
 
@@ -919,18 +949,22 @@ pub async fn run_command_stream(
     // Bound a streamed run too, so a runaway command (a stray `yes`) cannot stream
     // forever. 30 minutes is generous for a real script; the frontend also caps
     // how much output it keeps.
-    if tokio::time::timeout(std::time::Duration::from_secs(1800), pump)
-        .await
-        .is_err()
-    {
-        exit_signal.get_or_insert_with(|| "timed out after 30 min".to_string());
+    let ended = tokio::select! {
+        r = tokio::time::timeout(std::time::Duration::from_secs(1800), pump) => r.is_err().then_some("timed out after 30 min"),
+        _ = stop.notified() => Some("cancelled"),
+    };
+    if let Some(why) = ended {
+        exit_signal.get_or_insert_with(|| why.to_string());
+        let _ = channel.signal(russh::Sig::KILL).await;
+        let _ = channel.close().await;
+        let _ = session.disconnect(russh::Disconnect::ByApplication, "", "en").await;
     }
 
     let success = exit_signal.is_none() && exit_status == Some(0);
     state.services.audit.record(
         host.id.to_string(),
         host.name.clone(),
-        command.clone(),
+        command.to_string(),
         "user",
         exit_status,
         success,
