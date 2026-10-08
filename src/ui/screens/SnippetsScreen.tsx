@@ -20,7 +20,7 @@ import type { Host, Snippet } from "../../api";
 import { usePrefs } from "../../lib/prefs";
 import { IS_MAC, KEYS, MONO, errText, termFontStack } from "../mock";
 import { ChevronIcon, DotsIcon, PlayIcon, PlusIcon, SnippetIcon, TrashIcon } from "../icons";
-import { Overlay, useModalLayer } from "../overlays/Dialogs";
+import { CommandPreview, ConfirmDialog, Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import {
   Block,
@@ -787,7 +787,7 @@ export function SnippetsScreen({
 
   const plan = selected ? planFor(selected) : null;
   const runMode: RunMode = prefs.tabs ? "tabs" : prefs.parallel ? "parallel" : "serial";
-  const subLine = selected && plan ? `${selected.folder || "No folder"} · ${plan.targets.length > 0 ? plural(plan.targets.length, "host") : "no hosts"}` : "";
+  const subLine = selected && plan ? `${selected.folder || "No folder"} · ${plan.targets.length > 0 ? plural(plan.targets.length, "host") : "no hosts"}${selected.ai_edited ? " · changed by AI" : ""}` : "";
   const snippetRuns = runs.filter((r) => r.snippetId === selId);
   const busyIds = new Set(runs.filter((r) => r.results.some((x) => isLive(x.status))).map((r) => r.snippetId));
   const liveRuns = snippetRuns.filter((r) => r.results.some((x) => isLive(x.status)));
@@ -805,9 +805,18 @@ export function SnippetsScreen({
     if (confirmDelete && loaded && !snippets.some((x) => x.id === confirmDelete.id)) setConfirmDelete(null);
   }, [confirmDelete, loaded, snippets]);
 
-  const modalOpen = folderDialog !== null || promptSnippet !== null || confirmDelete !== null || folderToDelete !== null;
+  const [review, setReview] = useState<{ mode: "run" | "paste"; s: Snippet; script: string } | null>(null);
+  const modalOpen = folderDialog !== null || promptSnippet !== null || confirmDelete !== null || folderToDelete !== null || review !== null;
 
   function execute(mode: "run" | "paste", s: Snippet, script: string) {
+    if ((snippetsRef.current.find((x) => x.id === s.id) ?? s).ai_edited) {
+      setReview({ mode, s, script });
+      return;
+    }
+    executeNow(mode, s, script);
+  }
+
+  function executeNow(mode: "run" | "paste", s: Snippet, script: string) {
     if (mode === "paste") {
       onPasteToActive(script);
       return;
@@ -947,6 +956,7 @@ export function SnippetsScreen({
                             title={
                               <>
                                 {name || <span style={{ color: "var(--text-3)" }}>Untitled</span>}
+                                {s.ai_edited && <span title="Changed by AI, review it before it runs" style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: "var(--warn)" }}>AI</span>}
                                 {busy && <span style={srOnly}>, running</span>}
                               </>
                             }
@@ -1193,6 +1203,23 @@ export function SnippetsScreen({
         );
       })()}
 
+      {review && (
+        <ConfirmDialog
+          title="Changed by AI"
+          message="The AI created or changed this snippet. Check every line before it runs."
+          confirmLabel={review.mode === "run" ? "Run" : "Paste"}
+          width={540}
+          onConfirm={async () => {
+            const cur = snippetsRef.current.find((x) => x.id === review.s.id) ?? review.s;
+            await api.snippetUpdate({ ...cur, ai_edited: false });
+            commitSnippets(snippetsRef.current.map((x) => (x.id === cur.id ? { ...x, ai_edited: false } : x)));
+            executeNow(review.mode, review.s, review.script);
+          }}
+          onClose={() => setReview(null)}
+        >
+          <CommandPreview text={review.script} />
+        </ConfirmDialog>
+      )}
       {confirmDelete && (
         <ConfirmDeleteDialog
           title="Delete snippet"

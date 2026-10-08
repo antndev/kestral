@@ -382,11 +382,20 @@ impl KestralMcp {
         };
         match self.services.hosts.update(updated.clone()) {
             Ok(()) => {
+                let mut dependents = Vec::new();
+                if target_changed {
+                    dependents = self.services.hosts.lock_dependents(id).unwrap_or_default();
+                    for d in &dependents {
+                        self.services.ai_pool.forget(*d).await;
+                    }
+                }
                 crate::events::data_changed("hosts");
-                let note = if target_changed {
-                    " Connection target or sign-in changed, so AI access was reset to locked; the user must re-enable it."
+                let note = if !target_changed {
+                    String::new()
+                } else if dependents.is_empty() {
+                    " Connection target or sign-in changed, so AI access was reset to locked; the user must re-enable it.".to_string()
                 } else {
-                    ""
+                    format!(" Connection target or sign-in changed, so AI access was reset to locked for this host and the {} host(s) that connect through it; the user must re-enable it.", dependents.len())
                 };
                 self.services.audit.record(
                     id.to_string(),
@@ -436,7 +445,11 @@ impl KestralMcp {
             parallel: true,
             open_tabs: false,
         };
-        match self.services.snippets.add(new) {
+        let added = self.services.snippets.add(new).and_then(|mut s| {
+            s.ai_edited = true;
+            self.services.snippets.update(s.clone()).map(|()| s)
+        });
+        match added {
             Ok(s) => {
                 crate::events::data_changed("snippets");
                 self.services.audit.record(
@@ -494,6 +507,7 @@ impl KestralMcp {
             vars: existing.vars,
             parallel: existing.parallel,
             open_tabs: existing.open_tabs,
+            ai_edited: true,
         };
         match self.services.snippets.update(updated.clone()) {
             Ok(()) => {

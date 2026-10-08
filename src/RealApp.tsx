@@ -1294,6 +1294,10 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         <ApprovalDialog
           key={approvals[0].id}
           req={approvals[0]}
+          address={(() => {
+            const h = hosts.find((x) => x.id === approvals[0].host_id);
+            return h ? `${h.username}@${h.hostname}:${h.port}` : undefined;
+          })()}
           receivedAt={approvals[0].receivedAt}
           expired={approvals[0].expired}
           onAnswer={(approved) => {

@@ -335,6 +335,7 @@ export interface Snippet {
   vars: Record<string, SnippetVar>;
   parallel: boolean;
   open_tabs: boolean;
+  ai_edited?: boolean;
 }
 export interface SnippetVar {
   value: string;

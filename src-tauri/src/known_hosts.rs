@@ -220,6 +220,25 @@ fn hosts_match(field: &str, host: &str, port: u16) -> bool {
     matched
 }
 
+fn is_wild(pattern: &str) -> bool {
+    pattern.starts_with('!') || pattern.contains(['*', '?'])
+}
+
+fn match_kind(field: &str, host: &str, port: u16) -> Option<bool> {
+    if !hosts_match(field, host, port) {
+        return None;
+    }
+    let target = host_field(host, port);
+    let lower = target.to_lowercase();
+    Some(field.split(',').any(|e| {
+        if e.starts_with("|1|") {
+            hashed_match(e, &[&target, &lower])
+        } else {
+            !is_wild(e) && e.to_lowercase() == lower
+        }
+    }))
+}
+
 fn read(path: &Path) -> std::io::Result<Vec<u8>> {
     match std::fs::read(path) {
         Ok(bytes) => Ok(bytes),
@@ -278,7 +297,7 @@ fn check_expected(content: &[u8], expected: &[ExpectedEntry]) -> Result<()> {
 
 fn forget_lines_in(content: &[u8], host: &str, port: u16) -> HashSet<usize> {
     records(content)
-        .filter(|r| r.marker.is_none() && hosts_match(&r.hosts, host, port))
+        .filter(|r| r.marker.is_none() && match_kind(&r.hosts, host, port) == Some(true))
         .map(|r| r.line)
         .collect()
 }
@@ -293,7 +312,7 @@ fn import_lines<'a>(existing: &[u8], incoming: &'a [u8]) -> Vec<&'a [u8]> {
         let Some(rec) = parse_record(n, raw) else {
             continue;
         };
-        if rec.entry().is_none() || !seen.insert(rec.identity()) {
+        if rec.hosts.split(',').any(is_wild) || rec.entry().is_none() || !seen.insert(rec.identity()) {
             continue;
         }
         out.push(raw.trim_ascii());
@@ -312,8 +331,8 @@ pub enum Verdict {
 }
 
 fn verify_in(content: &[u8], host: &str, port: u16, key: &PublicKey) -> Verdict {
-    let mut trusted = false;
-    let mut saved = Vec::new();
+    let mut exact: (bool, Vec<KnownHostEntry>) = (false, Vec::new());
+    let mut wild: (bool, Vec<KnownHostEntry>) = (false, Vec::new());
     for rec in records(content) {
         match rec.marker {
             Some(Marker::Revoked) => {
@@ -323,12 +342,13 @@ fn verify_in(content: &[u8], host: &str, port: u16, key: &PublicKey) -> Verdict 
             }
             Some(Marker::CertAuthority) => {}
             None => {
-                if !hosts_match(&rec.hosts, host, port) {
+                let Some(is_exact) = match_kind(&rec.hosts, host, port) else {
                     continue;
-                }
+                };
+                let slot = if is_exact { &mut exact } else { &mut wild };
                 match rec.key() {
-                    Some(k) if k.key_data() == key.key_data() => trusted = true,
-                    Some(k) => saved.push(rec.entry_with(&k)),
+                    Some(k) if k.key_data() == key.key_data() => slot.0 = true,
+                    Some(k) => slot.1.push(rec.entry_with(&k)),
                     None => tracing::warn!(
                         "known hosts line {} has an unreadable key, ignored",
                         rec.line
@@ -338,6 +358,7 @@ fn verify_in(content: &[u8], host: &str, port: u16, key: &PublicKey) -> Verdict 
         }
     }
     // Decide only after the whole store: a @revoked line anywhere wins.
+    let (trusted, saved) = if exact.0 || !exact.1.is_empty() { exact } else { wild };
     if trusted {
         Verdict::Trusted
     } else if saved.is_empty() {
@@ -450,6 +471,9 @@ impl Store {
 
     /// Records `host:port` with `key`, unless that exact entry is already present.
     pub fn append(&mut self, host: &str, port: u16, key: &PublicKey, stamp: &str) -> Result<bool> {
+        if !crate::util::valid_hostname(host) {
+            return Err(AppError::Other(format!("'{host}' cannot be stored as a known host")));
+        }
         if verify_in(&self.content, host, port, key) == Verdict::Trusted {
             return Ok(false);
         }
@@ -687,6 +711,31 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn exact_entries_beat_wildcards() {
+        let s = format!("example.org ssh-ed25519 {ED_A}\n* ssh-ed25519 {ED_B}\n").into_bytes();
+        assert!(matches!(verify_in(&s, "example.org", 22, &key(ED_B)), Verdict::Changed(_)));
+        assert_eq!(verify_in(&s, "example.org", 22, &key(ED_A)), Verdict::Trusted);
+        assert_eq!(verify_in(&s, "other.org", 22, &key(ED_B)), Verdict::Trusted);
+    }
+
+    #[test]
+    fn import_skips_wildcard_and_negated_patterns() {
+        let incoming = format!(
+            "* ssh-ed25519 {ED_A}\nfoo,*.bar ssh-ed25519 {ED_A}\n!x,y ssh-ed25519 {ED_B}\nreal.host ssh-ed25519 {ED_B}\n"
+        )
+        .into_bytes();
+        let lines = import_lines(b"", &incoming);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].starts_with(b"real.host "));
+    }
+
+    #[test]
+    fn forget_keeps_wildcard_lines() {
+        let s = format!("example.org ssh-ed25519 {ED_A}\n*.org ssh-ed25519 {ED_B}\n").into_bytes();
+        assert_eq!(forget_lines_in(&s, "example.org", 22), HashSet::from([1]));
+    }
 
     #[test]
     fn lists_entries_with_real_line_numbers() {

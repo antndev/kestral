@@ -88,7 +88,7 @@ const secrets: Any[] = [
 const snippets: Any[] = [
   { id: "s1", label: "Restart stack", script: "cd /opt/{app}\ndocker compose pull\ndocker compose up -d\ndocker compose ps", target_host_ids: ["h1", "h2"], folder: "Docker" },
   { id: "s2", label: "Prune images", script: "docker image prune -af", target_host_ids: [], folder: "Docker" },
-  { id: "s3", label: "Disk usage", script: "df -h", target_host_ids: ["h1", "h3"], folder: "System" },
+  { id: "s3", label: "Disk usage", script: "df -h", target_host_ids: ["h1", "h3"], folder: "System", ai_edited: true },
   { id: "s4", label: "Tail nginx", script: "tail -n 20 /var/log/nginx/access.log", target_host_ids: ["h1"], folder: "Logs" },
 ];
 if (flags.has("empty") || flags.has("fresh")) {
@@ -466,7 +466,7 @@ export function installDevMock() {
       // snippets
       case "snippet_list": return JSON.parse(JSON.stringify(snippets));
       case "snippet_add": { const s = { id: uuid(), folder: "", ...p.snippet }; snippets.push(s); return s; }
-      case "snippet_update": { const i = snippets.findIndex((s) => s.id === p.snippet.id); if (i >= 0) snippets[i] = p.snippet; return null; }
+      case "snippet_update": { const i = snippets.findIndex((s) => s.id === p.snippet.id); if (i >= 0) snippets[i] = { ...p.snippet, ai_edited: false }; return null; }
       case "snippet_delete": { const i = snippets.findIndex((s) => s.id === p.id); if (i >= 0) snippets.splice(i, 1); return null; }
       case "run_command_ui": { await sleep(400); const fake: Shell = { id: "", host: hosts.find((h) => h.id === p.hostId) ?? {}, channel: null, idx: 0, line: "", cwd: "~" }; return { stdout: String(p.command).split("\n").map((l: string) => runLine(fake, l)).join("").replace(/\r\n/g, "\n"), stderr: "", exit_status: 0 }; }
       case "run_command_stream": return streamCommand(p);

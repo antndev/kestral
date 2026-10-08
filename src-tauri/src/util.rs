@@ -4,7 +4,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let tmp = path.with_extension("tmp");
     {
-        let mut file = std::fs::File::create(&tmp)?;
+        let mut file = create_private(&tmp)?;
         restrict(&file)?;
         file.write_all(bytes)?;
         file.sync_all()?;
@@ -30,16 +30,14 @@ pub fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .unwrap_or_default();
     let tmp = dir.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4().simple()));
     let result = (|| {
-        let mut file = std::fs::File::create(&tmp)?;
+        let mut file = create_private(&tmp)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = std::fs::metadata(&target) {
-                file.set_permissions(meta.permissions())?;
-            } else if looks_like_private_key(bytes) {
-                // ssh refuses private keys readable by others, so a freshly
-                // exported key is created owner-only.
+            if looks_like_private_key(bytes) {
                 file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            } else if let Ok(meta) = std::fs::metadata(&target) {
+                file.set_permissions(meta.permissions())?;
             }
         }
         file.write_all(bytes)?;
@@ -51,6 +49,32 @@ pub fn replace_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let _ = std::fs::remove_file(&tmp);
     }
     result
+}
+
+fn create_private(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)
+}
+
+pub fn valid_hostname(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 253
+        && host
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ':' | '%'))
+}
+
+pub fn valid_username(user: &str) -> bool {
+    user.len() <= 128
+        && user
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | '@' | '\\' | '+'))
 }
 
 /// True for PEM / OpenSSH private key text ("-----BEGIN ... PRIVATE KEY-----").

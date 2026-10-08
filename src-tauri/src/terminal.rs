@@ -81,13 +81,20 @@ async fn shell_name(session: Arc<Session>) -> Option<String> {
     let read = async {
         while let Some(msg) = channel.wait().await {
             match msg {
-                ChannelMsg::Data { ref data } => out.extend_from_slice(data),
+                ChannelMsg::Data { ref data } => {
+                    out.extend_from_slice(data);
+                    if out.len() > 256 {
+                        break;
+                    }
+                }
                 ChannelMsg::Eof | ChannelMsg::Close => break,
                 _ => {}
             }
         }
     };
-    tokio::time::timeout(std::time::Duration::from_secs(10), read).await.ok()?;
+    let done = tokio::time::timeout(std::time::Duration::from_secs(10), read).await;
+    let _ = channel.close().await;
+    done.ok()?;
     let name = String::from_utf8_lossy(&out).trim().to_string();
     (!name.is_empty() && name.len() < 40 && !name.contains(char::is_whitespace)).then_some(name)
 }

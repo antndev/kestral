@@ -15,6 +15,22 @@ pub struct HostStore {
     hosts: Mutex<Vec<Host>>,
 }
 
+fn check_address(host: &Host) -> Result<()> {
+    if !crate::util::valid_hostname(&host.hostname) {
+        return Err(AppError::Other(format!(
+            "'{}' is not a valid host name or address. Use letters, digits, dots, dashes and colons only.",
+            host.hostname
+        )));
+    }
+    if !crate::util::valid_username(&host.username) {
+        return Err(AppError::Other(format!(
+            "'{}' is not a valid user name. Spaces and shell characters are not allowed.",
+            host.username
+        )));
+    }
+    Ok(())
+}
+
 fn check_jump(hosts: &[Host], host: &Host) -> Result<()> {
     let Some(first) = host.jump_host_id else {
         return Ok(());
@@ -139,6 +155,7 @@ impl HostStore {
 
     pub fn add(&self, new_host: NewHost) -> Result<Host> {
         let host = new_host.into_host();
+        check_address(&host)?;
         let mut hosts = self.hosts.lock().unwrap();
         if name_taken(&hosts, &host.name, host.id) {
             return Err(AppError::Other(format!(
@@ -161,7 +178,8 @@ impl HostStore {
         let mut skipped = 0;
         for host in incoming {
             let clash = hosts.iter().any(|h| h.id == host.id)
-                || name_taken(&hosts, &host.name, host.id);
+                || name_taken(&hosts, &host.name, host.id)
+                || check_address(&host).is_err();
             if clash {
                 skipped += 1;
                 continue;
@@ -177,6 +195,7 @@ impl HostStore {
 
     pub fn update(&self, mut host: Host) -> Result<()> {
         host.normalize();
+        check_address(&host)?;
         let mut hosts = self.hosts.lock().unwrap();
         if name_taken(&hosts, &host.name, host.id) {
             return Err(AppError::Other(format!(
@@ -191,6 +210,34 @@ impl HostStore {
             .ok_or_else(|| AppError::NotFound(host.id.to_string()))?;
         *slot = host;
         self.save(&hosts)
+    }
+
+    pub fn lock_dependents(&self, jump: Uuid) -> Result<Vec<Uuid>> {
+        let mut hosts = self.hosts.lock().unwrap();
+        let parents: std::collections::HashMap<Uuid, Option<Uuid>> =
+            hosts.iter().map(|h| (h.id, h.jump_host_id)).collect();
+        let mut locked = Vec::new();
+        for h in hosts.iter_mut() {
+            let mut next = h.jump_host_id;
+            let mut hops = 0;
+            while let Some(id) = next {
+                if id == jump {
+                    h.ai_policy = AiPolicy::Locked;
+                    h.ai_file_policy = AiPolicy::Locked;
+                    locked.push(h.id);
+                    break;
+                }
+                hops += 1;
+                if hops > 8 {
+                    break;
+                }
+                next = parents.get(&id).copied().flatten();
+            }
+        }
+        if !locked.is_empty() {
+            self.save(&hosts)?;
+        }
+        Ok(locked)
     }
 
     pub fn remove(&self, id: Uuid) -> Result<()> {

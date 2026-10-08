@@ -588,7 +588,8 @@ pub async fn snippet_add(state: State<'_, AppState>, snippet: NewSnippet) -> Res
 }
 
 #[tauri::command]
-pub async fn snippet_update(state: State<'_, AppState>, snippet: Snippet) -> Result<()> {
+pub async fn snippet_update(state: State<'_, AppState>, mut snippet: Snippet) -> Result<()> {
+    snippet.ai_edited = false;
     state.services.snippets.update(snippet)
 }
 

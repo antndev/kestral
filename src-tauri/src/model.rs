@@ -180,6 +180,8 @@ pub struct Snippet {
     pub parallel: bool,
     #[serde(default)]
     pub open_tabs: bool,
+    #[serde(default)]
+    pub ai_edited: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -250,6 +252,7 @@ impl NewSnippet {
             vars: self.vars,
             parallel: self.parallel,
             open_tabs: self.open_tabs,
+            ai_edited: false,
         };
         snippet.normalize();
         snippet

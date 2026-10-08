@@ -135,34 +135,73 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
         }
     }
 
+    let bundled: HashSet<&str> = bundle.secrets.iter().map(|s| s.id.as_str()).collect();
+    let own_secrets = |auth: &AuthMethod| match auth {
+        AuthMethod::Password { secret_id } | AuthMethod::Key { secret_id } => bundled.contains(secret_id.as_str()),
+        _ => true,
+    };
+
+    let current_identities = services.identities.list()?;
+    let mut identity_remap: HashMap<String, String> = HashMap::new();
+    let mut identity_ids: HashSet<String> = HashSet::new();
+    let mut identities: Vec<Identity> = Vec::new();
+    for mut i in bundle.identities.iter().cloned() {
+        if !own_secrets(&i.auth) {
+            continue;
+        }
+        i.auth = remap_auth(i.auth, &remap, &HashMap::new());
+        let old = i.id.to_string();
+        if let Some(cur) = current_identities.iter().find(|c| c.id == i.id) {
+            if cur.name == i.name && cur.username == i.username && cur.auth == i.auth {
+                identity_ids.insert(old);
+                continue;
+            }
+            i.id = uuid::Uuid::new_v4();
+            identity_remap.insert(old.clone(), i.id.to_string());
+        }
+        identity_ids.insert(old);
+        identities.push(i);
+    }
+
+    let current_hosts: HashSet<uuid::Uuid> = services.hosts.list().iter().map(|h| h.id).collect();
+    let importable: HashSet<uuid::Uuid> = bundle.hosts.iter().map(|h| h.id).filter(|id| !current_hosts.contains(id)).collect();
+    let mut hosts_dropped = 0;
     let hosts: Vec<Host> = bundle
         .hosts
         .iter()
+        .filter(|h| {
+            let ok = own_secrets(&h.auth)
+                && match &h.auth {
+                    AuthMethod::Identity { identity_id } => identity_ids.contains(identity_id),
+                    _ => true,
+                };
+            if !ok {
+                hosts_dropped += 1;
+            }
+            ok
+        })
         .cloned()
         .map(|mut h| {
-            h.auth = remap_auth(h.auth, &remap);
-            h.agent_keys = h
-                .agent_keys
-                .into_iter()
-                .map(|k| remap.get(&k).cloned().unwrap_or(k))
-                .collect();
+            h.auth = remap_auth(h.auth, &remap, &identity_remap);
+            h.ai_policy = crate::model::AiPolicy::Locked;
+            h.ai_file_policy = crate::model::AiPolicy::Locked;
+            h.forward_agent = false;
+            h.agent_keys.clear();
+            for f in &mut h.forwards {
+                f.autostart = false;
+                f.start_on_connect = false;
+            }
+            if h.jump_host_id.is_some_and(|j| !importable.contains(&j)) {
+                h.jump_host_id = None;
+            }
             h
-        })
-        .collect();
-
-    let identities: Vec<Identity> = bundle
-        .identities
-        .iter()
-        .cloned()
-        .map(|mut i| {
-            i.auth = remap_auth(i.auth, &remap);
-            i
         })
         .collect();
 
     services.vault.put_secrets(to_add)?;
     let (identities_added, identities_skipped) = services.identities.import(identities)?;
     let (hosts_added, hosts_skipped) = services.hosts.import(hosts)?;
+    let hosts_skipped = hosts_skipped + hosts_dropped;
     let (snippets_added, snippets_skipped) = services.snippets.import(bundle.snippets.clone())?;
     services.collections.import(bundle.collections.clone())?;
     if !bundle.known_hosts.is_empty() {
@@ -219,13 +258,15 @@ fn free_id(base: &str, used: &mut HashSet<String>) -> String {
     }
 }
 
-fn remap_auth(auth: AuthMethod, remap: &HashMap<String, String>) -> AuthMethod {
+fn remap_auth(auth: AuthMethod, remap: &HashMap<String, String>, identities: &HashMap<String, String>) -> AuthMethod {
     let swap = |id: String| remap.get(&id).cloned().unwrap_or(id);
     match auth {
         AuthMethod::Password { secret_id } => AuthMethod::Password { secret_id: swap(secret_id) },
         AuthMethod::Key { secret_id } => AuthMethod::Key { secret_id: swap(secret_id) },
         AuthMethod::Agent => AuthMethod::Agent,
-        AuthMethod::Identity { identity_id } => AuthMethod::Identity { identity_id },
+        AuthMethod::Identity { identity_id } => AuthMethod::Identity {
+            identity_id: identities.get(&identity_id).cloned().unwrap_or(identity_id),
+        },
     }
 }
 
@@ -290,12 +331,13 @@ mod tests {
         let rewritten = remap_auth(
             AuthMethod::Password { secret_id: "admin@server".into() },
             &remap,
+            &HashMap::new(),
         );
         assert!(matches!(rewritten, AuthMethod::Password { secret_id } if secret_id == "admin@server-2"));
 
-        let untouched = remap_auth(AuthMethod::Key { secret_id: "other".into() }, &remap);
+        let untouched = remap_auth(AuthMethod::Key { secret_id: "other".into() }, &remap, &HashMap::new());
         assert!(matches!(untouched, AuthMethod::Key { secret_id } if secret_id == "other"));
 
-        assert!(matches!(remap_auth(AuthMethod::Agent, &remap), AuthMethod::Agent));
+        assert!(matches!(remap_auth(AuthMethod::Agent, &remap, &HashMap::new()), AuthMethod::Agent));
     }
 }

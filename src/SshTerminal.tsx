@@ -19,6 +19,14 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
 
+const cleanPaste = (text: string) =>
+  Array.from(text)
+    .filter((c) => {
+      const n = c.codePointAt(0) ?? 0;
+      return n === 9 || n === 10 || n === 13 || (n >= 32 && n !== 127 && (n < 128 || n > 159));
+    })
+    .join("");
+
 export type TerminalStage = PaneStage;
 
 // Prompts after which the typed line is treated as a secret and NOT recorded in
@@ -324,7 +332,7 @@ export function SshTerminal(props: SshTerminalProps) {
     const paste = async () => {
       try {
         const txt = await clipReadText();
-        if (!disposed && txt) term.paste(txt);
+        if (!disposed && txt) term.paste(cleanPaste(txt));
       } catch {
         /* clipboard empty or not text */
       }
@@ -446,7 +454,7 @@ export function SshTerminal(props: SshTerminalProps) {
       if (input?.paste) {
         mirror = { secret: !!input.secret };
         try {
-          term.paste(data);
+          term.paste(cleanPaste(data));
         } finally {
           mirror = null;
         }

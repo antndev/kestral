@@ -315,6 +315,8 @@ export function ConfirmDialog({
   danger,
   onConfirm,
   onClose,
+  width,
+  children,
 }: {
   title: string;
   message: string;
@@ -322,6 +324,8 @@ export function ConfirmDialog({
   danger?: boolean;
   onConfirm(): void | Promise<void>;
   onClose(): void;
+  width?: number;
+  children?: ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -360,11 +364,12 @@ export function ConfirmDialog({
 
   return (
     <Overlay z={z} onBackdrop={danger ? undefined : close}>
-      <section ref={ref} role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} aria-busy={busy} tabIndex={-1} style={{ ...dialogBox(400), gap: 20, padding: "22px 24px 20px" }}>
+      <section ref={ref} role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} aria-busy={busy} tabIndex={-1} style={{ ...dialogBox(width ?? 400), gap: 20, padding: "22px 24px 20px" }}>
         <div>
           <h2 id={titleId} style={title}>{heading}</h2>
           <p id={descId} style={{ ...lead, lineHeight: 1.5, overflowWrap: "anywhere" }}>{message}</p>
         </div>
+        {children}
         <Actions left={<span role="alert" title={err || undefined} style={{ display: "block", color: "var(--err)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{err}</span>}>
           {[
             <Button key="cancel" btnRef={cancelRef} disabled={busy} title={busy ? WORKING : undefined} onClick={close}>Cancel</Button>,
@@ -602,13 +607,76 @@ export function HostKeyChangedDialog({
 
 /* ---------- ApprovalDialog ---------- */
 
+const HIDDEN_RANGES: [number, number][] = [[0x00, 0x08], [0x0b, 0x1f], [0x7f, 0x9f], [0xad, 0xad], [0x200b, 0x200f], [0x2028, 0x2029], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069], [0xfeff, 0xfeff]];
+const isHidden = (c: string) => {
+  const n = c.codePointAt(0) ?? 0;
+  return HIDDEN_RANGES.some(([a, b]) => n >= a && n <= b);
+};
+
+function hiddenLabel(c: string) {
+  if (c === "\u001b") return "ESC";
+  if (c === "\r") return "CR";
+  return `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+function VisibleLine({ text }: { text: string }) {
+  const parts: ReactNode[] = [];
+  let plain = "";
+  for (const c of text) {
+    if (isHidden(c)) {
+      if (plain) parts.push(plain);
+      plain = "";
+      parts.push(
+        <span key={parts.length} style={{ padding: "0 3px", margin: "0 1px", borderRadius: 3, background: "color-mix(in srgb, var(--warn) 22%, transparent)", color: "var(--warn)", fontSize: 10.5 }}>
+          {hiddenLabel(c)}
+        </span>,
+      );
+    } else plain += c;
+  }
+  if (plain) parts.push(plain);
+  return <>{parts.length ? parts : " "}</>;
+}
+
+export function CommandPreview({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const hidden = [...text].some(isHidden);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", gap: 8, fontSize: 12, color: hidden || lines.length > 1 ? "var(--warn)" : "var(--text-3)" }}>
+        <span>{lines.length === 1 ? "1 line" : `${lines.length} lines`}</span>
+        {hidden && <span>Contains hidden characters, marked below</span>}
+      </div>
+      <pre
+        data-selectable
+        style={{ margin: 0, maxHeight: 208, overflow: "auto", padding: "10px 12px", borderRadius: 6, background: "var(--term-bg)", color: "var(--term-text)", fontFamily: MONO, fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+      >
+        {lines.map((l, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: lines.length > 1 ? `${String(lines.length).length + 1}ch minmax(0, 1fr)` : "minmax(0, 1fr)", columnGap: 10 }}>
+            {lines.length > 1 && <span aria-hidden="true" style={{ color: "var(--text-3)", textAlign: "right", userSelect: "none" }}>{i + 1}</span>}
+            <span><VisibleLine text={l} /></span>
+          </div>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
+function fileTitle(action: string) {
+  if (action.startsWith("sftp upload")) return "AI wants to upload a file to the server";
+  if (action.startsWith("sftp download")) return "AI wants to download a file from the server";
+  if (action.startsWith("sftp list")) return "AI wants to list a folder";
+  return "AI wants to access files";
+}
+
 export function ApprovalDialog({
   req,
+  address,
   receivedAt,
   expired: expiredByBackend,
   onAnswer,
 }: {
   req: ApprovalRequest;
+  address?: string;
   /** When the approval-request event arrived (ms epoch); defaults to when the dialog opened. */
   receivedAt?: number;
   expired?: boolean;
@@ -617,12 +685,18 @@ export function ApprovalDialog({
   const ref = useRef<HTMLElement>(null);
   const denyRef = useRef<HTMLButtonElement>(null);
   const [answered, setAnswered] = useState(false);
+  const [armed, setArmed] = useState(false);
   const [openedAt] = useState(() => receivedAt ?? Date.now());
   const left = useSecondsLeft(openedAt + PROMPT_TIMEOUT_MS);
   const timedOut = left === 0 || !!expiredByBackend;
   const isFile = req.kind === "file";
   const titleId = useId();
   const descId = useId();
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setArmed(true), 750);
+    return () => window.clearTimeout(t);
+  }, []);
 
   const answer = (approved: boolean) => {
     if (answered) return;
@@ -637,27 +711,23 @@ export function ApprovalDialog({
         <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
           <IconTile tone="accent"><CpuIcon size={20} /></IconTile>
           <div style={{ minWidth: 0 }}>
-            <h2 id={titleId} style={title}>{isFile ? "AI wants to access files" : "AI wants to run a command"}</h2>
+            <h2 id={titleId} style={title}>{isFile ? fileTitle(req.command) : "AI wants to run a command"}</h2>
             <p id={descId} style={{ ...lead, overflowWrap: "anywhere" }}>
-              On <span style={{ fontWeight: 500, color: "var(--text)" }}>{req.host_name}</span>. Review it before you allow it.
+              On <span style={{ fontWeight: 500, color: "var(--text)" }}>{req.host_name}</span>
+              {address && <span style={{ fontFamily: MONO, fontSize: 12 }}> ({address})</span>}. Review it before you allow it.
             </p>
           </div>
         </div>
-        <pre
-          data-selectable
-          style={{ margin: 0, maxHeight: 208, overflow: "auto", padding: "10px 12px", borderRadius: 6, background: "var(--term-bg)", color: "var(--term-text)", fontFamily: MONO, fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
-        >
-          {req.command}
-        </pre>
+        <CommandPreview text={req.command} />
         <Actions left={!timedOut ? `Denied automatically in ${fmtCountdown(left)}` : isFile ? "Timed out, the request was denied" : "Timed out, the command was denied"}>
           {[
             <Button key="deny" btnRef={denyRef} disabled={answered} title={answered ? WORKING : undefined} onClick={() => answer(false)}>Deny</Button>,
             <Button
               key="approve"
               kind="primary"
-              disabled={answered || timedOut}
+              disabled={answered || timedOut || !armed}
               title={timedOut ? "This request timed out" : answered ? WORKING : undefined}
-              onClick={() => answer(true)}
+              onClick={() => armed && answer(true)}
             >
               {isFile ? "Approve" : <>Approve &amp; run</>}
             </Button>,
