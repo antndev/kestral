@@ -368,6 +368,8 @@ type UpdateWindow = { __kestralUpdate?: UpdateHandle };
 const updateWindow = window as unknown as UpdateWindow;
 // One install at a time, even if Settings is closed and reopened while it runs.
 
+const MIN_CHECK_MS = 500;
+
 type UpdateState =
   | { kind: "idle" }
   | { kind: "checking" }
@@ -613,10 +615,13 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
       return;
     }
     setUpd({ kind: "checking" });
+    const started = Date.now();
+    const settle = () => new Promise((r) => window.setTimeout(r, Math.max(0, MIN_CHECK_MS - (Date.now() - started))));
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
       const u = (await check()) as UpdateHandle | null;
       if (u) updateWindow.__kestralUpdate = u;
+      await settle();
       if (!alive.current) return;
       if (u) found(u);
       else {
@@ -624,6 +629,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
         setUpd({ kind: "current" });
       }
     } catch (e) {
+      await settle();
       if (alive.current) setUpd({ kind: "error", message: friendlyUpdateError(e) });
     }
   }
