@@ -39,6 +39,26 @@ use crate::state::{AppState, McpInfo, Services};
 const MCP_PORT: u16 = 4517;
 
 // Bring the main window back from the tray (or a background second launch).
+#[cfg(windows)]
+fn set_taskbar_icon(w: &tauri::WebviewWindow) {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::WindowsAndMessaging::{LoadImageW, SendMessageW, ICON_BIG, IMAGE_ICON, LR_DEFAULTCOLOR, WM_SETICON};
+    let Ok(hwnd) = w.hwnd() else {
+        return;
+    };
+    unsafe {
+        let Ok(module) = GetModuleHandleW(None) else {
+            return;
+        };
+        let id = PCWSTR(32512usize as *const u16);
+        if let Ok(icon) = LoadImageW(Some(HINSTANCE(module.0)), id, IMAGE_ICON, 64, 64, LR_DEFAULTCOLOR) {
+            SendMessageW(HWND(hwnd.0 as _), WM_SETICON, Some(WPARAM(ICON_BIG as usize)), Some(LPARAM(icon.0 as isize)));
+        }
+    }
+}
+
 fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -156,6 +176,8 @@ pub fn run() {
                     tauri::window::Color(250, 249, 245, 255)
                 };
                 let _ = w.set_background_color(Some(color));
+                #[cfg(windows)]
+                set_taskbar_icon(&w);
             }
 
             let base_dir = kestral_data_dir();

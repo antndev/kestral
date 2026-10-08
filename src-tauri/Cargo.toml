@@ -1,6 +1,6 @@
 [package]
 name = "kestral"
-version = "0.2.2"
+version = "0.2.3"
 description = "SSH client with an encrypted vault and a built-in MCP server for controlled AI access"
 authors = ["antndev <antonkonig691@gmail.com>"]
 edition = "2021"
@@ -58,7 +58,7 @@ subtle = "2"
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["Foundation", "Security_Credentials", "Security_Cryptography", "Storage_Streams", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Com"] }
+windows = { version = "0.61", features = ["Foundation", "Security_Credentials", "Security_Cryptography", "Storage_Streams", "Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Com", "Win32_System_LibraryLoader"] }
 
 # Optimise for build time over the last bit of runtime speed. This is a desktop
 # SSH client, so lighter codegen and more parallel units cut CI build time a lot
