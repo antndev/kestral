@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.11 - 2026-10-10
+
+### Changed
+- Protected paths start with just .ssh/authorized_keys and .ssh/config again. The authorized_keys entry also covers authorized_keys2 and the Windows administrators_authorized_keys file behind the scenes, and lists that got those two entries automatically are cleaned up once.
+
 ## 0.2.10 - 2026-10-10
 
 ### Changed

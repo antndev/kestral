@@ -1,6 +1,6 @@
 [package]
 name = "kestral"
-version = "0.2.10"
+version = "0.2.11"
 description = "SSH client with an encrypted vault and a built-in MCP server for controlled AI access"
 authors = ["antndev <antonkonig691@gmail.com>"]
 edition = "2021"
