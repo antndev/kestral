@@ -476,7 +476,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   const hostNameFor = (host: string, port: number) => hostFor(host, port)?.name;
   const aiChangedAt = (host: string, port: number) => hosts.some((h) => h.ai_changed && h.hostname.toLowerCase() === host.toLowerCase() && h.port === port);
 
-  const gateAi = useCallback((ids: string[], then: () => void) => {
+  const gateAi = useCallback((ids: string[], then: () => void, label = "Connect") => {
     const changed = hostsRef.current.filter((h) => ids.includes(h.id) && h.ai_changed);
     if (changed.length === 0) {
       then();
@@ -488,7 +488,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       setConfirm({
         title: one ? "Changed by AI" : `${changed.length} hosts changed by AI`,
         message: one ? "The AI created this host or changed where it connects. Check it before you connect." : "The AI created these hosts or changed where they connect. Check them before you connect.",
-        confirmLabel: "Connect",
+        confirmLabel: label,
         guarded: true,
         width: 460,
         body: <AiHostFacts hosts={changed} all={hostsRef.current} identities={identities} />,
@@ -1211,6 +1211,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
           statuses={statuses}
           onConnect={(h) => openTerminal(h)}
           onSftp={openSftp}
+          onConfirmAi={(h) => gateAi([h.id], () => {}, "Confirm")}
           onEdit={(h) => editHost({ host: h })}
           onNew={() => editHost({ host: null })}
           onDuplicate={duplicateHost}

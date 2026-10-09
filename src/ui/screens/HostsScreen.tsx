@@ -233,9 +233,10 @@ interface DetailProps {
   onConnect(): void;
   onSftp(): void;
   onEdit(): void;
+  onConfirmAi(): void;
 }
 
-function HostDetail({ host, user, via, identity, identities, status, note, menu, menuAt, onMenuAt, onConnect, onSftp, onEdit }: DetailProps) {
+function HostDetail({ host, user, via, identity, identities, status, note, menu, menuAt, onMenuAt, onConnect, onSftp, onEdit, onConfirmAi }: DetailProps) {
   const addr = hostAddress({ ...host, username: user });
   return (
     <>
@@ -263,6 +264,11 @@ function HostDetail({ host, user, via, identity, identities, status, note, menu,
             <button type="button" aria-label={`Open SFTP for ${host.name}`} onClick={onSftp} style={pageBtn}>SFTP</button>
             <button type="button" aria-label={`Edit ${host.name}`} onClick={onEdit} style={pageBtn}>Edit</button>
             <MoreMenu hostName={host.name} items={menu} at={menuAt} note={note} onAt={onMenuAt} />
+            {host.ai_changed && (
+              <button type="button" onClick={onConfirmAi} title="The AI created this host or changed where it connects. Review and confirm it." style={pageBtn}>
+                Confirm host
+              </button>
+            )}
           </>
         }
       />
@@ -317,6 +323,7 @@ export function HostsScreen(p: {
   statuses: Record<string, Status>;
   onConnect(h: Host): void;
   onSftp(h: Host): void;
+  onConfirmAi(h: Host): void;
   onEdit(h: Host): void;
   onNew(): void;
   onDuplicate(h: Host): void;
@@ -575,6 +582,7 @@ export function HostsScreen(p: {
               onConnect={() => p.onConnect(current)}
               onSftp={() => p.onSftp(current)}
               onEdit={() => p.onEdit(current)}
+              onConfirmAi={() => p.onConfirmAi(current)}
             />
           )}
         </SplitView>

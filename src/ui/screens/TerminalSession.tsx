@@ -542,7 +542,7 @@ export function TerminalSession({
         ? retryAt !== null
           ? (
               <>
-                Connection lost, retrying in <span style={{ display: "inline-block", minWidth: "2ch", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{Math.max(1, Math.ceil((retryAt - now) / 1000))}</span> s{tries}
+                Connection lost{tries}, retrying in <span style={{ fontVariantNumeric: "tabular-nums" }}>{Math.max(1, Math.ceil((retryAt - now) / 1000))}</span> s
               </>
             )
           : `Reconnecting${tries}`
