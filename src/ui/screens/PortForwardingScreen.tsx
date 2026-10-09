@@ -185,7 +185,7 @@ function routeOf(it: Item): string {
   return rest ? `${KIND_LABEL[it.d.kind]} · ${rest}` : KIND_LABEL[it.d.kind];
 }
 
-export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hosts: Host[]; onHostsChanged(): void }) {
+export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfirmHosts }: { hosts: Host[]; onHostsChanged(): void; onConfirmHosts?(hostIds: string[], then: () => void): void }) {
   const [hosts, setHosts] = useState<Host[]>(hostsProp);
   const [active, setActive] = useState<Set<string>>(new Set());
   const [stats, setStats] = useState<Record<string, number>>({});
@@ -279,10 +279,14 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hos
     setSelId(id);
   }
 
-  async function toggle(r: Row) {
+  async function toggle(r: Row, checked = false) {
     const id = r.f.id;
     if (pending[id]) return;
     const on = active.has(id);
+    if (!on && !checked && onConfirmHosts) {
+      onConfirmHosts([r.host.id], () => void toggle(r, true));
+      return;
+    }
     setPending((p) => ({ ...p, [id]: on ? "stop" : "start" }));
     setRowErr((e) => ({ ...e, [id]: "" }));
     try {
@@ -464,7 +468,7 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged }: { hos
                 if (!alive.current) return;
                 setNewDraft((n) => (n?.id === id ? null : n));
                 setHosts(next);
-                setRowErr((e) => ({ ...e, [id]: restartErr }));
+                if (restartErr !== null) setRowErr((e) => ({ ...e, [id]: restartErr }));
                 void refreshActive();
               }}
               refreshActive={refreshActive}
@@ -519,7 +523,7 @@ function RuleDetail({
   onToggle(): void;
   onDelete(): void;
   onCancel(): void;
-  onSaved(id: string, hosts: Host[], restartErr: string): void;
+  onSaved(id: string, hosts: Host[], restartErr: string | null): void;
   refreshActive(): Promise<void>;
 }) {
   const saved = useMemo(() => (row ? draftOf(row) : null), [row]);
@@ -580,16 +584,18 @@ function RuleDetail({
 
   async function saveStart(m: StartMode) {
     if (!row || saving) return;
-    const updated: PortForward = { ...row.f, autostart: m === "open" || m === "both", start_on_connect: m === "connect" || m === "both" };
     setSaving(true);
     setFormErr("");
     try {
       const fresh = await api.hostList();
       const h = fresh.find((x) => x.id === row.host.id);
+      const cur = h?.forwards.find((f) => f.id === id);
       if (!h) throw new Error("That host no longer exists.");
+      if (!cur) throw new Error("This rule no longer exists.");
+      const updated: PortForward = { ...cur, autostart: m === "open" || m === "both", start_on_connect: m === "connect" || m === "both" };
       const next = { ...h, forwards: h.forwards.map((f) => (f.id === id ? updated : f)) };
       await api.hostUpdate(next);
-      onSaved(id, fresh.map((x) => (x.id === next.id ? next : x)), "");
+      onSaved(id, fresh.map((x) => (x.id === next.id ? next : x)), null);
     } catch (e) {
       if (alive.current) setFormErr(errText(e));
     } finally {

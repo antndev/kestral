@@ -1,10 +1,10 @@
 import { CSSProperties, ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
-import type { ApprovalRequest, Host, HostKeyChanged, HostKeyRequest, KnownHostEntry, NewHost, Snippet } from "./api";
+import type { ApprovalRequest, Host, HostKeyChanged, HostKeyRequest, Identity, KnownHostEntry, NewHost, Snippet } from "./api";
 import { usePrefs } from "./lib/prefs";
 import { Shell, type Tab } from "./ui/Shell";
-import { IS_MAC, errText, readJson, writeJson, type SectionId, type Status } from "./ui/mock";
+import { IS_MAC, MONO, errText, readJson, writeJson, type SectionId, type Status } from "./ui/mock";
 import { LockIcon, CloseIcon } from "./ui/icons";
 import { BootScreen, LockScreen } from "./ui/LockScreen";
 import { termBus, TerminalSession, type SessionStatus } from "./ui/screens/TerminalSession";
@@ -41,7 +41,7 @@ import {
 import { HostsScreen, type QuickConnect } from "./ui/screens/HostsScreen";
 import { SftpScreen } from "./ui/screens/SftpScreen";
 import { KeychainScreen } from "./ui/screens/KeychainScreen";
-import { SnippetsScreen, clearSnippetRuns } from "./ui/screens/SnippetsScreen";
+import { SnippetsScreen, clearSnippetRuns, flushSnippetSaves } from "./ui/screens/SnippetsScreen";
 import { PortForwardingScreen } from "./ui/screens/PortForwardingScreen";
 import { KnownHostsScreen } from "./ui/screens/KnownHostsScreen";
 import { AiScreen } from "./ui/screens/AiScreen";
@@ -49,7 +49,7 @@ import { LogsScreen } from "./ui/screens/LogsScreen";
 import { WelcomeScreen } from "./ui/screens/WelcomeScreen";
 import { SettingsScreen } from "./ui/screens/SettingsScreen";
 import { CommandPalette, type PaletteAction } from "./ui/overlays/CommandPalette";
-import { AiStoppedDialog, ApprovalDialog, ConfirmDialog, HostKeyChangedDialog, HostKeyDialog, TrayOnboardingDialog, UpdateDialog } from "./ui/overlays/Dialogs";
+import { AiStoppedDialog, ApprovalDialog, ConfirmDialog, HostKeyChangedDialog, HostKeyDialog, TrayOnboardingDialog, UpdateDialog, VisibleLine } from "./ui/overlays/Dialogs";
 
 // ------------------------------------------------------------------ theme
 
@@ -173,11 +173,52 @@ function Toasts({ items, onDismiss }: { items: Toast[]; onDismiss: (id: number) 
   );
 }
 
+// ------------------------------------------------------------------ AI changed hosts
+
+function signIn(h: Host, identities: Identity[] | null): { user: string; method: string } {
+  const a = h.auth;
+  if (a.kind === "agent") return { user: h.username, method: "SSH agent" };
+  if (a.kind === "key") return { user: h.username, method: `Key ${a.secret_id}` };
+  if (a.kind === "password") return { user: h.username, method: `Password ${a.secret_id}` };
+  const it = identities?.find((i) => i.id === a.identity_id);
+  return { user: it?.username || h.username, method: it ? `Identity ${it.name}` : "Identity" };
+}
+
+function AiHostFacts({ hosts, all, identities }: { hosts: Host[]; all: Host[]; identities: Identity[] | null }) {
+  const dt: CSSProperties = { color: "var(--text-2)" };
+  const dd: CSSProperties = { margin: 0, minWidth: 0, overflowWrap: "anywhere" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflow: "auto" }}>
+      {hosts.map((h) => {
+        const { user, method } = signIn(h, identities);
+        const addr = `${user}@${h.hostname.includes(":") ? `[${h.hostname}]` : h.hostname}:${h.port}`;
+        const jump = h.jump_host_id ? all.find((x) => x.id === h.jump_host_id)?.name ?? "missing host" : "";
+        return (
+          <dl key={h.id} data-selectable style={{ display: "grid", gridTemplateColumns: "84px minmax(0, 1fr)", gap: "6px 12px", margin: 0, padding: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", fontSize: 12.5 }}>
+            <dt style={dt}>Name</dt>
+            <dd style={dd}><VisibleLine text={h.name} /></dd>
+            <dt style={dt}>Address</dt>
+            <dd style={{ ...dd, fontFamily: MONO, fontSize: 12 }}><VisibleLine text={addr} /></dd>
+            <dt style={dt}>Sign-in</dt>
+            <dd style={dd}><VisibleLine text={method} /></dd>
+            {jump && (
+              <>
+                <dt style={dt}>Jump host</dt>
+                <dd style={dd}><VisibleLine text={jump} /></dd>
+              </>
+            )}
+          </dl>
+        );
+      })}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ workspace
 
 type Session = { tabId: string; kind: "terminal" | "sftp"; host: Host; status: Status; layout?: Layout; focus?: string; zoom?: string | null; broadcast?: boolean; openSeq?: number };
 type EditorState = { host: Host | null; prefill?: Partial<NewHost>; connectAfterSave?: boolean; seq?: number };
-type Confirm = { title: string; message: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void | Promise<void> };
+type Confirm = { title: string; message: string; confirmLabel?: string; danger?: boolean; guarded?: boolean; width?: number; body?: ReactNode; onConfirm: () => void | Promise<void> };
 
 const SESSION_TO_STATUS: Record<SessionStatus, Status> = { connecting: "warn", connected: "ok", reconnecting: "warn", error: "err", closed: "idle" };
 
@@ -300,7 +341,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
 
   // Autostart forwards once per unlock.
   useEffect(() => {
-    if (!loaded || autostarted.current) return;
+    if (!loaded || hostsError || autostarted.current) return;
     autostarted.current = true;
     void (async () => {
       let active: Set<string>;
@@ -310,6 +351,10 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         active = new Set();
       }
       for (const h of hosts) {
+        if (h.ai_changed) {
+          if (h.forwards.some((f) => f.autostart && !active.has(f.id))) toast("info", `Port forwards on ${h.name} did not start because the AI changed this host. Connect to it once to review it.`);
+          continue;
+        }
         for (const f of h.forwards) {
           if (!f.autostart || active.has(f.id)) continue;
           try {
@@ -320,7 +365,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         }
       }
     })();
-  }, [loaded, hosts, toast]);
+  }, [loaded, hostsError, hosts, toast]);
 
   // Startup checks: data warnings, tray onboarding, updates.
   useEffect(() => {
@@ -427,10 +472,39 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
     setChangedOpen({ info, saved: info.saved ?? [] });
   }
 
-  const hostNameFor = (host: string, port: number) => hosts.find((h) => h.hostname.toLowerCase() === host.toLowerCase() && h.port === port)?.name;
+  const hostFor = (host: string, port: number) => hosts.find((h) => h.hostname.toLowerCase() === host.toLowerCase() && h.port === port);
+  const hostNameFor = (host: string, port: number) => hostFor(host, port)?.name;
+  const aiChangedAt = (host: string, port: number) => hosts.some((h) => h.ai_changed && h.hostname.toLowerCase() === host.toLowerCase() && h.port === port);
+
+  const gateAi = useCallback((ids: string[], then: () => void) => {
+    const changed = hostsRef.current.filter((h) => ids.includes(h.id) && h.ai_changed);
+    if (changed.length === 0) {
+      then();
+      return;
+    }
+    void (async () => {
+      const identities = changed.some((h) => h.auth.kind === "identity") ? await api.identityList().catch(() => null) : null;
+      const one = changed.length === 1;
+      setConfirm({
+        title: one ? "Changed by AI" : `${changed.length} hosts changed by AI`,
+        message: one ? "The AI created this host or changed where it connects. Check it before you connect." : "The AI created these hosts or changed where they connect. Check them before you connect.",
+        confirmLabel: "Connect",
+        guarded: true,
+        width: 460,
+        body: <AiHostFacts hosts={changed} all={hostsRef.current} identities={identities} />,
+        onConfirm: async () => {
+          for (const h of changed) await api.hostAckAiChange(h.id);
+          const acked = new Set(changed.map((h) => h.id));
+          hostsRef.current = hostsRef.current.map((h) => (acked.has(h.id) ? { ...h, ai_changed: false } : h));
+          setHosts(hostsRef.current);
+          then();
+        },
+      });
+    })();
+  }, []);
 
   // ---------------------------------------------------------------- sessions
-  const openTerminal = useCallback((host: Host, initialCommand?: string, password?: string | null) => {
+  const openTerminalNow = useCallback((host: Host, initialCommand?: string, password?: string | null) => {
     const tabId = crypto.randomUUID();
     const paneId = newPaneId();
     if (password) termBus.handOver(paneId, password);
@@ -439,6 +513,10 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
     setActiveTab(tabId);
     setLastTerminal(tabId);
   }, []);
+  const openTerminal = useCallback(
+    (host: Host, initialCommand?: string, password?: string | null) => gateAi([host.id], () => openTerminalNow(host, initialCommand, password)),
+    [gateAi, openTerminalNow],
+  );
   const sessionsRef = useRef<Session[]>([]);
   sessionsRef.current = sessions;
   const sftpUnsaved = useRef(new Map<string, string>());
@@ -449,10 +527,12 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       setActiveTab(open.tabId);
       return;
     }
-    const tabId = crypto.randomUUID();
-    setSessions((s) => [...s, { tabId, kind: "sftp", host, status: "warn" }]);
-    setActiveTab(tabId);
-  }, []);
+    gateAi([host.id], () => {
+      const tabId = crypto.randomUUID();
+      setSessions((s) => [...s, { tabId, kind: "sftp", host, status: "warn" }]);
+      setActiveTab(tabId);
+    });
+  }, [gateAi]);
   const dropTab = useCallback((tabId: string) => {
     sftpUnsaved.current.delete(tabId);
     setSessions((s) => {
@@ -540,6 +620,12 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       }
       const target = opts.target && hasPane(s.layout, opts.target) ? opts.target : s.focus && hasPane(s.layout, s.focus) ? s.focus : leaves(s.layout)[0];
       const hostId = opts.hostId ?? specsRef.current[target]?.hostId ?? s.host.id;
+      if (hostsRef.current.some((x) => x.id === hostId && x.ai_changed)) {
+        gateAi([hostId], () => {
+          if (splitPane(tabId, opts)) selectTab(tabId);
+        });
+        return true;
+      }
       const { w, h } = contentSize();
       const side = opts.side ?? autoSide(s.layout, target, w, h);
       const id = newPaneId();
@@ -549,7 +635,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       setSessions((ss) => ss.map((x) => (x.tabId === tabId && x.layout ? { ...x, layout: insertAt(x.layout, target, side, leaf(id)), focus: id, zoom: null } : x)));
       return true;
     },
-    [contentSize],
+    [contentSize, gateAi, selectTab],
   );
 
   const closePane = useCallback(
@@ -790,16 +876,17 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   function lock() {
     if (lockingRef.current) return;
     const open = sessionsRef.current.length;
-    const unsaved = [...sftpUnsaved.current.values()][0];
-    if (!open && !unsaved) {
+    const ed = editorRef.current && editorDirty.current ? (editorRef.current.host ? `Your changes to ${editorRef.current.host.name} are not saved.` : "The new host is not saved yet.") : "";
+    const lost = [...new Set(sftpUnsaved.current.values()), ed].filter(Boolean);
+    if (!open && !lost.length) {
       lockNow();
       return;
     }
     setConfirm({
       title: "Lock the vault?",
-      message: [open ? (open === 1 ? "This closes the open tab." : `This closes all ${open} open tabs.`) : "", unsaved ? `${unsaved} Locking discards them.` : ""].filter(Boolean).join(" "),
+      message: [open ? (open === 1 ? "This closes the open tab." : `This closes all ${open} open tabs.`) : "", ...lost, lost.length ? "Locking discards them." : ""].filter(Boolean).join(" "),
       confirmLabel: "Lock",
-      danger: !!unsaved,
+      danger: lost.length > 0,
       onConfirm: lockNow,
     });
   }
@@ -812,8 +899,9 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
     setSessions([]);
     setSpecs({});
     setActiveTab("vault");
-    void api
-      .vaultLock()
+    void flushSnippetSaves()
+      .catch(() => {})
+      .then(() => api.vaultLock())
       .catch(() => {})
       .finally(() => window.setTimeout(onLocked, 450));
   }
@@ -878,8 +966,9 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   }
 
   function duplicateHost(h: Host) {
-    const { id: _id, ...rest } = h;
+    const { id: _id, ai_changed: _ai, ...rest } = h;
     void _id;
+    void _ai;
     editHost({
       host: null,
       prefill: {
@@ -894,7 +983,11 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   }
 
   function runInTabs(script: string, hostIds: string[]) {
-    hosts.filter((h) => hostIds.includes(h.id)).forEach((h) => openTerminal(h, script));
+    const list = hosts.filter((h) => hostIds.includes(h.id));
+    gateAi(
+      list.map((h) => h.id),
+      () => list.forEach((h) => openTerminalNow(h, script)),
+    );
   }
 
   function pasteToActive(script: string) {
@@ -1072,7 +1165,11 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         label: "Close other tabs",
         danger: true,
         onClick: () => {
-          sessions.filter((x) => x.tabId !== id).forEach((x) => closeTab(x.tabId));
+          const others = sessionsRef.current.filter((x) => x.tabId !== id);
+          const reasons = [...new Set(others.map((x) => sftpUnsaved.current.get(x.tabId)).filter((r): r is string => !!r))];
+          const closeAll = () => others.forEach((x) => dropTab(x.tabId));
+          if (!reasons.length) return closeAll();
+          setConfirm({ title: "Close other tabs?", message: `${reasons.join(" ")} Closing discards them.`, confirmLabel: "Close tabs", danger: true, onConfirm: closeAll });
         },
       });
     }
@@ -1139,8 +1236,8 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         onEditHost={(h) => editHost({ host: h })}
       />
     );
-  else if (section === "snippets") sectionBody = <SnippetsScreen hosts={hosts} pasteTarget={pasteSession ? { name: tabHost(pasteSession).name, connected: stages[pasteSession.focus ?? ""] === "connected" } : null} onRunInTabs={runInTabs} onPasteToActive={pasteToActive} onSnippetsChanged={refreshSnippets} focusRequest={snippetFocus} />;
-  else if (section === "forwarding") sectionBody = <PortForwardingScreen hosts={hosts} onHostsChanged={refreshHosts} />;
+  else if (section === "snippets") sectionBody = <SnippetsScreen hosts={hosts} pasteTarget={pasteSession ? { name: tabHost(pasteSession).name, connected: stages[pasteSession.focus ?? ""] === "connected" } : null} onRunInTabs={runInTabs} onPasteToActive={pasteToActive} onSnippetsChanged={refreshSnippets} onConfirmHosts={gateAi} focusRequest={snippetFocus} />;
+  else if (section === "forwarding") sectionBody = <PortForwardingScreen hosts={hosts} onHostsChanged={refreshHosts} onConfirmHosts={gateAi} />;
   else if (section === "known")
     sectionBody = (
       <KnownHostsScreen
@@ -1203,6 +1300,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
                   else sftpUnsaved.current.delete(s.tabId);
                 }}
                 onOpenTerminal={(h) => openTerminal(h)}
+                onConfirmHosts={gateAi}
               />
             </div>
           ))}
@@ -1255,6 +1353,8 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
           expired={hostKeyReqs[0].expired}
           replaced={hostKeyReqs[0].replaced}
           hostName={hostNameFor(hostKeyReqs[0].host, hostKeyReqs[0].port)}
+          user={hostFor(hostKeyReqs[0].host, hostKeyReqs[0].port)?.username}
+          aiChanged={aiChangedAt(hostKeyReqs[0].host, hostKeyReqs[0].port)}
           onAnswer={(accept, save) => {
             const r = hostKeyReqs[0];
             setHostKeyReqs((q) => q.filter((x) => x.id !== r.id));
@@ -1302,13 +1402,18 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       {updateOpen && update && <UpdateDialog version={update.version} notes={update.notes} onClose={() => setUpdateOpen(false)} />}
       {confirm && (
         <ConfirmDialog
+          key={confirm.title + confirm.message}
           title={confirm.title}
           message={confirm.message}
           confirmLabel={confirm.confirmLabel}
           danger={confirm.danger}
+          guarded={confirm.guarded}
+          width={confirm.width}
           onClose={() => setConfirm(null)}
           onConfirm={() => confirm.onConfirm()}
-        />
+        >
+          {confirm.body}
+        </ConfirmDialog>
       )}
       <Toasts items={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
       {locking && (

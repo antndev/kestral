@@ -1,4 +1,4 @@
-import { CSSProperties, ReactNode, RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
+import { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { writeText as clipWrite } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { addedLabel } from "../../api";
@@ -264,6 +264,43 @@ function useAlive() {
   return alive;
 }
 
+export function useArmed(delay = 750) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    let timer = 0;
+    const stop = () => {
+      window.clearTimeout(timer);
+      setArmed(false);
+    };
+    const start = () => {
+      stop();
+      timer = window.setTimeout(() => setArmed(true), delay);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") stop();
+      else if (document.hasFocus()) start();
+    };
+    if (document.visibilityState === "visible" && document.hasFocus()) start();
+    window.addEventListener("blur", stop);
+    window.addEventListener("focus", start);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("blur", stop);
+      window.removeEventListener("focus", start);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [delay]);
+  return armed;
+}
+
+export function ignoreRepeat(e: ReactKeyboardEvent) {
+  if (e.repeat && (e.key === "Enter" || e.key === " ")) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}
+
 /** Seconds left until `deadline` (ms epoch), ticking once per second. */
 function useSecondsLeft(deadline: number) {
   const [now, setNow] = useState(() => Date.now());
@@ -313,6 +350,9 @@ export function ConfirmDialog({
   message,
   confirmLabel,
   danger,
+  guarded,
+  ready = true,
+  notReady,
   onConfirm,
   onClose,
   width,
@@ -322,7 +362,10 @@ export function ConfirmDialog({
   message: string;
   confirmLabel?: string;
   danger?: boolean;
-  onConfirm(): void | Promise<void>;
+  guarded?: boolean;
+  ready?: boolean;
+  notReady?: string;
+  onConfirm(): void | boolean | Promise<void | boolean>;
   onClose(): void;
   width?: number;
   children?: ReactNode;
@@ -336,10 +379,13 @@ export function ConfirmDialog({
   const titleId = useId();
   const descId = useId();
 
+  const armed = useArmed();
+  const blocked = (guarded && !armed) || !ready;
+
   const close = () => {
     if (!busy) onClose();
   };
-  const focusRef = danger ? cancelRef : confirmRef;
+  const focusRef = danger || guarded ? cancelRef : confirmRef;
   const z = useModalLayer(ref, { onEscape: close, initialFocus: focusRef });
 
   useEffect(() => {
@@ -347,14 +393,16 @@ export function ConfirmDialog({
   }, [err, focusRef]);
 
   async function confirm() {
-    if (busy) return;
+    if (busy || blocked) return;
     // The focused button is about to be disabled; keep focus inside the dialog.
     ref.current?.focus();
     setBusy(true);
     setErr("");
     try {
-      await onConfirm();
-      if (alive.current) onClose();
+      const done = await onConfirm();
+      if (!alive.current) return;
+      if (done === false) setBusy(false);
+      else onClose();
     } catch (e) {
       if (!alive.current) return;
       setErr(errText(e));
@@ -363,8 +411,8 @@ export function ConfirmDialog({
   }
 
   return (
-    <Overlay z={z} onBackdrop={danger ? undefined : close}>
-      <section ref={ref} role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} aria-busy={busy} tabIndex={-1} style={{ ...dialogBox(width ?? 400), gap: 20, padding: "22px 24px 20px" }}>
+    <Overlay z={z} onBackdrop={danger || guarded ? undefined : close}>
+      <section ref={ref} role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} aria-busy={busy} tabIndex={-1} onKeyDownCapture={guarded ? ignoreRepeat : undefined} style={{ ...dialogBox(width ?? 400), gap: 20, padding: "22px 24px 20px" }}>
         <div>
           <h2 id={titleId} style={title}>{heading}</h2>
           <p id={descId} style={{ ...lead, lineHeight: 1.5, overflowWrap: "anywhere" }}>{message}</p>
@@ -373,7 +421,7 @@ export function ConfirmDialog({
         <Actions left={<span role="alert" title={err || undefined} style={{ display: "block", color: "var(--err)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{err}</span>}>
           {[
             <Button key="cancel" btnRef={cancelRef} disabled={busy} title={busy ? WORKING : undefined} onClick={close}>Cancel</Button>,
-            <Button key="ok" btnRef={confirmRef} kind={danger ? "danger" : "primary"} disabled={busy} title={busy ? WORKING : undefined} onClick={confirm}>
+            <Button key="ok" btnRef={confirmRef} kind={danger ? "danger" : "primary"} disabled={busy || blocked} title={busy ? WORKING : !ready ? notReady : undefined} onClick={confirm}>
               <span style={{ display: "grid", placeItems: "center" }}>
                 <span style={{ gridArea: "1 / 1", opacity: busy ? 0 : 1 }}>{confirmLabel ?? (danger ? "Delete" : "Confirm")}</span>
                 <span style={{ gridArea: "1 / 1", display: "flex", opacity: busy ? 1 : 0 }}>
@@ -393,6 +441,8 @@ export function ConfirmDialog({
 export function HostKeyDialog({
   req,
   hostName,
+  user,
+  aiChanged,
   receivedAt,
   expired: expiredByBackend,
   replaced,
@@ -401,6 +451,8 @@ export function HostKeyDialog({
   req: HostKeyRequest;
   /** Name of the saved host this address belongs to; the lead sentence falls back to the address. */
   hostName?: string;
+  user?: string;
+  aiChanged?: boolean;
   /** When the hostkey-request event arrived (ms epoch); defaults to when the dialog opened. */
   receivedAt?: number;
   expired?: boolean;
@@ -419,9 +471,10 @@ export function HostKeyDialog({
   const titleId = useId();
   const descId = useId();
   const alive = useAlive();
+  const armed = useArmed();
 
   const answer = (accept: boolean, persist: boolean) => {
-    if (answered) return;
+    if (answered || (accept && !armed)) return;
     setAnswered(true);
     onAnswer(accept, persist);
   };
@@ -458,7 +511,7 @@ export function HostKeyDialog({
         </div>
         <dl style={dl}>
           <dt style={dt}>Host</dt>
-          <dd data-selectable style={{ margin: 0, fontFamily: MONO, fontSize: 12, overflowWrap: "anywhere" }}>{hostPort(req.host, req.port)}</dd>
+          <dd data-selectable style={{ margin: 0, fontFamily: MONO, fontSize: 12, overflowWrap: "anywhere" }}><VisibleLine text={`${user ? `${user}@` : ""}${hostPort(req.host, req.port)}`} /></dd>
           <dt style={dt}>Key type</dt>
           <dd style={{ margin: 0 }}>{keyLabel(req.key_type)}</dd>
           <dt style={dt}>Fingerprint</dt>
@@ -479,6 +532,9 @@ export function HostKeyDialog({
             </button>
           </dd>
         </dl>
+        {aiChanged && (
+          <p role="alert" style={{ margin: 0, fontSize: 12.5, color: "var(--warn)" }}>The AI created or changed this host. Make sure this is the server you expect before you trust it.</p>
+        )}
         <div>
           <p style={{ margin: "0 0 6px", fontSize: 12, color: "var(--text-2)" }}>Check it on the server with this command</p>
           <code style={{ display: "block", padding: "8px 10px", borderRadius: 6, background: "var(--term-bg)", color: "var(--term-text)", fontFamily: MONO, fontSize: 12, overflowWrap: "anywhere" }}>{checkCmd}</code>
@@ -497,8 +553,8 @@ export function HostKeyDialog({
             <Actions left={`Refused automatically in ${fmtCountdown(left)}`}>
               {[
                 <Button key="cancel" btnRef={cancelRef} disabled={answered} title={answered ? WORKING : undefined} onClick={() => answer(false, false)}>Cancel</Button>,
-                <Button key="once" disabled={answered} title={answered ? WORKING : undefined} onClick={() => answer(true, false)}>Connect once</Button>,
-                <Button key="trust" kind="primary" disabled={answered} title={answered ? WORKING : undefined} onClick={() => answer(true, save)}>Trust and connect</Button>,
+                <Button key="once" disabled={answered || !armed} title={answered ? WORKING : undefined} onClick={() => answer(true, false)}>Connect once</Button>,
+                <Button key="trust" kind="primary" disabled={answered || !armed} title={answered ? WORKING : undefined} onClick={() => answer(true, save)}>Trust and connect</Button>,
               ]}
             </Actions>
           </>
@@ -607,11 +663,9 @@ export function HostKeyChangedDialog({
 
 /* ---------- ApprovalDialog ---------- */
 
-const HIDDEN_RANGES: [number, number][] = [[0x00, 0x08], [0x0b, 0x1f], [0x7f, 0x9f], [0xad, 0xad], [0x200b, 0x200f], [0x2028, 0x2029], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069], [0xfeff, 0xfeff]];
-const isHidden = (c: string) => {
-  const n = c.codePointAt(0) ?? 0;
-  return HIDDEN_RANGES.some(([a, b]) => n >= a && n <= b);
-};
+const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u061C\u115F\u1160\u180E\u3164\uFFA0\uFE00-\uFE0F\u206A-\u206F\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/u;
+const isHidden = (c: string) => c !== "\t" && c !== "\n" && HIDDEN.test(c);
+export const hasHidden = (text: string) => [...text].some(isHidden);
 
 function hiddenLabel(c: string) {
   if (c === "\u001b") return "ESC";
@@ -619,7 +673,11 @@ function hiddenLabel(c: string) {
   return `U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
-function VisibleLine({ text }: { text: string }) {
+export function visibleText(text: string): string {
+  return [...text].map((c) => (isHidden(c) ? `[${hiddenLabel(c)}]` : c)).join("");
+}
+
+export function VisibleLine({ text }: { text: string }) {
   const parts: ReactNode[] = [];
   let plain = "";
   for (const c of text) {
@@ -637,26 +695,67 @@ function VisibleLine({ text }: { text: string }) {
   return <>{parts.length ? parts : " "}</>;
 }
 
-export function CommandPreview({ text }: { text: string }) {
+const LONG_LINE = 200;
+
+export function CommandPreview({ text, onReviewed }: { text: string; onReviewed?(done: boolean): void }) {
   const lines = text.split("\n");
-  const hidden = [...text].some(isHidden);
+  const hidden = hasHidden(text);
+  const long = lines.some((l) => l.length > LONG_LINE);
+  const preRef = useRef<HTMLPreElement>(null);
+  const [overflow, setOverflow] = useState(false);
+  const [seenText, setSeenText] = useState<string | null>(null);
+  const seen = seenText === text;
+  const reviewed = useRef(onReviewed);
+  reviewed.current = onReviewed;
+
+  const measure = useCallback(() => {
+    const el = preRef.current;
+    if (!el) return;
+    setOverflow(el.scrollHeight - el.clientHeight > 1);
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 2) setSeenText(text);
+  }, [text]);
+
+  useLayoutEffect(() => {
+    measure();
+    const el = preRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measure]);
+
+  useEffect(() => {
+    reviewed.current?.(seen);
+  }, [seen]);
+
+  const warn = hidden || long || overflow || lines.length > 1;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ display: "flex", gap: 8, fontSize: 12, color: hidden || lines.length > 1 ? "var(--warn)" : "var(--text-3)" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", columnGap: 8, fontSize: 12, color: warn ? "var(--warn)" : "var(--text-3)" }}>
         <span>{lines.length === 1 ? "1 line" : `${lines.length} lines`}</span>
         {hidden && <span>Contains hidden characters, marked below</span>}
+        {long && <span>Very long line</span>}
       </div>
-      <pre
-        data-selectable
-        style={{ margin: 0, maxHeight: 208, overflow: "auto", padding: "10px 12px", borderRadius: 6, background: "var(--term-bg)", color: "var(--term-text)", fontFamily: MONO, fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
-      >
-        {lines.map((l, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: lines.length > 1 ? `${String(lines.length).length + 1}ch minmax(0, 1fr)` : "minmax(0, 1fr)", columnGap: 10 }}>
-            {lines.length > 1 && <span aria-hidden="true" style={{ color: "var(--text-3)", textAlign: "right", userSelect: "none" }}>{i + 1}</span>}
-            <span><VisibleLine text={l} /></span>
-          </div>
-        ))}
-      </pre>
+      <div style={{ position: "relative" }}>
+        <pre
+          ref={preRef}
+          data-selectable
+          onScroll={measure}
+          style={{ margin: 0, maxHeight: 208, overflow: "auto", padding: "10px 12px", borderRadius: 6, background: "var(--term-bg)", color: "var(--term-text)", fontFamily: MONO, fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere", boxShadow: long || overflow ? "inset 0 0 0 1px color-mix(in srgb, var(--warn) 55%, transparent)" : undefined }}
+        >
+          {lines.map((l, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: lines.length > 1 ? `${String(lines.length).length + 1}ch minmax(0, 1fr)` : "minmax(0, 1fr)", columnGap: 10 }}>
+              {lines.length > 1 && <span aria-hidden="true" style={{ color: l.length > LONG_LINE ? "var(--warn)" : "var(--text-3)", textAlign: "right", userSelect: "none" }}>{i + 1}</span>}
+              <span><VisibleLine text={l} /></span>
+            </div>
+          ))}
+        </pre>
+        {overflow && !seen && (
+          <span aria-hidden="true" style={{ position: "absolute", left: 1, right: 1, bottom: 1, display: "flex", justifyContent: "center", padding: "14px 0 6px", borderRadius: "0 0 6px 6px", background: "linear-gradient(transparent, var(--term-bg) 70%)", color: "var(--warn)", fontSize: 11.5, pointerEvents: "none" }}>
+            Scroll to the end to review all of it
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -685,18 +784,14 @@ export function ApprovalDialog({
   const ref = useRef<HTMLElement>(null);
   const denyRef = useRef<HTMLButtonElement>(null);
   const [answered, setAnswered] = useState(false);
-  const [armed, setArmed] = useState(false);
+  const armed = useArmed();
+  const [reviewed, setReviewed] = useState(false);
   const [openedAt] = useState(() => receivedAt ?? Date.now());
   const left = useSecondsLeft(openedAt + PROMPT_TIMEOUT_MS);
   const timedOut = left === 0 || !!expiredByBackend;
   const isFile = req.kind === "file";
   const titleId = useId();
   const descId = useId();
-
-  useEffect(() => {
-    const t = window.setTimeout(() => setArmed(true), 750);
-    return () => window.clearTimeout(t);
-  }, []);
 
   const answer = (approved: boolean) => {
     if (answered) return;
@@ -718,16 +813,16 @@ export function ApprovalDialog({
             </p>
           </div>
         </div>
-        <CommandPreview text={req.command} />
+        <CommandPreview text={req.command} onReviewed={setReviewed} />
         <Actions left={!timedOut ? `Denied automatically in ${fmtCountdown(left)}` : isFile ? "Timed out, the request was denied" : "Timed out, the command was denied"}>
           {[
             <Button key="deny" btnRef={denyRef} disabled={answered} title={answered ? WORKING : undefined} onClick={() => answer(false)}>Deny</Button>,
             <Button
               key="approve"
               kind="primary"
-              disabled={answered || timedOut || !armed}
-              title={timedOut ? "This request timed out" : answered ? WORKING : undefined}
-              onClick={() => armed && answer(true)}
+              disabled={answered || timedOut || !armed || !reviewed}
+              title={timedOut ? "This request timed out" : answered ? WORKING : !reviewed ? "Scroll to the end first" : undefined}
+              onClick={() => armed && reviewed && answer(true)}
             >
               {isFile ? "Approve" : <>Approve &amp; run</>}
             </Button>,
@@ -792,10 +887,15 @@ async function pendingUpdate(): Promise<PendingUpdate> {
 }
 
 /** Downloads, installs and relaunches. `onPct` gets null while the size is unknown. */
-async function installUpdate(onPct: (pct: number | null) => void) {
+async function installUpdate(report: (pct: number | null) => void) {
   if (updateLock.busy) throw new Error("An update is already installing.");
   const update = await pendingUpdate();
   updateLock.busy = true;
+  const onPct = (pct: number | null) => {
+    updateLock.setPhase({ kind: "downloading", pct });
+    report(pct);
+  };
+  onPct(0);
 
   const runDownload = async () => {
     let total = 0;
@@ -817,6 +917,7 @@ async function installUpdate(onPct: (pct: number | null) => void) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await runDownload();
+      updateLock.setPhase({ kind: "ready" });
       const { relaunch } = await import("@tauri-apps/plugin-process");
       await relaunch();
       return;
@@ -830,6 +931,7 @@ async function installUpdate(onPct: (pct: number | null) => void) {
     }
   }
   updateLock.busy = false;
+  updateLock.setPhase({ kind: "error", message: friendlyUpdateError(lastErr) });
   throw lastErr;
 }
 

@@ -20,7 +20,7 @@ import type { Host, Snippet } from "../../api";
 import { usePrefs } from "../../lib/prefs";
 import { IS_MAC, KEYS, MONO, errText, termFontStack } from "../mock";
 import { ChevronIcon, DotsIcon, PlayIcon, PlusIcon, SnippetIcon, TrashIcon } from "../icons";
-import { CommandPreview, ConfirmDialog, Overlay, useModalLayer } from "../overlays/Dialogs";
+import { CommandPreview, ConfirmDialog, Overlay, VisibleLine, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import {
   Block,
@@ -254,8 +254,16 @@ function subscribeRuns(l: () => void) {
 const getRuns = () => runStore;
 
 export function clearSnippetRuns() {
+  for (const r of runStore) if (r.results.some((x) => isLive(x.status))) stopRun(r.runId);
   pendingOutput.clear();
   setRuns(() => []);
+}
+
+let flushMounted: (() => Promise<void>) | null = null;
+let lastSave: Promise<void> = Promise.resolve();
+
+export function flushSnippetSaves(): Promise<void> {
+  return flushMounted ? flushMounted() : lastSave;
 }
 
 function patchHost(runId: string, hostId: string, fn: (r: HostRun) => HostRun) {
@@ -397,6 +405,14 @@ const RUN_DEBOUNCE_MS = 600;
 
 const normalize = (s: Snippet): Snippet => ({ ...s, folder: s.folder ?? "" });
 
+type RunPlan = { targets: Host[]; tabs: boolean; parallel: boolean };
+type Review = { mode: "run" | "paste"; s: Snippet; script: string; values: Record<string, string>; plan: RunPlan; changed: boolean; seq: number };
+
+function varDefaults(s: Snippet): Record<string, string> {
+  const p = prefsOf(s);
+  return Object.fromEntries(parseVars(s.script).map((v) => [v, p.vars[v]?.value ?? ""]));
+}
+
 // True when nothing (an app overlay, a dialog) covers the middle of el.
 function isOnTop(el: HTMLElement): boolean {
   const r = el.getBoundingClientRect();
@@ -413,6 +429,7 @@ export function SnippetsScreen({
   onRunInTabs,
   onPasteToActive,
   onSnippetsChanged,
+  onConfirmHosts,
   focusRequest,
 }: {
   hosts: Host[];
@@ -421,6 +438,7 @@ export function SnippetsScreen({
   onRunInTabs(script: string, hostIds: string[]): void;
   onPasteToActive(script: string): void;
   onSnippetsChanged?(): void;
+  onConfirmHosts?(hostIds: string[], then: () => void): void;
   focusRequest?: { id: string; seq: number };
 }) {
   const [snippets, setSnippets] = useState<Snippet[]>([]);
@@ -498,6 +516,7 @@ export function SnippetsScreen({
       }
       if (savedAny) changedRef.current?.();
     });
+    lastSave = saveChain.current;
     return saveChain.current;
   }, []);
 
@@ -524,12 +543,14 @@ export function SnippetsScreen({
 
   useEffect(() => {
     alive.current = true;
+    flushMounted = flush;
     void reload();
     const onFocus = () => void reload();
     window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("focus", onFocus);
       alive.current = false;
+      if (flushMounted === flush) flushMounted = null;
       void flush();
     };
   }, [reload, flush]);
@@ -717,6 +738,7 @@ export function SnippetsScreen({
 
   async function deleteSnippet(target: Snippet) {
     const id = target.id;
+    for (const r of runStore) if (r.snippetId === id && r.results.some((x) => isLive(x.status))) stopRun(r.runId);
     await api.snippetDelete(id);
     dirty.current.delete(id);
     dropLegacy(id);
@@ -824,18 +846,25 @@ export function SnippetsScreen({
     if (confirmDelete && loaded && !snippets.some((x) => x.id === confirmDelete.id)) setConfirmDelete(null);
   }, [confirmDelete, loaded, snippets]);
 
-  const [review, setReview] = useState<{ mode: "run" | "paste"; s: Snippet; script: string } | null>(null);
+  const [review, setReview] = useState<Review | null>(null);
+  const [reviewSeen, setReviewSeen] = useState(false);
+  const reviewSeq = useRef(0);
   const modalOpen = folderDialog !== null || promptSnippet !== null || confirmDelete !== null || folderToDelete !== null || review !== null;
 
-  function execute(mode: "run" | "paste", s: Snippet, script: string) {
-    if ((snippetsRef.current.find((x) => x.id === s.id) ?? s).ai_edited) {
-      setReview({ mode, s, script });
-      return;
-    }
-    executeNow(mode, s, script);
+  function runPlan(s: Snippet): RunPlan {
+    const { targets, tabs } = blockFor(s);
+    return { targets, tabs, parallel: prefsOf(s).parallel };
   }
 
-  function executeNow(mode: "run" | "paste", s: Snippet, script: string) {
+  function execute(mode: "run" | "paste", s: Snippet, script: string, values: Record<string, string>) {
+    if ((snippetsRef.current.find((x) => x.id === s.id) ?? s).ai_edited) {
+      setReview({ mode, s, script, values, plan: runPlan(s), changed: false, seq: ++reviewSeq.current });
+      return;
+    }
+    executeNow(mode, s, script, runPlan(s));
+  }
+
+  function executeNow(mode: "run" | "paste", s: Snippet, script: string, plan: RunPlan) {
     if (mode === "paste") {
       onPasteToActive(script);
       return;
@@ -845,9 +874,26 @@ export function SnippetsScreen({
     lastRun.current[s.id] = now;
     setEditId((cur) => (cur === s.id ? null : cur));
     setFreshId((cur) => (cur === s.id ? null : cur));
-    const { p, targets, tabs } = planFor(s);
-    if (tabs) onRunInTabs(script, targets.map((h) => h.id));
-    else void startRun(s.id, script, targets, p.parallel);
+    const ids = plan.targets.map((h) => h.id);
+    if (plan.tabs) onRunInTabs(script, ids);
+    else if (onConfirmHosts) onConfirmHosts(ids, () => void startRun(s.id, script, plan.targets, plan.parallel));
+    else void startRun(s.id, script, plan.targets, plan.parallel);
+  }
+
+  async function confirmReview(r: Review): Promise<boolean> {
+    await flush();
+    const ok = await api.snippetMarkReviewed(r.s.id, r.s.script, r.s.target_host_ids);
+    if (!ok) {
+      await reload();
+      const fresh = snippetsRef.current.find((x) => x.id === r.s.id);
+      if (!fresh) throw new Error("This snippet was deleted.");
+      const values = { ...varDefaults(fresh), ...r.values };
+      setReview({ ...r, s: fresh, script: applyVars(fresh.script, values), values, plan: runPlan(fresh), changed: true, seq: ++reviewSeq.current });
+      return false;
+    }
+    commitSnippets(snippetsRef.current.map((x) => (x.id === r.s.id ? { ...x, ai_edited: false } : x)));
+    executeNow(r.mode, r.s, r.script, r.plan);
+    return true;
   }
 
   function begin(mode: "run" | "paste", s: Snippet | null = selected) {
@@ -862,7 +908,8 @@ export function SnippetsScreen({
       setVarPrompt({ snippetId: s.id, mode, names: need, values: Object.fromEntries(need.map((v) => [v, p.vars[v]?.value ?? ""])) });
       return;
     }
-    execute(mode, s, applyVars(s.script, Object.fromEntries(vars.map((v) => [v, p.vars[v]?.value ?? ""]))));
+    const values = Object.fromEntries(vars.map((v) => [v, p.vars[v]?.value ?? ""]));
+    execute(mode, s, applyVars(s.script, values), values);
   }
 
   const beginRef = useRef(begin);
@@ -1199,9 +1246,9 @@ export function SnippetsScreen({
             script={promptSnippet.script}
             defaults={Object.fromEntries(pp.vars.map((v) => [v, pp.p.vars[v]?.value ?? ""]))}
             runLabel={pp.runTitle}
-            onSubmit={(script) => {
+            onSubmit={(script, values) => {
               setVarPrompt(null);
-              execute(varPrompt.mode, promptSnippet, script);
+              execute(varPrompt.mode, promptSnippet, script, values);
             }}
             onClose={() => setVarPrompt(null)}
           />
@@ -1210,25 +1257,27 @@ export function SnippetsScreen({
 
       {review && (
         <ConfirmDialog
+          key={review.seq}
+          guarded
+          ready={reviewSeen}
+          notReady="Scroll to the end of the command first"
           title="Changed by AI"
-          message="The AI created or changed this snippet. Check every line before it runs."
-          confirmLabel={review.mode === "run" ? "Run" : "Paste"}
+          message={review.changed ? "The snippet changed while you were reviewing it. This is the new version, check it again." : "The AI created or changed this snippet. Check every line and where it runs before you continue."}
+          confirmLabel={review.mode === "paste" ? "Paste" : review.plan.tabs ? "Run in tabs" : "Run"}
           width={540}
-          onConfirm={async () => {
-            const cur = snippetsRef.current.find((x) => x.id === review.s.id) ?? review.s;
-            await api.snippetUpdate({ ...cur, ai_edited: false });
-            commitSnippets(snippetsRef.current.map((x) => (x.id === cur.id ? { ...x, ai_edited: false } : x)));
-            executeNow(review.mode, review.s, review.script);
-          }}
+          onConfirm={() => confirmReview(review)}
           onClose={() => setReview(null)}
         >
-          <CommandPreview text={review.script} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <ReviewTarget review={review} pasteName={pasteTo?.name ?? ""} />
+            <CommandPreview text={review.script} onReviewed={setReviewSeen} />
+          </div>
         </ConfirmDialog>
       )}
       {confirmDelete && (
         <ConfirmDeleteDialog
           title="Delete snippet"
-          message={`Delete "${confirmDelete.label.trim() || "Untitled"}"? This cannot be undone.`}
+          message={`Delete "${confirmDelete.label.trim() || "Untitled"}"?${busyIds.has(confirmDelete.id) ? " Its running commands are stopped." : ""} This cannot be undone.`}
           onConfirm={() => deleteSnippet(confirmDelete)}
           onClose={() => setConfirmDelete(null)}
         />
@@ -1245,6 +1294,24 @@ export function SnippetsScreen({
         );
       })()}
     </main>
+  );
+}
+
+function ReviewTarget({ review, pasteName }: { review: Review; pasteName: string }) {
+  if (review.mode === "paste") return <p style={{ ...muted, margin: 0, fontSize: 12.5 }}>Pastes into {pasteName || "the active terminal"}</p>;
+  const { targets, tabs, parallel } = review.plan;
+  const mode: RunMode = tabs ? "tabs" : parallel ? "parallel" : "serial";
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+      <span style={{ color: "var(--text-2)", marginRight: 2 }}>Runs on</span>
+      {targets.map((h) => (
+        <span key={h.id} style={hostChip}>
+          <VisibleLine text={h.name} />
+          {h.ai_changed && <span title="Changed by AI" style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: "var(--warn)" }}>AI</span>}
+        </span>
+      ))}
+      {targets.length > 1 && <span style={{ color: "var(--text-2)", marginLeft: 4 }}>{RUN_MODES.find((m) => m.id === mode)?.label}</span>}
+    </div>
   );
 }
 
@@ -1951,15 +2018,16 @@ function VarPromptDialog({
   script: string;
   defaults: Record<string, string>;
   runLabel: string;
-  onSubmit(script: string): void;
+  onSubmit(script: string, values: Record<string, string>): void;
   onClose(): void;
 }) {
   const [values, setValues] = useState(initial);
   const missing = names.filter((n) => (values[n] ?? "") === "");
-  const final = applyVars(script, { ...defaults, ...values });
+  const merged = { ...defaults, ...values };
+  const final = applyVars(script, merged);
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (missing.length === 0) onSubmit(final);
+    if (missing.length === 0) onSubmit(final, merged);
   };
   return (
     <Modal title="Fill in variables" onClose={onClose} backdropCloses>

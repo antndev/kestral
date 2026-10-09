@@ -195,6 +195,12 @@ function MoreMenu({ hostName, items, at, note, onAt }: { hostName: string; items
   );
 }
 
+const AI_MARK = "Changed by AI, you are asked to check it before the next connection";
+
+function AiMark() {
+  return <span title={AI_MARK} style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: "var(--warn)" }}>AI</span>;
+}
+
 function Live({ host, status, note }: { host: Host; status: Status; note: Note | null }) {
   const text = note?.text ?? STATUS_LABEL[status];
   return <span role="status" style={srOnly}>{text ? `${host.name}: ${text}` : ""}</span>;
@@ -234,7 +240,12 @@ function HostDetail({ host, user, via, identity, identities, status, note, menu,
   return (
     <>
       <DetailHead
-        title={host.name}
+        title={
+          <>
+            {host.name}
+            {host.ai_changed && <AiMark />}
+          </>
+        }
         sub={
           <>
             <span title={via ? `${addr} via ${via}` : addr} style={{ ...oneLine, ...mono }}>{addr}</span>
@@ -513,7 +524,12 @@ export function HostsScreen(p: {
                           }}
                           icon={<HostsIcon />}
                           iconColor={status === "idle" ? undefined : statusColor(status)}
-                          title={h.name}
+                          title={
+                            <>
+                              {h.name}
+                              {h.ai_changed && <AiMark />}
+                            </>
+                          }
                           sub={`${hostAddress({ ...h, username: userOf(h) })}${via ? ` via ${via}` : ""}`}
                           selected={h.id === current?.id}
                           onSelect={() => setSel(h.id)}

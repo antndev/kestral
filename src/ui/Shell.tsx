@@ -92,7 +92,9 @@ export function useMacInset() {
           }
         };
         await sync();
-        un = await w.onResized(() => void sync());
+        const off = await w.onResized(() => void sync());
+        if (alive) un = off;
+        else off();
       } catch {
         /* not running under Tauri */
       }
@@ -123,7 +125,9 @@ function useMaximized() {
           }
         };
         await sync();
-        un = await w.onResized(() => void sync());
+        const off = await w.onResized(() => void sync());
+        if (alive) un = off;
+        else off();
       } catch {
         /* not running under Tauri */
       }
@@ -243,8 +247,14 @@ function TitleBar({
   const [hoverTab, setHoverTab] = useState<string | null>(null);
   const [tabSlide, setTabSlide] = useState<{ id: string; dx: number; from: number; to: number; w: number; settling: boolean; done?: boolean } | null>(null);
   const slideAbort = useRef<(() => void) | null>(null);
+  const settle = useRef<{ timer: number; finish: () => void } | null>(null);
   const startSlide = (e: React.MouseEvent<HTMLElement>, id: string, name: string) => {
     if (e.button !== 0) return;
+    if (settle.current) {
+      window.clearTimeout(settle.current.timer);
+      settle.current.finish();
+      return;
+    }
     const strip = stripRef.current;
     if (!strip) return;
     const els = [...strip.querySelectorAll<HTMLElement>("[data-tab-id]")];
@@ -306,11 +316,13 @@ function TitleBar({
       window.setTimeout(() => window.removeEventListener("click", stop, { capture: true }), 0);
       const slot = to > from ? rects[to].left + rects[to].width - me.width : to < from ? rects[to].left : me.left;
       setTabSlide({ id, dx: slot - me.left, from, to, w: me.width, settling: true });
-      window.setTimeout(() => {
+      const finish = () => {
+        settle.current = null;
         if (to !== from) onReorderTab(id, rects[to].id);
         setTabSlide({ id, dx: 0, from, to: from, w: me.width, settling: true, done: true });
         requestAnimationFrame(() => requestAnimationFrame(() => setTabSlide(null)));
-      }, 150);
+      };
+      settle.current = { timer: window.setTimeout(finish, 150), finish };
     };
     const key = (ev: KeyboardEvent) => {
       if (ev.key !== "Escape") return;
@@ -326,7 +338,13 @@ function TitleBar({
     slideAbort.current?.();
     slideAbort.current = abort;
   };
-  useEffect(() => () => slideAbort.current?.(), []);
+  useEffect(
+    () => () => {
+      slideAbort.current?.();
+      if (settle.current) window.clearTimeout(settle.current.timer);
+    },
+    [],
+  );
   useEffect(() => {
     stripRef.current?.querySelector<HTMLElement>(`[data-tab-id="${activeTab}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeTab, tabs.length]);

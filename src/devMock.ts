@@ -77,7 +77,7 @@ const hosts: Any[] = [
   { id: "h3", name: "db-primary", hostname: "10.0.1.30", port: 22, username: "ops", auth: { kind: "key", secret_id: "github-ci" }, ai_policy: "locked", ai_file_policy: "locked", forward_agent: true, agent_keys: ["deploy-ed25519"], group: "Production", tags: ["postgres", "via bastion"], forwards: [{ id: "f2", name: "Postgres", local_host: "127.0.0.1", local_port: 5433, remote_host: "localhost", remote_port: 5432, autostart: true, kind: "local", start_on_connect: false }, { id: "f4", name: "SOCKS proxy", local_host: "127.0.0.1", local_port: 1080, remote_host: "localhost", remote_port: 1, autostart: false, kind: "dynamic", start_on_connect: false }], jump_host_id: "h5", options: { keepalive_secs: 30, connect_timeout_secs: 10, terminal_theme: "production", encoding: "", startup_command: "", env: [] } },
   { id: "h4", name: "stage-app", hostname: "10.0.2.10", port: 22, username: "deploy", auth: { kind: "password", secret_id: "pw-stage-app" }, ai_policy: "free", ai_file_policy: "confirm", forward_agent: false, agent_keys: [], group: "Staging", tags: ["app"], forwards: [] },
   { id: "h5", name: "nas", hostname: "192.168.1.10", port: 2222, username: "admin", auth: { kind: "agent" }, ai_policy: "locked", ai_file_policy: "locked", forward_agent: false, agent_keys: [], group: "Homelab", tags: ["storage"], forwards: [] },
-  { id: "h6", name: "new-server", hostname: "10.0.2.40", port: 22, username: "root", auth: { kind: "agent" }, ai_policy: "locked", ai_file_policy: "locked", forward_agent: false, agent_keys: [], group: "", tags: [], forwards: [] },
+  { id: "h6", name: "new-server", hostname: "10.0.2.40", port: 22, username: "root", auth: { kind: "agent" }, ai_policy: "locked", ai_file_policy: "locked", forward_agent: false, agent_keys: [], group: "", tags: [], forwards: [{ id: "f5", name: "Metrics", local_host: "127.0.0.1", local_port: 9100, remote_host: "localhost", remote_port: 9100, autostart: true, kind: "local", start_on_connect: false }], ai_changed: true },
 ];
 const secrets: Any[] = [
   { id: "deploy-ed25519", kind: "private_key" },
@@ -364,6 +364,7 @@ const mockRuns = new Set<string>();
 
 // ---------------------------------------------------------------- dispatcher
 export function installDevMock() {
+  (window as Any).__kestralMock = { emit, hosts, snippets };
   mockWindows("main");
   mockIPC(async (cmd: string, payload?: unknown) => {
     const p = (payload ?? {}) as Any;
@@ -414,6 +415,7 @@ export function installDevMock() {
       case "host_remove": { const i = hosts.findIndex((h) => h.id === p.id); if (i >= 0) hosts.splice(i, 1); return null; }
       case "host_set_policy": { const h = hosts.find((x) => x.id === p.id); if (h) h.ai_policy = p.policy; return null; }
       case "host_set_file_policy": { const h = hosts.find((x) => x.id === p.id); if (h) h.ai_file_policy = p.policy; return null; }
+      case "host_ack_ai_change": { const h = hosts.find((x) => x.id === p.hostId); if (h) h.ai_changed = false; return null; }
       // forwards
       case "forward_active": return [...activeForwards];
       case "forward_start": { await sleep(200); const f = hosts.flatMap((h) => h.forwards).find((x: Any) => x.id === p.forwardId); if (f && f.local_port === 3000) throw "Address already in use (os error 10048)"; activeForwards.add(p.forwardId); return null; }
@@ -470,7 +472,21 @@ export function installDevMock() {
       // snippets
       case "snippet_list": return JSON.parse(JSON.stringify(snippets));
       case "snippet_add": { const s = { id: uuid(), folder: "", ...p.snippet }; snippets.push(s); return s; }
-      case "snippet_update": { const i = snippets.findIndex((s) => s.id === p.snippet.id); if (i >= 0) snippets[i] = { ...p.snippet, ai_edited: false }; return null; }
+      case "snippet_update": {
+        const i = snippets.findIndex((s) => s.id === p.snippet.id);
+        if (i >= 0) {
+          const old = snippets[i];
+          const changed = old.script !== p.snippet.script || JSON.stringify(old.target_host_ids) !== JSON.stringify(p.snippet.target_host_ids);
+          snippets[i] = { ...p.snippet, ai_edited: changed ? false : !!old.ai_edited };
+        }
+        return null;
+      }
+      case "snippet_mark_reviewed": {
+        const s = snippets.find((x) => x.id === p.id);
+        if (!s || s.script !== p.script || JSON.stringify(s.target_host_ids) !== JSON.stringify(p.targetHostIds)) return false;
+        s.ai_edited = false;
+        return true;
+      }
       case "snippet_delete": { const i = snippets.findIndex((s) => s.id === p.id); if (i >= 0) snippets.splice(i, 1); return null; }
       case "run_command_ui": { await sleep(400); const fake: Shell = { id: "", host: hosts.find((h) => h.id === p.hostId) ?? {}, channel: null, idx: 0, line: "", cwd: "~" }; return { stdout: String(p.command).split("\n").map((l: string) => runLine(fake, l)).join("").replace(/\r\n/g, "\n"), stderr: "", exit_status: 0 }; }
       case "run_command_stream": return streamCommand(p);

@@ -1,4 +1,4 @@
-import { CSSProperties, FormEvent, ReactNode, RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, ReactNode, RefObject, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -562,7 +562,9 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
   const [version, setVersion] = useState("");
   const [changelog, setChangelog] = useState<string | null>(null);
   const [changelogErr, setChangelogErr] = useState("");
-  const [upd, setUpd] = useState<UpdateState>({ kind: "idle" });
+  const [checkState, setUpd] = useState<UpdateState>({ kind: "idle" });
+  const install = useSyncExternalStore(updateLock.subscribe, updateLock.phase);
+  const upd: UpdateState = install.kind === "idle" ? checkState : install;
   const [pending, setPending] = useState<{ version: string; notes: string } | null>(null);
   const updRef = useRef<UpdateHandle | null>(null);
   const [linkErr, setLinkErr] = useState("");
@@ -604,10 +606,8 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
 
   async function checkUpdate() {
     setLinkErr("");
-    if (updateLock.busy) {
-      setUpd({ kind: "downloading", pct: null });
-      return;
-    }
+    if (updateLock.busy) return;
+    updateLock.setPhase({ kind: "idle" });
     // Reuse an update the app already found at startup or from the menu.
     const known = updateWindow.__kestralUpdate;
     if (known) {
@@ -640,7 +640,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
     if (updateLock.busy) return;
     updateLock.busy = true;
     setLinkErr("");
-    setUpd({ kind: "downloading", pct: 0 });
+    updateLock.setPhase({ kind: "downloading", pct: 0 });
     // The release CDN and some antivirus scanners drop connections now and then; a retry usually works.
     let last: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -651,10 +651,10 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
           if (e.event === "Started") total = e.data?.contentLength ?? 0;
           else if (e.event === "Progress") {
             got += e.data?.chunkLength ?? 0;
-            if (alive.current) setUpd({ kind: "downloading", pct: total ? Math.round((got / total) * 100) : 0 });
+            updateLock.setPhase({ kind: "downloading", pct: total ? Math.round((got / total) * 100) : 0 });
           }
         });
-        if (alive.current) setUpd({ kind: "ready" });
+        updateLock.setPhase({ kind: "ready" });
         const { relaunch } = await import("@tauri-apps/plugin-process");
         await relaunch();
         return;
@@ -663,12 +663,12 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
         const msg = errText(e).toLowerCase();
         const retryable = ["error sending request", "connect", "timed out", "timeout", "request", "network", "reset"].some((s) => msg.includes(s));
         if (!retryable || attempt === 2) break;
-        if (alive.current) setUpd({ kind: "downloading", pct: 0 });
+        updateLock.setPhase({ kind: "downloading", pct: 0 });
         await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
       }
     }
     updateLock.busy = false;
-    if (alive.current) setUpd({ kind: "error", message: friendlyUpdateError(last) });
+    updateLock.setPhase({ kind: "error", message: friendlyUpdateError(last) });
   }
 
   function openReleases() {

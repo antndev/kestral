@@ -6,7 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import { usePrefs } from "./lib/prefs";
 import { resolveTerminalTheme, toneOf, type Tone } from "./lib/terminal-themes";
 import { termFontStack } from "./ui/mock";
-import { installDisposeGuard } from "./lib/xtermGuard";
+import { installDisposeGuard, oscLinkHandler } from "./lib/xtermGuard";
 
 // A read-only xterm for command/script output. It matches the interactive
 // terminal (same font, size, line height and GPU rendering) and streams: pass a
@@ -37,6 +37,7 @@ export function LiveTerminalOutput({ output }: { output: string }) {
       lineHeight: termLineHeight,
       scrollback: 5000,
       theme: resolveTerminalTheme(termTheme, termColors, el),
+      linkHandler: oscLinkHandler,
     });
     const fit = new FitAddon();
     fitRef.current = fit;

@@ -8,7 +8,7 @@ import "./tokens.css";
 
 // In a plain browser (no Tauri runtime) install a mock IPC so the full UI can be
 // tested without a backend. The real desktop app always has __TAURI_INTERNALS__.
-if (!("__TAURI_INTERNALS__" in window)) {
+if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
   const { installDevMock } = await import("./devMock");
   installDevMock();
 }

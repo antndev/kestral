@@ -10,7 +10,7 @@ import * as api from "../../api";
 import type { FileEntry, Host } from "../../api";
 import { usePrefs } from "../../lib/prefs";
 import { IS_MAC, MOD, MONO, errText, fmtDate, fmtPerms, fmtSize } from "../mock";
-import { ConfirmDialog, Overlay, useModalLayer } from "../overlays/Dialogs";
+import { ConfirmDialog, Overlay, VisibleLine, hasHidden, useModalLayer, visibleText } from "../overlays/Dialogs";
 import {
   CheckIcon,
   ChevronIcon,
@@ -166,7 +166,7 @@ function baseName(p: string): string {
 /** Only the bare basename of a server-supplied name, so `..\..\evil` cannot escape the target folder. */
 function safeName(name: string): string | null {
   const n = name.split(/[/\\]/).pop() ?? "";
-  if (!n || n === "." || n === "..") return null;
+  if (!n || n === "." || n === ".." || hasHidden(n)) return null;
   if (LOCAL_WIN && (/[<>:"|?*\u0000-\u001f]/.test(n) || /[. ]$/.test(n) || WIN_RESERVED.test(n))) return null;
   return n;
 }
@@ -1312,8 +1312,8 @@ function TransferRow({ t, retryBlocked, onCancel, onRetry }: { t: Transfer; retr
       <span role="img" aria-label={dirLabel} title={t.kind === "copy" ? `From ${t.srcHostName ?? "another host"} to ${t.hostName}` : undefined} style={{ color: "var(--text-2)", display: "flex" }}>
         {t.kind === "up" ? <UploadIcon /> : t.kind === "down" ? <DownloadIcon /> : <CopyIcon />}
       </span>
-      <span title={t.name} style={ellipsis}>
-        {t.name}
+      <span title={visibleText(t.name)} style={ellipsis}>
+        <VisibleLine text={t.name} />
       </span>
       {t.state === "failed" ? (
         <span data-selectable title={t.error} style={{ ...ellipsis, fontSize: 12, color: "var(--err)" }}>
@@ -1353,9 +1353,11 @@ function PaneView({
   dropHint,
   dragTarget,
   h,
+  confirmHost,
 }: {
   pane: Pane;
   hosts: Host[];
+  confirmHost?(hostId: string, then: () => void): void;
   stacked: boolean;
   /** This pane receives the toolbar's New folder and New file. */
   focused: boolean;
@@ -1530,7 +1532,9 @@ function PaneView({
         value={locValue}
         onChange={(e) => {
           const v = e.target.value;
-          pane.changeLoc(v === "local" ? { kind: "local" } : { kind: "remote", hostId: v.slice(5) });
+          if (v === "local") pane.changeLoc({ kind: "local" });
+          else if (confirmHost) confirmHost(v.slice(5), () => pane.changeLoc({ kind: "remote", hostId: v.slice(5) }));
+          else pane.changeLoc({ kind: "remote", hostId: v.slice(5) });
         }}
         style={{ ...selectStyle, maxWidth: "min(180px, 40%)" }}
       >
@@ -1733,8 +1737,8 @@ function PaneView({
                           style={inlineInput}
                         />
                       ) : (
-                        <span title={e.name} style={{ ...ellipsis, color: hidden ? "var(--text-2)" : "var(--text)" }}>
-                          {e.name}
+                        <span title={visibleText(e.name)} style={{ ...ellipsis, color: hidden ? "var(--text-2)" : "var(--text)" }}>
+                          <VisibleLine text={e.name} />
                         </span>
                       )}
                     </span>
@@ -1956,6 +1960,7 @@ export function SftpScreen({
   host,
   active,
   onOpenTerminal,
+  onConfirmHosts,
   openRequest,
   onStatus,
   onUnsavedChange,
@@ -1964,6 +1969,7 @@ export function SftpScreen({
   host: Host | null;
   active: boolean;
   onOpenTerminal?(h: Host): void;
+  onConfirmHosts?(hostIds: string[], then: () => void): void;
   /** Bump to re-apply `host` to a pane even when it is the same host as before. */
   openRequest?: number;
   onStatus?(s: "connecting" | "connected" | "error" | "closed"): void;
@@ -2061,10 +2067,12 @@ export function SftpScreen({
         if (p.phase !== "ready") openedTarget.current[sd] = "";
         continue;
       }
-      const now = targetOf(p.loc.hostId);
+      const hostId = p.loc.hostId;
+      const now = targetOf(hostId);
       const was = openedTarget.current[sd];
+      const aiChanged = !!hosts.find((x) => x.id === hostId)?.ai_changed;
       if (!was) openedTarget.current[sd] = now;
-      else if (now && was !== now && !isDirty(p)) {
+      else if (now && was !== now && !isDirty(p) && !aiChanged) {
         openedTarget.current[sd] = "";
         p.reconnect();
       }
@@ -2326,7 +2334,7 @@ export function SftpScreen({
       }
       jobs.push(mkJob("down", hostId, { name: e.name, local: joinPath(localDir, clean, false), remote: e.path, isDir: e.is_dir }, localDir));
     }
-    if (skipped.length) p.setError(`Skipped unsafe names: ${skipped.join(", ")}`);
+    if (skipped.length) p.setError(`Skipped unsafe names: ${skipped.map(visibleText).join(", ")}`);
     const existing = known ?? (await api.localList(localDir).catch(() => [] as FileEntry[]));
     queueChecked(jobs, existing, localDir, false);
   };
@@ -2658,9 +2666,9 @@ export function SftpScreen({
       const count = realDir ? await p.fs.list(e.path).then((l) => l.length, () => 0) : 0;
       if (count > 0) {
         confirmLabel = "Delete all";
-        message = `"${e.name}" contains ${itemCount(count)}. Delete the folder and everything inside? This cannot be undone.`;
+        message = `"${visibleText(e.name)}" contains ${itemCount(count)}. Delete the folder and everything inside? This cannot be undone.`;
       } else {
-        message = `Delete "${e.name}"? This cannot be undone.`;
+        message = `Delete "${visibleText(e.name)}"? This cannot be undone.`;
       }
     } else {
       title = `Delete ${items.length} items`;
@@ -2941,6 +2949,7 @@ export function SftpScreen({
             dropHint={osDrop?.side === s ? { dir: osDrop.dir } : null}
             dragTarget={drag?.over === s ? { dir: drag.overDir } : null}
             h={handlersFor(s)}
+            confirmHost={onConfirmHosts ? (id, then) => onConfirmHosts([id], then) : undefined}
           />
         ))}
       </div>

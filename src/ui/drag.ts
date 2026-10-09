@@ -43,6 +43,10 @@ export function beginDrag(e: ReactMouseEvent, h: DragHandlers) {
   };
 
   const move = (ev: MouseEvent) => {
+    if (active && (ev.buttons & 1) === 0) {
+      cancel();
+      return;
+    }
     if (!active) {
       if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 5) return;
       active = true;

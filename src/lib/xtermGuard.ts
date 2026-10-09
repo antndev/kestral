@@ -1,3 +1,6 @@
+import type { ILinkHandler } from "@xterm/xterm";
+import { openUrl } from "@tauri-apps/plugin-opener";
+
 // xterm's WebGL renderer can throw a benign "reading '_isDisposed'" error from a
 // requestAnimationFrame that fires just after the addon is disposed (on
 // reconnect, or when a terminal tab is closed). It is a teardown race inside
@@ -30,3 +33,18 @@ export function installDisposeGuard() {
     }
   });
 }
+
+export const oscLinkHandler: ILinkHandler = {
+  activate: (event, uri) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    let web = false;
+    try {
+      const { protocol } = new URL(uri);
+      web = protocol === "http:" || protocol === "https:";
+    } catch {
+      web = false;
+    }
+    if (web) void openUrl(uri).catch(() => {});
+  },
+  allowNonHttpProtocols: false,
+};

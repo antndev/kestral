@@ -77,6 +77,7 @@ export interface Host {
   tags: string[];
   jump_host_id: string | null;
   options: HostOptions;
+  ai_changed?: boolean;
 }
 
 export interface NewHost {
@@ -258,6 +259,7 @@ export const hostList = () => invoke<Host[]>("host_list");
 export const hostAdd = (host: NewHost) => invoke<Host>("host_add", { host });
 export const hostUpdate = (host: Host) => invoke<void>("host_update", { host });
 export const hostRemove = (id: string) => invoke<void>("host_remove", { id });
+export const hostAckAiChange = (hostId: string) => invoke<void>("host_ack_ai_change", { hostId });
 export const hostSetPolicy = (id: string, policy: AiPolicy) =>
   invoke<void>("host_set_policy", { id, policy });
 export const hostSetFilePolicy = (id: string, policy: AiPolicy) =>
@@ -354,6 +356,8 @@ export const snippetList = () => invoke<Snippet[]>("snippet_list");
 export const snippetAdd = (snippet: NewSnippet) => invoke<Snippet>("snippet_add", { snippet });
 export const snippetUpdate = (snippet: Snippet) => invoke<void>("snippet_update", { snippet });
 export const snippetDelete = (id: string) => invoke<void>("snippet_delete", { id });
+export const snippetMarkReviewed = (id: string, script: string, targetHostIds: string[]) =>
+  invoke<boolean>("snippet_mark_reviewed", { id, script, targetHostIds });
 export const snippetFolderList = () => invoke<string[]>("snippet_folder_list");
 export const snippetFolderAdd = (name: string) => invoke<string>("snippet_folder_add", { name });
 export const snippetFolderRename = (from: string, to: string) => invoke<string>("snippet_folder_rename", { from, to });

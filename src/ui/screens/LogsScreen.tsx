@@ -7,6 +7,7 @@ import { MONO, errText } from "../mock";
 import { CheckIcon, ChevronIcon, CopyIcon } from "../icons";
 import { Stable } from "../Stable";
 import { EmptyState, ListFilter, ScreenHeader, oneLine, pageBtn, smallBtn, th as baseTh, td } from "../kit";
+import { VisibleLine, visibleText } from "../overlays/Dialogs";
 
 type Tone = "ok" | "err" | "warn" | "accent" | "muted";
 
@@ -240,7 +241,7 @@ export function LogsScreen() {
       const fresh = delta.entries.slice().reverse();
       if (fresh.length) lastId.current = fresh[0].id;
       if (delta.full) {
-        setEntries(fresh);
+        setEntries(fresh.slice(0, MAX_KEEP));
         if (first) {
           loadedAll.current = true;
           window.setTimeout(() => {
@@ -248,7 +249,7 @@ export function LogsScreen() {
               .auditList()
               .then((all) => {
                 if (!alive.current) return;
-                const list = all.slice().reverse();
+                const list = all.slice().reverse().slice(0, MAX_KEEP);
                 if (list.length) lastId.current = list[0].id;
                 setEntries(list);
               })
@@ -430,14 +431,16 @@ export function LogsScreen() {
                         </button>
                       </td>
                       <td style={{ ...cell, ...joined, color: "var(--text-2)", fontVariantNumeric: "tabular-nums" }} title={fmtFull(e.timestamp)}>{fmtTime(e.timestamp)}</td>
-                      <td style={{ ...cell, ...joined, fontWeight: 600 }} title={e.host_name}>{e.host_name}</td>
-                      <td style={{ ...cell, ...joined, fontFamily: MONO, fontSize: 12, whiteSpace: expanded ? "normal" : "nowrap" }} title={expanded ? undefined : e.command}>
+                      <td style={{ ...cell, ...joined, fontWeight: 600 }} title={visibleText(e.host_name)}><VisibleLine text={e.host_name} /></td>
+                      <td style={{ ...cell, ...joined, fontFamily: MONO, fontSize: 12, whiteSpace: expanded ? "normal" : "nowrap" }} title={expanded ? undefined : visibleText(e.command)}>
                         {expanded ? (
                           <div data-selectable onClick={(ev) => ev.stopPropagation()} style={{ maxHeight: 240, overflowY: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }}>
-                            {e.command}
+                            {e.command.split("\n").map((l, k) => (
+                              <div key={k}><VisibleLine text={l} /></div>
+                            ))}
                           </div>
                         ) : (
-                          e.command
+                          <VisibleLine text={e.command.replace(/\n/g, " ")} />
                         )}
                       </td>
                       <td style={{ ...cell, ...joined }}><Decision decision={e.decision} sel={expanded} /></td>

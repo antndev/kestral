@@ -7,7 +7,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { usePrefs } from "./lib/prefs";
 import { resolveTerminalTheme as buildTheme, toneOf, type Tone } from "./lib/terminal-themes";
 import { termBus } from "./ui/termBus";
-import { installDisposeGuard } from "./lib/xtermGuard";
+import { installDisposeGuard, oscLinkHandler } from "./lib/xtermGuard";
 import type { PaneInput, PaneStage } from "./ui/termBus";
 import { PopupMenu } from "./ui/screens/TerminalSession";
 import type { MenuEntry } from "./ui/screens/TerminalSession";
@@ -264,6 +264,7 @@ export function SshTerminal(props: SshTerminalProps) {
       lineHeight: p0.termLineHeight,
       scrollback: p0.termScrollback,
       theme: buildTheme(propsRef.current.themeOverride || p0.termTheme, p0.termColors, el),
+      linkHandler: oscLinkHandler,
     });
     termRef.current = term;
     const fit = new FitAddon();
@@ -394,6 +395,13 @@ export function SshTerminal(props: SshTerminalProps) {
       }
     };
     el.addEventListener("contextmenu", onContextMenu);
+    const onPaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const txt = e.clipboardData?.getData("text/plain");
+      if (!disposed && txt) term.paste(cleanPaste(txt));
+    };
+    el.addEventListener("paste", onPaste, true);
 
     let lineBuf = "";
     let lineSecret = false;
@@ -540,6 +548,7 @@ export function SshTerminal(props: SshTerminalProps) {
       resizeSub.dispose();
       bellSub.dispose();
       el.removeEventListener("contextmenu", onContextMenu);
+      el.removeEventListener("paste", onPaste, true);
       // Dispose the WebGL addon first and defensively. After the connection
       // drops its renderer is half torn down, so letting term.dispose() reach it
       // throws "Cannot read properties of undefined (reading '_isDisposed')".
