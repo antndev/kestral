@@ -13,7 +13,7 @@ use crate::policy::{DeniedReason, Gate, PolicyEngine};
 use crate::sftp::{self, FileEntry};
 use crate::snippets::SnippetStore;
 use crate::ssh::{CommandOutput, SshManager};
-use crate::vault::Vault;
+use crate::vault::{SecretStore, Vault};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct McpInfo {
@@ -53,6 +53,21 @@ fn resolve_local(path: &str) -> PathBuf {
         }
     }
     PathBuf::from(path)
+}
+
+fn plain_local(path: &std::path::Path) -> bool {
+    if !cfg!(windows) {
+        return true;
+    }
+    let text = path.to_string_lossy();
+    let mut lead = text.chars().take(2).filter(|c| matches!(c, '\\' | '/'));
+    let doubled = lead.next().is_some() && lead.next().is_some();
+    match path.components().next() {
+        Some(std::path::Component::Prefix(p)) => {
+            matches!(p.kind(), std::path::Prefix::Disk(_) | std::path::Prefix::VerbatimDisk(_))
+        }
+        _ => !doubled,
+    }
 }
 
 fn effective_local(path: &std::path::Path) -> PathBuf {
@@ -103,6 +118,7 @@ fn effective_local(path: &std::path::Path) -> PathBuf {
 
 impl Services {
     pub async fn ai_run_command(&self, host_id: Uuid, command: &str) -> Result<CommandOutput> {
+        self.require_unlocked()?;
         let host = self.hosts.get(host_id)?;
         let host_id_s = host.id.to_string();
 
@@ -172,19 +188,28 @@ impl Services {
     }
 
     fn record_denied(&self, host_id: &str, host_name: &str, command: &str, reason: DeniedReason) {
-        let text = match reason {
-            DeniedReason::HostLocked => "host locked",
-            DeniedReason::AiInactive => "AI off",
+        let (text, scope) = match reason {
+            DeniedReason::HostLocked => ("host locked", host_id),
+            DeniedReason::AiInactive => ("AI off", ""),
         };
-        self.audit.record(
-            host_id.to_string(),
-            host_name.to_string(),
-            command.to_string(),
-            "denied",
-            None,
-            false,
-            Some(text.to_string()),
-        );
+        self.audit.record_denied(scope, host_id, host_name, command, text);
+    }
+
+    fn require_unlocked(&self) -> Result<()> {
+        if self.vault.is_unlocked() {
+            Ok(())
+        } else {
+            Err(AppError::VaultLocked)
+        }
+    }
+
+    fn regate(&self, host_id: Uuid, files: bool) -> Result<()> {
+        let host = self.hosts.get(host_id)?;
+        let policy = if files { host.ai_file_policy } else { host.ai_policy };
+        match self.policy.gate(policy) {
+            Gate::Denied(reason) => Err(reason_to_err(reason)),
+            _ => Ok(()),
+        }
     }
 
     async fn execute_and_record(
@@ -292,7 +317,8 @@ impl Services {
     }
 
     async fn pooled_exec(&self, host: &Host, command: &str) -> Result<CommandOutput> {
-        let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
+        let allowed = || self.regate(host.id, false);
+        let session = self.ai_pool.session(&self.ssh, &self.vault, host, &allowed).await?;
         let result = self.ssh.exec_on(&session, host, command, false).await;
         let Err(e) = &result else {
             return result;
@@ -302,15 +328,18 @@ impl Services {
         if !never_started {
             return result;
         }
-        let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
+        allowed()?;
+        let session = self.ai_pool.session(&self.ssh, &self.vault, host, &allowed).await?;
         self.ssh.exec_on(&session, host, command, false).await
     }
 
     async fn pooled_sftp(&self, host: &Host) -> Result<sftp::SftpHandle> {
-        let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
+        let allowed = || self.regate(host.id, true);
+        let session = self.ai_pool.session(&self.ssh, &self.vault, host, &allowed).await?;
         match sftp::on_session(session.clone()).await {
             Err(_) if session.is_closed() => {
-                let session = self.ai_pool.session(&self.ssh, &self.vault, host).await?;
+                allowed()?;
+                let session = self.ai_pool.session(&self.ssh, &self.vault, host, &allowed).await?;
                 sftp::on_session(session).await
             }
             other => other,
@@ -318,6 +347,7 @@ impl Services {
     }
 
     pub async fn ai_sftp_list(&self, host_id: Uuid, path: &str) -> Result<Vec<FileEntry>> {
+        self.require_unlocked()?;
         let action = format!("sftp list {path}");
         self.guard_protected(host_id, &action, path).await?;
         let (host, decision) = self.authorize_file(host_id, &action).await?;
@@ -370,11 +400,27 @@ impl Services {
         ))
     }
 
+    fn refuse_share(&self, host_id: Uuid, action: &str) -> AppError {
+        if self.policy.is_active() {
+            if let Ok(h) = self.hosts.get(host_id) {
+                let hid = h.id.to_string();
+                self.audit.record_denied(&hid, &hid, &h.name, action, "network or device path");
+            }
+        }
+        AppError::PathNotAllowed("network shares and device paths cannot be used for AI transfers".into())
+    }
+
     async fn guard_local(&self, host_id: Uuid, action: &str, raw: &str, path: &std::path::Path) -> Result<()> {
         self.guard_protected(host_id, action, raw).await?;
+        if !plain_local(path) {
+            return Err(self.refuse_share(host_id, action));
+        }
         let effective = effective_local(path);
         let shown = effective.to_string_lossy().into_owned();
         self.guard_protected(host_id, action, &shown).await?;
+        if !plain_local(&effective) {
+            return Err(self.refuse_share(host_id, action));
+        }
         if self.policy.is_active() && self.policy.is_app_data(&effective) {
             return Err(self.refuse_protected(host_id, action, raw).await);
         }
@@ -382,6 +428,7 @@ impl Services {
     }
 
     pub async fn ai_sftp_download(&self, host_id: Uuid, remote: &str, local: &str) -> Result<u64> {
+        self.require_unlocked()?;
         let action = format!("sftp download {remote} -> {local}");
         // The local target is unconstrained, but a protected path on either side
         // (e.g. writing onto a local authorized_keys) still trips the kill switch.
@@ -401,6 +448,7 @@ impl Services {
     }
 
     pub async fn ai_sftp_upload(&self, host_id: Uuid, local: &str, remote: &str) -> Result<u64> {
+        self.require_unlocked()?;
         let action = format!("sftp upload {local} -> {remote}");
         self.guard_protected(host_id, &action, remote).await?;
         let local_path = resolve_local(local);
@@ -459,5 +507,22 @@ mod tests {
         let deeper = base.join("a").join("b").join("..").join("..").join("data");
         assert_eq!(effective_local(&deeper), real.join("data"));
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn network_and_device_paths_are_not_plain_local() {
+        for bad in [
+            r"\\localhost\c$\Users\x\.kestral\ai_caps.json",
+            r"\\?\UNC\localhost\c$\Users\x\.kestral\ai_caps.json",
+            r"\\.\pipe\x",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume3\x",
+            "//server/share/x",
+        ] {
+            assert!(!plain_local(std::path::Path::new(bad)), "{bad}");
+        }
+        for good in [r"C:\Users\x\notes.txt", r"\\?\C:\Users\x\notes.txt", "relative/x", r"\temp\x"] {
+            assert!(plain_local(std::path::Path::new(good)), "{good}");
+        }
     }
 }

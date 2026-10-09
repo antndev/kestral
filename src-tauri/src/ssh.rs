@@ -16,7 +16,7 @@ use crate::identities::IdentityStore;
 use crate::known_hosts::{self, Verdict};
 use crate::model::{AuthMethod, Host};
 use crate::util::blocking;
-use crate::vault::{SecretStore, Vault};
+use crate::vault::{SecretKind, SecretStore, Vault};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandOutput {
@@ -315,8 +315,29 @@ impl SshManager {
         password: Option<&str>,
     ) -> Result<Connected> {
         let chain = self.jump_chain(host)?;
+        self.connect_through(&chain, host, vault, on_stage, forwarded, password).await
+    }
+
+    pub async fn connect_route(
+        &self,
+        host: &Host,
+        chain: &[Host],
+        vault: &Arc<Vault>,
+    ) -> Result<client::Handle<ClientHandler>> {
+        Ok(self.connect_through(chain, host, vault, &|_, _| {}, None, None).await?.session)
+    }
+
+    async fn connect_through(
+        &self,
+        chain: &[Host],
+        host: &Host,
+        vault: &Arc<Vault>,
+        on_stage: &(dyn Fn(&str, &str) + Sync),
+        forwarded: Option<ForwardedTx>,
+        password: Option<&str>,
+    ) -> Result<Connected> {
         let mut via: Option<Arc<client::Handle<ClientHandler>>> = None;
-        for jump in &chain {
+        for jump in chain {
             on_stage("jumping", &jump.name);
             let hop = self
                 .connect_one(jump, vault, via.take(), &|_, _| {}, None, None)
@@ -354,8 +375,8 @@ impl SshManager {
         Ok(chain)
     }
 
-    pub fn route_key(&self, host: &Host) -> String {
-        let mut hops = self.jump_chain(host).unwrap_or_default();
+    pub fn route_key(&self, host: &Host, chain: &[Host]) -> String {
+        let mut hops = chain.to_vec();
         hops.push(host.clone());
         let route: Vec<_> = hops.iter().map(|h| (h, self.identities.resolve(h).ok())).collect();
         serde_json::to_string(&route).unwrap_or_default()
@@ -671,6 +692,11 @@ impl SshManager {
     ) -> Result<(russh::client::AuthResult, String)> {
         match auth {
             AuthMethod::Password { secret_id } => {
+                if vault.secret_kind(secret_id)? != SecretKind::Password {
+                    return Err(AppError::Ssh(format!(
+                        "{secret_id} is a private key, not a password. Pick a password for password sign-in."
+                    )));
+                }
                 let bytes = vault.get_secret(secret_id)?;
                 let password = zeroize::Zeroizing::new(
                     std::str::from_utf8(&bytes)
@@ -680,6 +706,11 @@ impl SshManager {
                 self.authenticate_password(session, user, password.as_str()).await
             }
             AuthMethod::Key { secret_id } => {
+                if vault.secret_kind(secret_id)? != SecretKind::PrivateKey {
+                    return Err(AppError::Ssh(format!(
+                        "{secret_id} is a password, not a private key. Pick a key for key sign-in."
+                    )));
+                }
                 let bytes = vault.get_secret(secret_id)?;
                 let key_str = std::str::from_utf8(&bytes)
                     .map_err(|_| AppError::Ssh("Key is not valid UTF-8".into()))?;

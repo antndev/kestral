@@ -135,7 +135,11 @@ impl Vault {
     }
 
     fn persist(&self, unlocked: &Unlocked) -> Result<()> {
-        let plaintext = Zeroizing::new(serde_json::to_vec(&unlocked.data)?);
+        self.persist_with(&unlocked.key, &unlocked.salt, &unlocked.data)
+    }
+
+    fn persist_with(&self, key: &[u8; 32], salt: &[u8; 16], data: &BTreeMap<String, Record>) -> Result<()> {
+        let plaintext = Zeroizing::new(serde_json::to_vec(data)?);
 
         let mut nonce_bytes = [0u8; 24];
         OsRng.fill_bytes(&mut nonce_bytes);
@@ -145,13 +149,13 @@ impl Vault {
             m_cost: KDF_M_COST,
             t_cost: KDF_T_COST,
             p_cost: KDF_P_COST,
-            salt: b64().encode(unlocked.salt),
+            salt: b64().encode(salt),
             nonce: b64().encode(nonce_bytes),
         };
         let aad = serde_json::to_vec(&header)?;
 
         let cipher =
-            XChaCha20Poly1305::new_from_slice(unlocked.key.as_slice()).map_err(|_| AppError::Crypto)?;
+            XChaCha20Poly1305::new_from_slice(key.as_slice()).map_err(|_| AppError::Crypto)?;
         let ciphertext = cipher
             .encrypt(
                 XNonce::from_slice(&nonce_bytes),
@@ -279,10 +283,45 @@ impl Vault {
 
         let mut new_salt = [0u8; 16];
         OsRng.fill_bytes(&mut new_salt);
-        unlocked.key = Vault::derive_key(new, &new_salt)?;
+        let new_key = Vault::derive_key(new, &new_salt)?;
+        self.persist_with(&new_key, &new_salt, &unlocked.data)?;
+        unlocked.key = new_key;
         unlocked.salt = new_salt;
-        self.persist(unlocked)?;
         Ok(())
+    }
+
+    fn apply(&self, unlocked: &mut Unlocked, changes: Vec<(String, Option<Record>)>) -> Result<()> {
+        let mut undo = Vec::with_capacity(changes.len());
+        for (id, rec) in changes {
+            let prev = match rec {
+                Some(r) => unlocked.data.insert(id.clone(), r),
+                None => unlocked.data.remove(&id),
+            };
+            undo.push((id, prev));
+        }
+        let result = self.persist(unlocked);
+        if result.is_err() {
+            for (id, prev) in undo.into_iter().rev() {
+                match prev {
+                    Some(p) => unlocked.data.insert(id, p),
+                    None => unlocked.data.remove(&id),
+                };
+            }
+        }
+        result
+    }
+
+    pub fn secret_kind(&self, id: &str) -> Result<SecretKind> {
+        if is_reserved(id) {
+            return Err(AppError::NotFound(id.to_string()));
+        }
+        let guard = self.state.lock().unwrap();
+        let unlocked = guard.as_ref().ok_or(AppError::VaultLocked)?;
+        unlocked
+            .data
+            .get(id)
+            .map(|rec| rec.kind)
+            .ok_or_else(|| AppError::NotFound(id.to_string()))
     }
 
     fn ensure_dek(unlocked: &mut Unlocked) -> bool {
@@ -344,15 +383,12 @@ impl Vault {
     pub fn put_blob(&self, id: &str, bytes: &[u8]) -> Result<()> {
         let mut guard = self.state.lock().unwrap();
         let unlocked = guard.as_mut().ok_or(AppError::VaultLocked)?;
-        unlocked.data.insert(
-            id.to_string(),
-            Record {
-                kind: SecretKind::Password,
-                value: bytes.to_vec(),
-                created: None,
-            },
-        );
-        self.persist(unlocked)
+        let rec = Record {
+            kind: SecretKind::Password,
+            value: bytes.to_vec(),
+            created: None,
+        };
+        self.apply(unlocked, vec![(id.to_string(), Some(rec))])
     }
 
     /// Insert several secrets and persist once, instead of rewriting and fsyncing
@@ -363,14 +399,15 @@ impl Vault {
         }
         let mut guard = self.state.lock().unwrap();
         let unlocked = guard.as_mut().ok_or(AppError::VaultLocked)?;
+        let mut changes = Vec::new();
         for (id, kind, value) in items {
             if is_reserved(&id) {
                 continue;
             }
             let created = unlocked.data.get(&id).and_then(|r| r.created.clone()).or_else(now_stamp);
-            unlocked.data.insert(id, Record { kind, value, created });
+            changes.push((id, Some(Record { kind, value, created })));
         }
-        self.persist(unlocked)
+        self.apply(unlocked, changes)
     }
 
     pub fn copy_secret(&self, from: &str, to: &str) -> Result<()> {
@@ -387,8 +424,7 @@ impl Vault {
         }
         let rec = unlocked.data.get(from).ok_or_else(|| AppError::NotFound(from.to_string()))?;
         let copy = Record { kind: rec.kind, value: rec.value.clone(), created: rec.created.clone() };
-        unlocked.data.insert(to.to_string(), copy);
-        self.persist(unlocked)
+        self.apply(unlocked, vec![(to.to_string(), Some(copy))])
     }
 
     pub fn seal_envelope(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
@@ -514,15 +550,12 @@ impl SecretStore for Vault {
         let mut guard = self.state.lock().unwrap();
         let unlocked = guard.as_mut().ok_or(AppError::VaultLocked)?;
         let created = unlocked.data.get(id).and_then(|r| r.created.clone()).or_else(now_stamp);
-        unlocked.data.insert(
-            id.to_string(),
-            Record {
-                kind,
-                value: value.to_vec(),
-                created,
-            },
-        );
-        self.persist(unlocked)
+        let rec = Record {
+            kind,
+            value: value.to_vec(),
+            created,
+        };
+        self.apply(unlocked, vec![(id.to_string(), Some(rec))])
     }
 
     fn get_secret(&self, id: &str) -> Result<Zeroizing<Vec<u8>>> {
@@ -544,8 +577,7 @@ impl SecretStore for Vault {
         }
         let mut guard = self.state.lock().unwrap();
         let unlocked = guard.as_mut().ok_or(AppError::VaultLocked)?;
-        unlocked.data.remove(id);
-        self.persist(unlocked)
+        self.apply(unlocked, vec![(id.to_string(), None)])
     }
 
     fn list_secrets(&self) -> Result<Vec<SecretMeta>> {
@@ -766,6 +798,35 @@ mod tests {
         assert!(v.unlock(old).is_err());
         v.unlock(new).unwrap();
         assert_eq!(v.get_secret("k").unwrap().to_vec(), b"val".to_vec());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn failed_persist_changes_nothing_in_memory() {
+        let path = tmp_vault_path("failpersist");
+        let v = Vault::new(path.clone());
+        v.create("old").unwrap();
+        v.put_secret("k", SecretKind::Password, b"val").unwrap();
+        let blocker = path.with_extension("tmp");
+        std::fs::create_dir_all(&blocker).unwrap();
+
+        assert!(v.change_master("old", "new").is_err());
+        assert!(v.delete_secret("k").is_err());
+        assert!(v.put_secret("lost", SecretKind::PrivateKey, b"x").is_err());
+        assert!(v.put_blob(HOSTS_ID, b"[1]").is_err());
+        assert_eq!(v.get_secret("k").unwrap().to_vec(), b"val".to_vec());
+        assert!(v.get_secret("lost").is_err());
+        assert!(v.get_blob(HOSTS_ID).unwrap().is_none());
+
+        std::fs::remove_dir_all(&blocker).unwrap();
+        v.put_secret("later", SecretKind::Password, b"y").unwrap();
+        v.lock();
+        assert!(v.unlock("new").is_err());
+        v.unlock("old").unwrap();
+        assert_eq!(v.get_secret("k").unwrap().to_vec(), b"val".to_vec());
+        assert!(v.get_secret("lost").is_err());
+        assert_eq!(v.secret_kind("later").unwrap(), SecretKind::Password);
 
         let _ = std::fs::remove_file(&path);
     }

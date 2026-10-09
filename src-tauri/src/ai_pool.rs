@@ -49,10 +49,17 @@ impl AiPool {
         self.slots.lock().unwrap().entry(id).or_default().clone()
     }
 
-    pub async fn session(&self, ssh: &SshManager, vault: &Arc<Vault>, host: &Host) -> Result<Session> {
+    pub async fn session(
+        &self,
+        ssh: &SshManager,
+        vault: &Arc<Vault>,
+        host: &Host,
+        allowed: &(dyn Fn() -> Result<()> + Sync),
+    ) -> Result<Session> {
         let slot = self.slot(host.id);
         let mut live = slot.lock().await;
-        let target = ssh.route_key(host);
+        let chain = ssh.jump_chain(host);
+        let target = ssh.route_key(host, chain.as_deref().unwrap_or_default());
         if let Some(l) = live.as_mut() {
             if l.target == target && !l.session.is_closed() && !l.idle() {
                 l.last_used = Instant::now();
@@ -62,7 +69,9 @@ impl AiPool {
         if let Some(old) = live.take() {
             retire(old.session);
         }
-        let session = Arc::new(ssh.connect(host, vault).await?);
+        let chain = chain?;
+        allowed()?;
+        let session = Arc::new(ssh.connect_route(host, &chain, vault).await?);
         *live = Some(Live { session: session.clone(), target, last_used: Instant::now() });
         Ok(session)
     }

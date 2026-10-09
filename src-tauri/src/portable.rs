@@ -163,8 +163,6 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
         identities.push(i);
     }
 
-    let current_hosts: HashSet<uuid::Uuid> = services.hosts.list().iter().map(|h| h.id).collect();
-    let importable: HashSet<uuid::Uuid> = bundle.hosts.iter().map(|h| h.id).filter(|id| !current_hosts.contains(id)).collect();
     let mut hosts_dropped = 0;
     let hosts: Vec<Host> = bundle
         .hosts
@@ -191,18 +189,26 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
                 f.autostart = false;
                 f.start_on_connect = false;
             }
-            if h.jump_host_id.is_some_and(|j| !importable.contains(&j)) {
-                h.jump_host_id = None;
-            }
             h
         })
         .collect();
 
     services.vault.put_secrets(to_add)?;
     let (identities_added, identities_skipped) = services.identities.import(identities)?;
-    let (hosts_added, hosts_skipped) = services.hosts.import(hosts)?;
+    let (imported, hosts_skipped) = services.hosts.import(hosts)?;
+    let hosts_added = imported.len();
     let hosts_skipped = hosts_skipped + hosts_dropped;
-    let (snippets_added, snippets_skipped) = services.snippets.import(bundle.snippets.clone())?;
+    let snippets: Vec<Snippet> = bundle
+        .snippets
+        .iter()
+        .cloned()
+        .map(|mut s| {
+            s.target_host_ids.retain(|id| imported.contains(id));
+            s.ai_edited = true;
+            s
+        })
+        .collect();
+    let (snippets_added, snippets_skipped) = services.snippets.import(snippets)?;
     services.collections.import(bundle.collections.clone())?;
     if !bundle.known_hosts.is_empty() {
         crate::known_hosts::import_content(bundle.known_hosts.as_bytes())?;

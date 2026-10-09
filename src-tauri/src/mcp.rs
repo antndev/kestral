@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::model::{AiPolicy, AuthMethod, Host, NewHost, NewSnippet, Snippet};
 use crate::state::Services;
-use crate::vault::SecretStore;
+use crate::vault::{SecretKind, SecretStore, Vault};
 
 #[derive(Serialize)]
 struct HostView {
@@ -38,16 +38,20 @@ struct HostView {
     tags: Vec<String>,
 }
 
-fn build_auth(kind: &str, secret_id: Option<String>) -> std::result::Result<AuthMethod, String> {
-    match kind {
-        "password" => secret_id
-            .map(|s| AuthMethod::Password { secret_id: s })
-            .ok_or_else(|| "secret_id is required for auth_kind=password".to_string()),
-        "key" => secret_id
-            .map(|s| AuthMethod::Key { secret_id: s })
-            .ok_or_else(|| "secret_id is required for auth_kind=key".to_string()),
-        "agent" => Ok(AuthMethod::Agent),
-        other => Err(format!("unknown auth_kind '{other}', use password, key or agent")),
+fn build_auth(kind: &str, secret_id: Option<String>, vault: &Vault) -> std::result::Result<AuthMethod, String> {
+    let want = match kind {
+        "password" => SecretKind::Password,
+        "key" => SecretKind::PrivateKey,
+        "agent" => return Ok(AuthMethod::Agent),
+        other => return Err(format!("unknown auth_kind '{other}', use password, key or agent")),
+    };
+    let secret_id = secret_id.ok_or_else(|| format!("secret_id is required for auth_kind={kind}"))?;
+    match vault.secret_kind(&secret_id) {
+        Ok(SecretKind::Password) if want == SecretKind::Password => Ok(AuthMethod::Password { secret_id }),
+        Ok(SecretKind::PrivateKey) if want == SecretKind::PrivateKey => Ok(AuthMethod::Key { secret_id }),
+        Ok(SecretKind::Password) => Err(format!("secret '{secret_id}' is a password, use auth_kind=password")),
+        Ok(SecretKind::PrivateKey) => Err(format!("secret '{secret_id}' is a private key, use auth_kind=key")),
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -264,7 +268,7 @@ impl KestralMcp {
         if !self.services.policy.caps().manage_hosts {
             return Ok(Self::cap_denied("creating or changing hosts"));
         }
-        let auth = match build_auth(&a.auth_kind, a.secret_id) {
+        let auth = match build_auth(&a.auth_kind, a.secret_id, &self.services.vault) {
             Ok(au) => au,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
@@ -284,7 +288,9 @@ impl KestralMcp {
             jump_host_id: None,
             options: Default::default(),
         };
-        match self.services.hosts.add(new) {
+        let mut host = new.into_host();
+        host.ai_changed = true;
+        match self.services.hosts.add_host(host) {
             Ok(h) => {
                 crate::events::data_changed("hosts");
                 self.services.audit.record(
@@ -331,7 +337,7 @@ impl KestralMcp {
             Ok(h) => h,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
         };
-        let auth = match build_auth(&a.auth_kind, a.secret_id) {
+        let auth = match build_auth(&a.auth_kind, a.secret_id, &self.services.vault) {
             Ok(au) => au,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
@@ -379,15 +385,12 @@ impl KestralMcp {
             tags: a.tags.unwrap_or(existing.tags),
             jump_host_id: existing.jump_host_id,
             options: existing.options,
+            ai_changed: target_changed || existing.ai_changed,
         };
-        match self.services.hosts.update(updated.clone()) {
-            Ok(()) => {
-                let mut dependents = Vec::new();
-                if target_changed {
-                    dependents = self.services.hosts.lock_dependents(id).unwrap_or_default();
-                    for d in &dependents {
-                        self.services.ai_pool.forget(*d).await;
-                    }
+        match self.services.hosts.update_relocking(updated.clone(), target_changed) {
+            Ok(dependents) => {
+                for d in &dependents {
+                    self.services.ai_pool.forget(*d).await;
                 }
                 crate::events::data_changed("hosts");
                 let note = if !target_changed {

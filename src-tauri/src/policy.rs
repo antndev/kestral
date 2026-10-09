@@ -114,7 +114,7 @@ fn load_protected(path: &std::path::Path) -> Vec<String> {
 
 fn save_protected(path: &std::path::Path, paths: &[String]) {
     if let Ok(json) = serde_json::to_string_pretty(&SavedProtected { version: PROTECTED_VERSION, paths }) {
-        let _ = std::fs::write(path, json);
+        let _ = crate::util::atomic_write(path, json.as_bytes());
     }
 }
 
@@ -123,24 +123,75 @@ fn save_protected(path: &std::path::Path, paths: &[String]) {
 /// Without this an AI could dodge the guard with `.ssh//authorized_keys` or
 /// `.ssh/./authorized_keys`, which still resolve to the real file on the host.
 fn normalize_path(p: &str) -> String {
-    let p = p.replace('\\', "/");
-    let body = p.strip_prefix("~/").unwrap_or(&p);
-    let absolute = body.starts_with('/');
-    let mut out: Vec<&str> = Vec::new();
-    for seg in body.split('/') {
-        match seg {
-            "" | "." => {}
-            ".." => {
-                out.pop();
-            }
-            s => out.push(s),
-        }
-    }
-    let joined = out.join("/");
+    let (absolute, segs) = path_segments(p, true);
+    let joined = segs.join("/");
     if absolute {
         format!("/{joined}")
     } else {
         joined
+    }
+}
+
+fn path_segments(p: &str, dotted_parent: bool) -> (bool, Vec<String>) {
+    let p = p.replace('\\', "/");
+    let body = p.strip_prefix("~/").unwrap_or(&p);
+    let absolute = body.starts_with('/');
+    let mut out: Vec<String> = Vec::new();
+    for seg in body.split('/') {
+        let clean = seg.split(':').next().unwrap_or("").trim_end_matches(['.', ' ']);
+        match (seg, clean) {
+            ("" | ".", _) => {}
+            ("..", _) => {
+                out.pop();
+            }
+            (s, "") if dotted_parent && s.starts_with("..") => {
+                out.pop();
+            }
+            (_, "") => {}
+            (_, c) => out.push(c.to_string()),
+        }
+    }
+    (absolute, out)
+}
+
+fn short_base(name: &str) -> String {
+    let name = name.trim_start_matches('.');
+    let stem = match name.rfind('.') {
+        Some(i) if i > 0 => &name[..i],
+        _ => name,
+    };
+    stem.chars().filter(|c| *c != '.' && *c != ' ').collect()
+}
+
+fn short_name_of(seg: &str, name: &str) -> bool {
+    let Some((prefix, rest)) = seg.split_once('~') else {
+        return false;
+    };
+    let digits = rest.split('.').next().unwrap_or("");
+    if prefix.is_empty() || prefix.len() > 6 || digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    let base = short_base(name);
+    base.starts_with(prefix)
+        || (prefix.len() == 6
+            && prefix.is_char_boundary(2)
+            && base.starts_with(&prefix[..2])
+            && prefix[2..].bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+fn segment_matches(seg: &str, pat: &str) -> bool {
+    seg == pat || short_name_of(seg, pat)
+}
+
+fn segments_match(path: &[String], pat: &[String], anchored: bool) -> bool {
+    if path.len() < pat.len() {
+        return false;
+    }
+    let at = |i: usize| path[i..i + pat.len()].iter().zip(pat).all(|(s, p)| segment_matches(s, p));
+    if anchored {
+        at(0)
+    } else {
+        (0..=path.len() - pat.len()).any(at)
     }
 }
 
@@ -161,20 +212,53 @@ fn collapse_slashes(text: &str) -> String {
 /// `/`-anchored pattern matches from the root; otherwise it matches as a trailing
 /// path segment, and a directory pattern protects everything inside it.
 fn path_matches(path: &str, pattern: &str) -> bool {
-    let path = normalize_path(path).to_lowercase();
-    let pat = normalize_path(pattern.trim()).to_lowercase();
+    let (anchored, pat) = path_segments(&pattern.trim().to_lowercase(), true);
     if pat.is_empty() {
-        return false;
+        return anchored && normalize_path(path) == "/";
     }
-    if let Some(abs) = pat.strip_prefix('/') {
-        let abs = format!("/{abs}");
-        path == abs || path.starts_with(&format!("{abs}/"))
-    } else {
-        path == pat
-            || path.ends_with(&format!("/{pat}"))
-            || path.starts_with(&format!("{pat}/"))
-            || path.contains(&format!("/{pat}/"))
+    let lower = path.to_lowercase();
+    [true, false].into_iter().any(|dotted_parent| {
+        let (absolute, segs) = path_segments(&lower, dotted_parent);
+        (absolute || !anchored) && segments_match(&segs, &pat, anchored)
+    })
+}
+
+#[cfg(unix)]
+fn file_id(path: &std::path::Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+#[cfg(windows)]
+fn file_id(path: &std::path::Path) -> Option<(u64, u64)> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetFileInformationByHandle(file: *mut std::ffi::c_void, info: *mut [u32; 13]) -> i32;
     }
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    let file = std::fs::OpenOptions::new()
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .ok()?;
+    let mut info = [0u32; 13];
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+        return None;
+    }
+    Some((u64::from(info[7]), (u64::from(info[11]) << 32) | u64::from(info[12])))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn file_id(_path: &std::path::Path) -> Option<(u64, u64)> {
+    None
+}
+
+fn path_text(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let text = text.strip_prefix("//?/").unwrap_or(&text);
+    text.trim_end_matches('/').to_lowercase()
 }
 
 impl PolicyEngine {
@@ -236,19 +320,32 @@ impl PolicyEngine {
             .map(|p| p.trim().to_string())
             .filter(|p| !p.is_empty())
             .collect();
+        let mut inner = self.inner.lock().unwrap();
         save_protected(&self.protected_path, &cleaned);
-        self.inner.lock().unwrap().protected = cleaned;
+        inner.protected = cleaned;
     }
 
     /// True if AI writes to `path` are blocked by the protection list.
     pub fn is_app_data(&self, path: &std::path::Path) -> bool {
-        let Some(dir) = self.state_path.parent() else {
+        let Some(dir) = self.state_path.parent().filter(|d| !d.as_os_str().is_empty()) else {
             return false;
         };
-        let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-        let dir = dir.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
-        let p = path.to_string_lossy().replace('\\', "/").to_lowercase();
-        !dir.is_empty() && (p == dir || p.starts_with(&format!("{dir}/")))
+        let canon = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+        let dir_text = path_text(&canon);
+        let p = path_text(path);
+        if !dir_text.is_empty() && (p == dir_text || p.starts_with(&format!("{dir_text}/"))) {
+            return true;
+        }
+        let Some(dir_id) = file_id(dir) else {
+            return false;
+        };
+        if path.ancestors().any(|a| !a.as_os_str().is_empty() && file_id(a) == Some(dir_id)) {
+            return true;
+        }
+        let Some(target) = file_id(path) else {
+            return false;
+        };
+        std::fs::read_dir(dir).is_ok_and(|entries| entries.flatten().any(|e| file_id(&e.path()) == Some(target)))
     }
 
     pub fn is_protected(&self, path: &str) -> bool {
@@ -280,7 +377,7 @@ impl PolicyEngine {
         } else {
             format!("until {}", inner.expires_at.unwrap().to_rfc3339())
         };
-        let _ = std::fs::write(&self.state_path, s);
+        let _ = crate::util::atomic_write(&self.state_path, s.as_bytes());
     }
 
     pub fn enable(&self, minutes: Option<i64>) {
@@ -339,9 +436,10 @@ impl PolicyEngine {
     }
 
     pub fn set_caps(&self, caps: AiCaps) {
-        self.inner.lock().unwrap().caps = caps;
+        let mut inner = self.inner.lock().unwrap();
+        inner.caps = caps;
         if let Ok(json) = serde_json::to_string_pretty(&caps) {
-            let _ = std::fs::write(&self.caps_path, json);
+            let _ = crate::util::atomic_write(&self.caps_path, json.as_bytes());
         }
     }
 
@@ -510,5 +608,87 @@ mod tests {
         assert!(p.is_protected(r"C:\PROGRA~3\ssh\Administrators_Authorized_Keys"));
         assert!(p.mentions_protected(r"Add-Content C:\ProgramData\ssh\Administrators_Authorized_Keys key"));
         assert!(!p.is_protected("/home/u/.ssh/known_hosts"));
+    }
+
+    #[test]
+    fn windows_spellings_of_protected_files_still_match() {
+        let dir = std::env::temp_dir().join(format!("kestral_pol_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = PolicyEngine::new(dir.join("ai_state"), dir.join("missing.json"), dir.join("caps.json"));
+        for path in [
+            "/home/x/.ssh/authorized_keys.",
+            "/home/x/.ssh/authorized_keys ",
+            "/home/x/.ssh/authorized_keys. .",
+            "C:/Users/x/.ssh/authorized_keys::$DATA",
+            "C:/Users/x/.ssh/authorized_keys:evil:$DATA",
+            r"C:\Users\x\.ssh.\authorized_keys",
+            r"C:\Users\x\SSH~1\AUTHOR~1",
+            r"C:\Users\x\.ssh\AUTHOR~2.",
+            r"C:\ProgramData\ssh\ADMINI~1",
+            r"C:\ProgramData\ssh\AD3F2A~1",
+            r"C:\Users\x\.ssh\foo\.. \authorized_keys",
+            r"C:\Users\x\.ssh\...\authorized_keys",
+            r"C:\Users\x\SSH~1\config",
+        ] {
+            assert!(p.is_protected(path), "{path}");
+        }
+        for path in [
+            "/home/x/.ssh/known_hosts",
+            r"C:\Users\x\SSH~1\KNOWN_~1",
+            r"C:\Users\x\DOCUME~1\notes.txt",
+            r"C:\Users\x\.ssh\ZZ3F2A~1",
+            "/etc/myssh/config",
+        ] {
+            assert!(!p.is_protected(path), "{path}");
+        }
+        let abs = engine(&["/etc/passwd"]);
+        assert!(abs.is_protected("/etc/passwd:x"));
+        assert!(abs.is_protected("/etc/x/.. /passwd"));
+        assert!(!abs.is_protected("etc/passwd"));
+    }
+
+    #[test]
+    fn app_data_is_found_by_file_identity() {
+        let root = std::env::temp_dir().join(format!("kestral_pol_{}", uuid::Uuid::new_v4()));
+        let data = root.join("data");
+        let other = root.join("other");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(data.join("vault.json"), b"{}").unwrap();
+        let p = PolicyEngine::new(data.join("ai_state"), data.join("protected.json"), data.join("caps.json"));
+
+        assert!(p.is_app_data(&data.join("vault.json")));
+        assert!(p.is_app_data(&data.join("new.json")));
+        assert!(!p.is_app_data(&other.join("vault.json")));
+
+        let link = other.join("linked.json");
+        std::fs::hard_link(data.join("vault.json"), &link).unwrap();
+        assert!(p.is_app_data(&link));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn policy_files_are_replaced_atomically() {
+        let dir = std::env::temp_dir().join(format!("kestral_pol_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let open = || PolicyEngine::new(dir.join("ai_state"), dir.join("protected.json"), dir.join("caps.json"));
+        let p = open();
+        p.set_caps(AiCaps { list_secrets: false, ..AiCaps::default() });
+        p.set_protected_paths(vec!["/srv/secret".into()]);
+        p.enable(Some(0));
+
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
+        let again = open();
+        assert!(!again.caps().list_secrets);
+        assert_eq!(again.protected_paths(), vec!["/srv/secret".to_string()]);
+        assert!(again.is_active());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

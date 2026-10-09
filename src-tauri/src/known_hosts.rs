@@ -302,12 +302,35 @@ fn forget_lines_in(content: &[u8], host: &str, port: u16) -> HashSet<usize> {
         .collect()
 }
 
+fn plain_names(field: &str) -> impl Iterator<Item = (String, u16)> + '_ {
+    field
+        .split(',')
+        .filter(|e| !e.starts_with("|1|") && !is_wild(e))
+        .map(split_host_port)
+}
+
+fn conflicts(known: &[(Record, PublicKey)], rec: &Record) -> bool {
+    let Some(key) = rec.key() else {
+        return false;
+    };
+    known.iter().any(|(r, k)| {
+        k.key_data() != key.key_data()
+            && (plain_names(&rec.hosts).any(|(h, p)| match_kind(&r.hosts, &h, p) == Some(true))
+                || plain_names(&r.hosts).any(|(h, p)| match_kind(&rec.hosts, &h, p) == Some(true)))
+    })
+}
+
 /// Lines of `incoming` that are host entries not yet present in `existing`.
 /// `@cert-authority` and `@revoked` lines are skipped: the Known hosts screen
 /// cannot show them, so importing them would change trust invisibly.
-fn import_lines<'a>(existing: &[u8], incoming: &'a [u8]) -> Vec<&'a [u8]> {
+fn import_lines<'a>(existing: &[u8], incoming: &'a [u8]) -> (Vec<&'a [u8]>, usize) {
     let mut seen: HashSet<_> = records(existing).map(|r| r.identity()).collect();
+    let known: Vec<(Record, PublicKey)> = records(existing)
+        .filter(|r| r.marker.is_none())
+        .filter_map(|r| r.key().map(|k| (r, k)))
+        .collect();
     let mut out = Vec::new();
+    let mut conflicting = 0;
     for (n, raw) in raw_lines(incoming) {
         let Some(rec) = parse_record(n, raw) else {
             continue;
@@ -315,9 +338,21 @@ fn import_lines<'a>(existing: &[u8], incoming: &'a [u8]) -> Vec<&'a [u8]> {
         if rec.hosts.split(',').any(is_wild) || rec.entry().is_none() || !seen.insert(rec.identity()) {
             continue;
         }
+        if conflicts(&known, &rec) {
+            conflicting += 1;
+            continue;
+        }
         out.push(raw.trim_ascii());
     }
-    out
+    (out, conflicting)
+}
+
+fn warn_conflicts(conflicting: usize) {
+    if conflicting > 0 {
+        tracing::warn!(
+            "{conflicting} known hosts lines skipped: the host is already known with a different key"
+        );
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -521,7 +556,8 @@ impl Store {
     /// Appends host entries from another known_hosts file that are not present
     /// yet and returns how many were added (each one is a new row on the screen).
     pub fn import(&mut self, incoming: &[u8], stamp: &str) -> u32 {
-        let new_lines = import_lines(&self.content, incoming);
+        let (new_lines, conflicting) = import_lines(&self.content, incoming);
+        warn_conflicts(conflicting);
         if new_lines.is_empty() {
             return 0;
         }
@@ -653,7 +689,8 @@ pub async fn known_hosts_export(path: String) -> Result<u32> {
         let store = load()?;
         let target = PathBuf::from(&path);
         let existing = read(&target)?;
-        let new_lines = import_lines(&existing, store.content());
+        let (new_lines, conflicting) = import_lines(&existing, store.content());
+        warn_conflicts(conflicting);
         if new_lines.is_empty() {
             return Ok(0);
         }
@@ -726,9 +763,34 @@ mod tests {
             "* ssh-ed25519 {ED_A}\nfoo,*.bar ssh-ed25519 {ED_A}\n!x,y ssh-ed25519 {ED_B}\nreal.host ssh-ed25519 {ED_B}\n"
         )
         .into_bytes();
-        let lines = import_lines(b"", &incoming);
+        let (lines, _) = import_lines(b"", &incoming);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].starts_with(b"real.host "));
+    }
+
+    #[test]
+    fn import_skips_a_second_key_for_a_known_host() {
+        let existing =
+            format!("a.host ssh-ed25519 {ED_A}\n[b.host]:2222 ssh-ed25519 {ED_A}\n{HASHED} ssh-ed25519 {ED_C}\n")
+                .into_bytes();
+        let incoming = format!(
+            "a.host ssh-ed25519 {ED_B}\nother,b.host ssh-ed25519 {ED_B}\n[b.host]:2222 ssh-ed25519 {ED_B}\nexample.com ssh-ed25519 {ED_A}\nnew.host ssh-ed25519 {ED_B}\na.host ssh-ed25519 {ED_A}\n"
+        )
+        .into_bytes();
+        let (lines, skipped) = import_lines(&existing, &incoming);
+        assert_eq!(skipped, 3);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].starts_with(b"other,b.host "));
+        assert!(lines[1].starts_with(b"new.host "));
+
+        let plain = format!("example.com ssh-ed25519 {ED_A}\n").into_bytes();
+        let hashed = format!("{HASHED} ssh-ed25519 {ED_B}\n").into_bytes();
+        assert_eq!(import_lines(&plain, &hashed), (Vec::new(), 1));
+
+        let mut store = Store::from_content(existing, "t0");
+        assert_eq!(store.import(&incoming, "t1"), 2);
+        assert!(matches!(store.verify("a.host", 22, &key(ED_B)), Verdict::Changed(_)));
+        assert_eq!(store.verify("new.host", 22, &key(ED_B)), Verdict::Trusted);
     }
 
     #[test]

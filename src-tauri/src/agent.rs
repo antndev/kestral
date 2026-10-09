@@ -265,6 +265,7 @@ mod tests {
             tags: vec![],
             jump_host_id: None,
             options: Default::default(),
+            ai_changed: false,
         };
         let ctx = AgentContext::build(&host, &vault, audit).expect("agent context");
 

@@ -123,6 +123,8 @@ pub struct Host {
     pub jump_host_id: Option<Uuid>,
     #[serde(default)]
     pub options: HostOptions,
+    #[serde(default)]
+    pub ai_changed: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -277,6 +279,7 @@ impl NewHost {
             tags: self.tags,
             jump_host_id: self.jump_host_id,
             options: self.options,
+            ai_changed: false,
         };
         host.normalize();
         host

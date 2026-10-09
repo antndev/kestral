@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use uuid::Uuid;
@@ -11,6 +12,7 @@ pub struct SnippetStore {
     path: PathBuf,
     vault: Arc<Vault>,
     warning: Mutex<Option<String>>,
+    unreadable: AtomicBool,
     items: Mutex<Vec<Snippet>>,
 }
 
@@ -20,6 +22,7 @@ impl SnippetStore {
             path,
             vault,
             warning: Mutex::new(None),
+            unreadable: AtomicBool::new(false),
             items: Mutex::new(Vec::new()),
         }
     }
@@ -29,12 +32,14 @@ impl SnippetStore {
             match serde_json::from_slice::<Vec<Snippet>>(&bytes) {
                 Ok(items) => {
                     *self.warning.lock().unwrap() = None;
+                    self.unreadable.store(false, Ordering::SeqCst);
                     *self.items.lock().unwrap() = items;
                 }
                 Err(e) => {
                     *self.warning.lock().unwrap() = Some(format!(
                         "Scripts in the vault could not be read ({e}). Nothing was changed."
                     ));
+                    self.unreadable.store(true, Ordering::SeqCst);
                     *self.items.lock().unwrap() = Vec::new();
                 }
             }
@@ -48,6 +53,7 @@ impl SnippetStore {
             Err(e) => return Err(e.into()),
         };
         *self.warning.lock().unwrap() = None;
+        self.unreadable.store(false, Ordering::SeqCst);
         *self.items.lock().unwrap() = items.clone();
 
         if had_file {
@@ -88,6 +94,11 @@ impl SnippetStore {
     }
 
     fn save(&self, items: &[Snippet]) -> Result<()> {
+        if self.unreadable.load(Ordering::SeqCst) {
+            return Err(AppError::Other(
+                "Scripts in the vault could not be read, so no changes are saved until that is fixed.".into(),
+            ));
+        }
         let bytes = serde_json::to_vec(items)?;
         self.vault.put_blob(Vault::snippets_blob_id(), &bytes)
     }

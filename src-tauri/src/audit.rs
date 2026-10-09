@@ -1,7 +1,9 @@
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -24,6 +26,7 @@ pub struct AuditEntry {
 
 const MAX_ENTRIES: usize = 5000;
 const MAX_LINES: usize = 20_000;
+const DENIAL_WINDOW: Duration = Duration::from_secs(60);
 
 pub struct AuditLog {
     entries: Mutex<Vec<AuditEntry>>,
@@ -36,6 +39,7 @@ pub struct AuditLog {
     // Serializes all disk mutation, so a concurrent append can never interleave
     // with a compaction's rewrite-and-rename and be lost.
     disk_lock: Mutex<()>,
+    denials: Mutex<HashMap<(String, String), (Instant, u32)>>,
 }
 
 impl AuditLog {
@@ -47,6 +51,7 @@ impl AuditLog {
             vault,
             line_count: AtomicUsize::new(0),
             disk_lock: Mutex::new(()),
+            denials: Mutex::new(HashMap::new()),
         }
     }
 
@@ -159,6 +164,35 @@ impl AuditLog {
         if written && self.line_count.fetch_add(1, Ordering::SeqCst) + 1 > MAX_LINES {
             self.compact_locked();
         }
+    }
+
+    pub fn record_denied(&self, scope: &str, host_id: &str, host_name: &str, command: &str, reason: &str) {
+        let suppressed = {
+            let mut denials = self.denials.lock().unwrap();
+            let key = (scope.to_string(), reason.to_string());
+            if let Some((at, count)) = denials.get_mut(&key) {
+                if at.elapsed() < DENIAL_WINDOW {
+                    *count += 1;
+                    return;
+                }
+            }
+            denials.retain(|_, (at, count)| *count > 0 || at.elapsed() < DENIAL_WINDOW);
+            denials.insert(key, (Instant::now(), 0)).map_or(0, |(_, n)| n)
+        };
+        let detail = if suppressed > 0 {
+            format!("{reason}, {suppressed} more not logged")
+        } else {
+            reason.to_string()
+        };
+        self.record(
+            host_id.to_string(),
+            host_name.to_string(),
+            command.to_string(),
+            "denied",
+            None,
+            false,
+            Some(detail),
+        );
     }
 
     fn defer(&self, entry: AuditEntry) {
@@ -336,6 +370,35 @@ mod tests {
         again.load();
         assert_eq!(again.list().len(), 3);
         assert_eq!(again.list()[2].command, "reboot");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn repeated_denials_are_throttled() {
+        let dir = std::env::temp_dir().join(format!("kestral_audit_{}", random_token()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault = Arc::new(crate::vault::Vault::new(dir.join("vault.json")));
+        vault.create("pw").unwrap();
+        let log = AuditLog::new(dir.join("audit.log"), vault.clone());
+
+        for _ in 0..50 {
+            log.record_denied("", "h1", "homelab", "uptime", "AI off");
+        }
+        log.record_denied("", "h2", "other", "ls", "AI off");
+        log.record_denied("h2", "h2", "other", "ls", "host locked");
+        log.record_denied("h2", "h2", "other", "ls", "host locked");
+        assert_eq!(log.list().len(), 2);
+
+        let past = Instant::now().checked_sub(DENIAL_WINDOW + Duration::from_secs(1)).unwrap();
+        for (at, _) in log.denials.lock().unwrap().values_mut() {
+            *at = past;
+        }
+        log.record_denied("", "h1", "homelab", "uptime", "AI off");
+        let entries = log.list();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[2].detail.as_deref(), Some("AI off, 50 more not logged"));
+        assert_eq!(entries[2].decision, "denied");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
