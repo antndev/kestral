@@ -11,8 +11,7 @@ on:
     paths: [package.json]
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: release
@@ -20,42 +19,91 @@ concurrency:
 
 jobs:
   version:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
     outputs:
       version: ${{ steps.v.outputs.version }}
-      build: ${{ steps.v.outputs.build }}
+      cli: ${{ steps.v.outputs.cli }}
+      pubkey: ${{ steps.v.outputs.pubkey }}
+      build: ${{ steps.tag.outputs.build }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-          sparse-checkout: package.json
+          sparse-checkout: |
+            package.json
+            package-lock.json
+            src-tauri/Cargo.toml
+            src-tauri/Cargo.lock
+            src-tauri/tauri.conf.json
           sparse-checkout-cone-mode: false
 
       - id: v
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const read = (f) => fs.readFileSync(f, "utf8");
+          const fail = (msg) => { console.log(`::error::${msg}`); process.exit(1); };
+          const semver = /^\d+\.\d+\.\d+$/;
+          const pkg = JSON.parse(read("package.json"));
+          const lock = JSON.parse(read("package-lock.json"));
+          const conf = JSON.parse(read("src-tauri/tauri.conf.json"));
+          const cargoPackage = read("src-tauri/Cargo.toml").split(/^(?=\[)/m).find((s) => s.split(/\r?\n/)[0].trim() === "[package]") ?? "";
+          const version = pkg.version;
+          if (!semver.test(version ?? "")) fail(`package.json version "${version}" is not x.y.z`);
+          const copies = {
+            "src-tauri/Cargo.toml": cargoPackage.match(/^version\s*=\s*"([^"]*)"/m)?.[1],
+            "src-tauri/Cargo.lock": read("src-tauri/Cargo.lock").match(/^name = "kestral"\r?\nversion = "([^"]*)"/m)?.[1],
+            "package-lock.json": lock.version,
+            'package-lock.json packages[""]': lock.packages?.[""]?.version,
+          };
+          for (const [where, v] of Object.entries(copies)) if (v !== version) fail(`${where} has version "${v}", package.json has "${version}"`);
+          if (conf.version !== "../package.json") fail(`src-tauri/tauri.conf.json must take its version from "../package.json"`);
+          const cli = lock.packages?.["node_modules/@tauri-apps/cli"]?.version;
+          if (!semver.test(cli ?? "")) fail(`no exact @tauri-apps/cli version in package-lock.json`);
+          const pubkey = conf.plugins?.updater?.pubkey;
+          if (!/^[A-Za-z0-9+/]+=*$/.test(pubkey ?? "")) fail(`no updater pubkey in src-tauri/tauri.conf.json`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncli=${cli}\npubkey=${pubkey}\n`);
+          console.log(`version ${version}, @tauri-apps/cli ${cli}`);
+          EOF
+
+      - id: tag
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.v.outputs.version }}
         run: |
-          version=$(node -p "require('./package.json').version")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if gh api "repos/${{ github.repository }}/git/ref/tags/v$version" > /dev/null 2>&1; then
-            echo "v$version already exists, nothing to build"
-            echo "build=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          fi
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
+          case "$code" in
+            200) echo "$TAG already exists, nothing to build"; echo "build=false" >> "$GITHUB_OUTPUT" ;;
+            404) echo "build=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::tag lookup for $TAG failed with HTTP $code"; exit 1 ;;
+          esac
 
   build:
     needs: version
     if: needs.version.outputs.build == 'true'
+    permissions:
+      contents: read
     strategy:
       fail-fast: true
       matrix:
         include:
           - platform: windows-latest
+            name: windows
             args: ""
           - platform: macos-latest
+            name: macos
             args: "--bundles app,dmg"
     runs-on: ${{ matrix.platform }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -78,54 +126,182 @@ jobs:
 
       - run: npm ci --no-audit --no-fund
 
-      # Each platform uploads its bundles into a draft release. latest.json is
-      # written once by the publish job, so the parallel builds never race on it.
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Write the CI config
+        shell: bash
+        run: echo '{"bundle":{"createUpdaterArtifacts":false}}' > "$RUNNER_TEMP/ci.conf.json"
+
+      - name: Build without updater artifacts
+        run: npx tauri build --config "${{ runner.temp }}/ci.conf.json" ${{ matrix.args }}
+
+      - name: Collect the release files
+        shell: bash
+        run: |
+          bundle=src-tauri/target/release/bundle
+          mkdir out
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp "$bundle/nsis/Kestral_${VERSION}_x64-setup.exe" out/
+          else
+            cp "$bundle/dmg/Kestral_${VERSION}_aarch64.dmg" out/
+            COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs -czf out/Kestral_aarch64.app.tar.gz -C "$bundle/macos" Kestral.app
+            first=$(tar -tzf out/Kestral_aarch64.app.tar.gz | sed -n 1p)
+            [ "${first%/}" = Kestral.app ] || { echo "::error::unexpected first archive entry $first"; exit 1; }
+          fi
+          ls -l out
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          tagName: v${{ needs.version.outputs.version }}
-          releaseName: Kestral v${{ needs.version.outputs.version }}
-          releaseCommitish: ${{ github.sha }}
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: false
-          args: ${{ matrix.args }}
+          name: kestral-${{ matrix.name }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
 
   publish:
     needs: [version, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
-      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.version.outputs.version }}
       TAG: v${{ needs.version.outputs.version }}
-      REPO: ${{ github.repository }}
+      WIN: Kestral_${{ needs.version.outputs.version }}_x64-setup.exe
+      DMG: Kestral_${{ needs.version.outputs.version }}_aarch64.dmg
+      MAC: Kestral_aarch64.app.tar.gz
+    defaults:
+      run:
+        shell: bash
+        working-directory: release
     steps:
-      - name: Write latest.json from both platforms and publish
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: kestral-*
+          path: release
+          merge-multiple: true
+
+      - name: Check the release files
         run: |
-          mkdir sig && cd sig
-          gh release download "$TAG" --repo "$REPO" --pattern "*.sig"
+          ls -l
+          expected=$(printf '%s\n' "$WIN" "$DMG" "$MAC" | sort)
+          actual=$(ls -A | sort)
+          [ "$actual" = "$expected" ] || { echo "::error::expected exactly $WIN, $DMG and $MAC"; exit 1; }
+
+      - name: Sign the updater files
+        timeout-minutes: 10
+        env:
+          CLI: ${{ needs.version.outputs.cli }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          files="$PWD"
+          mkdir "$RUNNER_TEMP/signer"
+          cd "$RUNNER_TEMP/signer"
+          for f in "$WIN" "$MAC"; do
+            npx --yes "@tauri-apps/cli@$CLI" signer sign "$files/$f" < /dev/null
+          done
+
+      - name: Verify the signatures against the pubkey in tauri.conf.json
+        env:
+          PUBKEY: ${{ needs.version.outputs.pubkey }}
+        run: |
           node - <<'EOF'
           const fs = require("fs");
-          const { TAG, REPO } = process.env;
-          const base = `https://github.com/${REPO}/releases/download/${TAG}/`;
-          const files = fs.readdirSync(".");
-          const pick = (end) => {
-            const f = files.find((n) => n.endsWith(end));
-            if (!f) throw new Error(`missing ${end}`);
-            return { signature: fs.readFileSync(f, "utf8").trim(), url: base + encodeURIComponent(f.slice(0, -4)) };
-          };
-          const win = pick("-setup.exe.sig");
-          const mac = pick(".app.tar.gz.sig");
+          const crypto = require("crypto");
+          const { PUBKEY, WIN, MAC } = process.env;
+          const lines = (b64) => Buffer.from(b64.trim(), "base64").toString("utf8").split(/\r?\n/);
+          const hex = (id) => Buffer.from(id).reverse().toString("hex").toUpperCase();
+          const pub = Buffer.from(lines(PUBKEY)[1] ?? "", "base64");
+          if (pub.length !== 42 || pub.toString("latin1", 0, 2) !== "Ed") throw new Error("the updater pubkey in tauri.conf.json is not a minisign public key");
+          const keyId = pub.subarray(2, 10);
+          const key = crypto.createPublicKey({ format: "jwk", key: { kty: "OKP", crv: "Ed25519", x: pub.subarray(10).toString("base64url") } });
+          for (const file of [WIN, MAC]) {
+            const [, sigLine, trustedLine, globalLine] = lines(fs.readFileSync(`${file}.sig`, "utf8"));
+            const sig = Buffer.from(sigLine ?? "", "base64");
+            const alg = sig.toString("latin1", 0, 2);
+            if (sig.length !== 74 || !["ED", "Ed"].includes(alg)) throw new Error(`${file}.sig is not a minisign signature`);
+            if (!sig.subarray(2, 10).equals(keyId)) throw new Error(`${file}.sig is from key ${hex(sig.subarray(2, 10))}, tauri.conf.json expects ${hex(keyId)}`);
+            const data = fs.readFileSync(file);
+            const signed = alg === "ED" ? crypto.createHash("blake2b512").update(data).digest() : data;
+            if (!crypto.verify(null, signed, key, sig.subarray(10))) throw new Error(`${file}.sig does not match the file`);
+            if (!trustedLine?.startsWith("trusted comment: ")) throw new Error(`${file}.sig has no trusted comment`);
+            const trusted = Buffer.from(trustedLine.slice("trusted comment: ".length), "utf8");
+            if (!crypto.verify(null, Buffer.concat([sig.subarray(10), trusted]), key, Buffer.from(globalLine ?? "", "base64"))) throw new Error(`${file}.sig has an invalid trusted comment signature`);
+            console.log(`${file}: valid signature from key ${hex(keyId)}`);
+          }
+          EOF
+
+      - name: Write latest.json
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const { TAG, VERSION, WIN, MAC, GITHUB_REPOSITORY } = process.env;
+          const base = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/`;
+          const entry = (f) => ({ signature: fs.readFileSync(`${f}.sig`, "utf8").trim(), url: base + encodeURIComponent(f) });
+          const win = entry(WIN);
+          const mac = entry(MAC);
           const json = {
-            version: TAG.slice(1),
+            version: VERSION,
             notes: "",
             pub_date: new Date().toISOString(),
             platforms: { "windows-x86_64": win, "windows-x86_64-nsis": win, "darwin-aarch64": mac, "darwin-aarch64-app": mac },
           };
-          fs.writeFileSync("../latest.json", JSON.stringify(json, null, 2));
+          fs.writeFileSync("latest.json", JSON.stringify(json, null, 2));
           EOF
-          cd ..
-          gh release upload "$TAG" latest.json --repo "$REPO" --clobber
-          gh release edit "$TAG" --repo "$REPO" --draft=false --latest
+          cat latest.json
+
+      - name: Create or reuse the draft release and upload the files
+        id: draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          code=$(curl -sS -o "$RUNNER_TEMP/tag.json" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GH_REPO/git/ref/tags/$TAG")
+          case "$code" in
+            404) ;;
+            200) [ "$(jq -r .object.sha "$RUNNER_TEMP/tag.json")" = "$GITHUB_SHA" ] || { echo "::error::tag $TAG already exists on another commit"; exit 1; } ;;
+            *) echo "::error::tag lookup for $TAG failed with HTTP $code"; exit 1 ;;
+          esac
+
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            | jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag) | {id, draft}]' > "$RUNNER_TEMP/releases.json"
+          if jq -e 'any(.draft | not)' "$RUNNER_TEMP/releases.json" > /dev/null; then
+            echo "::error::$TAG is already published"; exit 1
+          fi
+          case "$(jq length "$RUNNER_TEMP/releases.json")" in
+            0)
+              id=$(gh api -X POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
+                -f name="Kestral $TAG" -f body="" -F draft=true -F prerelease=false --jq .id)
+              echo "created draft $id" ;;
+            1)
+              id=$(jq -r '.[0].id' "$RUNNER_TEMP/releases.json")
+              gh api -X PATCH "repos/$GH_REPO/releases/$id" -f target_commitish="$GITHUB_SHA" -f name="Kestral $TAG" --silent
+              echo "reusing draft $id, target reset to $GITHUB_SHA" ;;
+            *) echo "::error::several drafts for $TAG, delete all but one"; exit 1 ;;
+          esac
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+          gh release upload "$TAG" "$WIN" "$WIN.sig" "$DMG" "$MAC" "$MAC.sig" latest.json --clobber
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ID: ${{ steps.draft.outputs.id }}
+        run: |
+          code=$(curl -sS -o "$RUNNER_TEMP/latest-release.json" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GH_REPO/releases/latest")
+          case "$code" in
+            200) current=$(jq -r .tag_name "$RUNNER_TEMP/latest-release.json") ;;
+            404) current="" ;;
+            *) echo "::error::latest release lookup failed with HTTP $code"; exit 1 ;;
+          esac
+          latest=true
+          if [ -n "$current" ] && [ "$(printf '%s\n' "${current#v}" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
+            latest=false
+            echo "$current is newer than $TAG, publishing without marking it latest"
+          fi
+          gh api -X PATCH "repos/$GH_REPO/releases/$ID" -F draft=false -f make_latest="$latest" --silent
+          echo "published $TAG (latest: $latest)"
