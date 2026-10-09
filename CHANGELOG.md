@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.8 - 2026-10-10
+
+### Changed
+- The update dialog shows what is new in the version, taken from this changelog, and stays compact when there is nothing to show.
+
 ## 0.2.7 - 2026-10-10
 
 ### Security
