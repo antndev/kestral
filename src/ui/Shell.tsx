@@ -489,7 +489,7 @@ function TitleBar({
           Update
         </button>
       )}
-      <button type="button" aria-label="Lock vault" title={`Lock vault (${KEYS.lock})`} onClick={onLock} style={{ ...iconBtn(), flex: "none", marginRight: 8, color: "var(--text-2)" }}>
+      <button type="button" aria-label="Lock vault" title={`Lock vault (${KEYS.lock})`} onClick={onLock} style={{ ...iconBtn(), flex: "none", marginRight: IS_MAC ? 9 : 8, color: "var(--text-2)" }}>
         <LockIcon />
       </button>
       {!IS_MAC && <WindowControls />}

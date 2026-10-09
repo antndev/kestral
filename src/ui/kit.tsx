@@ -18,7 +18,7 @@ export const td: CSSProperties = { height: 40, padding: "0 12px", borderBottom: 
 
 export function ScreenHeader({ title, meta, children }: { title: string; meta?: ReactNode; children?: ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, minHeight: 56, flex: "none", padding: "12px 28px", boxSizing: "border-box" }}>
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, minHeight: 56, flex: "none", padding: "12px 18px 12px 28px", boxSizing: "border-box" }}>
       <h1 style={{ position: "relative", top: -1, flex: "none", margin: 0, fontSize: 20, fontWeight: 600 }}>{title}</h1>
       {meta !== undefined && <span style={{ flex: "none", color: "var(--text-2)" }}>{meta}</span>}
       <div style={{ flex: 1 }} />
