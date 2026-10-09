@@ -1012,7 +1012,7 @@ export function UpdateDialog({ version, notes, onClose }: { version: string; not
           </div>
         </div>
 
-        <div style={{ height: 168, overflow: "auto", display: "flex", flexDirection: "column", justifyContent: phase === "prompt" ? "flex-start" : "center" }}>
+        <div style={{ height: notes.trim() ? 168 : 64, overflow: "auto", display: "flex", flexDirection: "column", justifyContent: phase === "prompt" ? "flex-start" : "center" }}>
         {phase === "prompt" && notes.trim() && (
           <div data-selectable style={{ paddingTop: 12, borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--text-2)", overflowWrap: "anywhere" }}>
             <Markdown text={notes.trim()} />

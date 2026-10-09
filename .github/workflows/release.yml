@@ -28,6 +28,7 @@ jobs:
         shell: bash
     outputs:
       version: ${{ steps.v.outputs.version }}
+      notes: ${{ steps.v.outputs.notes }}
       cli: ${{ steps.v.outputs.cli }}
       pubkey: ${{ steps.v.outputs.pubkey }}
       build: ${{ steps.tag.outputs.build }}
@@ -36,6 +37,7 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
+            CHANGELOG.md
             package.json
             package-lock.json
             src-tauri/Cargo.toml
@@ -68,7 +70,13 @@ jobs:
           if (!semver.test(cli ?? "")) fail(`no exact @tauri-apps/cli version in package-lock.json`);
           const pubkey = conf.plugins?.updater?.pubkey;
           if (!/^[A-Za-z0-9+/]+=*$/.test(pubkey ?? "")) fail(`no updater pubkey in src-tauri/tauri.conf.json`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncli=${cli}\npubkey=${pubkey}\n`);
+          const changelog = read("CHANGELOG.md").split(/\r?\n/);
+          const at = changelog.findIndex((l) => l.startsWith(`## ${version} - `));
+          if (at < 0) fail(`CHANGELOG.md has no entry for ${version}`);
+          const end = changelog.findIndex((l, i) => i > at && l.startsWith("## "));
+          const notes = changelog.slice(at + 1, end < 0 ? undefined : end).join("\n").trim();
+          const delim = `NOTES_${require("crypto").randomBytes(8).toString("hex")}`;
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ncli=${cli}\npubkey=${pubkey}\nnotes<<${delim}\n${notes}\n${delim}\n`);
           console.log(`version ${version}, @tauri-apps/cli ${cli}`);
           EOF
 
@@ -168,6 +176,7 @@ jobs:
       WIN: Kestral_${{ needs.version.outputs.version }}_x64-setup.exe
       DMG: Kestral_${{ needs.version.outputs.version }}_aarch64.dmg
       MAC: Kestral_aarch64.app.tar.gz
+      NOTES: ${{ needs.version.outputs.notes }}
     defaults:
       run:
         shell: bash
@@ -234,14 +243,14 @@ jobs:
         run: |
           node - <<'EOF'
           const fs = require("fs");
-          const { TAG, VERSION, WIN, MAC, GITHUB_REPOSITORY } = process.env;
+          const { TAG, VERSION, WIN, MAC, NOTES, GITHUB_REPOSITORY } = process.env;
           const base = `https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/`;
           const entry = (f) => ({ signature: fs.readFileSync(`${f}.sig`, "utf8").trim(), url: base + encodeURIComponent(f) });
           const win = entry(WIN);
           const mac = entry(MAC);
           const json = {
             version: VERSION,
-            notes: "",
+            notes: NOTES ?? "",
             pub_date: new Date().toISOString(),
             platforms: { "windows-x86_64": win, "windows-x86_64-nsis": win, "darwin-aarch64": mac, "darwin-aarch64-app": mac },
           };
@@ -272,11 +281,11 @@ jobs:
           case "$(jq length "$RUNNER_TEMP/releases.json")" in
             0)
               id=$(gh api -X POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
-                -f name="Kestral $TAG" -f body="" -F draft=true -F prerelease=false --jq .id)
+                -f name="Kestral $TAG" -f body="$NOTES" -F draft=true -F prerelease=false --jq .id)
               echo "created draft $id" ;;
             1)
               id=$(jq -r '.[0].id' "$RUNNER_TEMP/releases.json")
-              gh api -X PATCH "repos/$GH_REPO/releases/$id" -f target_commitish="$GITHUB_SHA" -f name="Kestral $TAG" --silent
+              gh api -X PATCH "repos/$GH_REPO/releases/$id" -f target_commitish="$GITHUB_SHA" -f name="Kestral $TAG" -f body="$NOTES" --silent
               echo "reusing draft $id, target reset to $GITHUB_SHA" ;;
             *) echo "::error::several drafts for $TAG, delete all but one"; exit 1 ;;
           esac
