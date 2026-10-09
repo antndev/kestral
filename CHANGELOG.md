@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.9 - 2026-10-10
+
+### Changed
+- Buttons on the right of a screen header line up with the window chrome: the close button on Windows, the lock on macOS.
+
 ## 0.2.8 - 2026-10-10
 
 ### Changed
