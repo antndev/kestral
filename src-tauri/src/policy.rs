@@ -68,16 +68,22 @@ pub struct PolicyEngine {
 /// are the classic footholds: adding a key to authorized_keys or rewriting the
 /// SSH client config.
 fn default_protected() -> Vec<String> {
-    vec![
-        ".ssh/authorized_keys".to_string(),
-        ".ssh/authorized_keys2".to_string(),
-        "administrators_authorized_keys".to_string(),
-        ".ssh/config".to_string(),
-    ]
+    vec![".ssh/authorized_keys".to_string(), ".ssh/config".to_string()]
 }
 
-const PROTECTED_VERSION: u32 = 2;
-const ADDED_IN_V2: [&str; 2] = [".ssh/authorized_keys2", "administrators_authorized_keys"];
+const PROTECTED_VERSION: u32 = 3;
+const KEY_FILE_COMPANIONS: [&str; 2] = [".ssh/authorized_keys2", "administrators_authorized_keys"];
+
+fn with_companions(pattern: &str) -> Vec<&str> {
+    let norm = collapse_slashes(pattern.trim()).to_lowercase();
+    if norm.trim_start_matches("~/").trim_start_matches('/') == ".ssh/authorized_keys" {
+        let mut out = vec![pattern];
+        out.extend(KEY_FILE_COMPANIONS);
+        out
+    } else {
+        vec![pattern]
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(untagged)]
@@ -102,10 +108,8 @@ fn load_protected(path: &std::path::Path) -> Vec<String> {
         Err(_) => return default_protected(),
     };
     if version < PROTECTED_VERSION {
-        for added in ADDED_IN_V2 {
-            if !paths.iter().any(|p| p.trim().eq_ignore_ascii_case(added)) {
-                paths.push(added.to_string());
-            }
+        if version == 2 {
+            paths.retain(|p| !KEY_FILE_COMPANIONS.iter().any(|c| p.trim().eq_ignore_ascii_case(c)));
         }
         save_protected(path, &paths);
     }
@@ -350,7 +354,7 @@ impl PolicyEngine {
 
     pub fn is_protected(&self, path: &str) -> bool {
         let inner = self.inner.lock().unwrap();
-        inner.protected.iter().any(|pat| path_matches(path, pat))
+        inner.protected.iter().flat_map(|p| with_companions(p)).any(|pat| path_matches(path, pat))
     }
 
     /// Best-effort tripwire for commands: true if a protected path appears in
@@ -366,6 +370,7 @@ impl PolicyEngine {
             .iter()
             .map(|p| p.trim())
             .filter(|p| !p.is_empty())
+            .flat_map(with_companions)
             .any(|p| normalized.contains(&collapse_slashes(p).to_lowercase()))
     }
 
@@ -478,17 +483,16 @@ mod tests {
     }
 
     #[test]
-    fn legacy_list_gains_new_defaults_once() {
+    fn v2_list_drops_the_auto_added_companions_once() {
         let dir = std::env::temp_dir().join(format!("kestral_pol_{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let pp = dir.join("protected.json");
-        std::fs::write(&pp, r#"[".ssh/authorized_keys", "/srv/secret"]"#).unwrap();
+        std::fs::write(&pp, r#"{"version":2,"paths":[".ssh/authorized_keys",".ssh/config",".ssh/authorized_keys2","administrators_authorized_keys","/srv/secret"]}"#).unwrap();
         let p = PolicyEngine::new(dir.join("ai_state"), pp.clone(), dir.join("caps.json"));
+        assert_eq!(p.protected_paths(), vec![".ssh/authorized_keys".to_string(), ".ssh/config".to_string(), "/srv/secret".to_string()]);
         assert!(p.is_protected("/home/x/.ssh/authorized_keys2"));
-        assert!(p.is_protected("/srv/secret"));
-        p.set_protected_paths(vec![".ssh/authorized_keys".into()]);
-        let p2 = PolicyEngine::new(dir.join("ai_state"), pp, dir.join("caps.json"));
-        assert_eq!(p2.protected_paths(), vec![".ssh/authorized_keys".to_string()]);
+        assert!(p.is_protected("C:/ProgramData/ssh/administrators_authorized_keys"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
