@@ -109,8 +109,82 @@ fn cancelled() -> AppError {
     AppError::Other("Cancelled".into())
 }
 
-fn is_cancelled(e: &AppError) -> bool {
-    matches!(e, AppError::Other(m) if m == "Cancelled")
+fn part_name(name: &str) -> String {
+    format!(".{name}.{}.part", uuid::Uuid::new_v4().simple())
+}
+
+fn remote_part(path: &str) -> String {
+    match path.rsplit_once('/') {
+        Some((dir, name)) => format!("{dir}/{}", part_name(name)),
+        None => part_name(path),
+    }
+}
+
+struct Part {
+    tmp: String,
+    target: String,
+    permissions: Option<u32>,
+}
+
+async fn create_part(sftp: &SftpSession, path: &str) -> Result<(russh_sftp::client::fs::File, Option<Part>)> {
+    let mut target = path.to_string();
+    let mut existing = sftp.symlink_metadata(path).await.ok();
+    if existing.as_ref().is_some_and(|m| m.file_type().is_symlink()) {
+        if let Ok(real) = sftp.canonicalize(path).await {
+            existing = sftp.metadata(real.as_str()).await.ok();
+            target = real;
+        }
+    }
+    let tmp = remote_part(&target);
+    match sftp.create(tmp.as_str()).await {
+        Ok(f) => Ok((f, Some(Part { tmp, target, permissions: existing.and_then(|m| m.permissions) }))),
+        Err(_) => {
+            let f = sftp.create(path).await.map_err(|e| ferr("create", e))?;
+            Ok((f, None))
+        }
+    }
+}
+
+async fn finish_part(sftp: &SftpSession, part: Option<Part>, result: Result<u64>) -> Result<u64> {
+    let Some(part) = part else {
+        return result;
+    };
+    let n = match result {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = sftp.remove_file(part.tmp.as_str()).await;
+            return Err(e);
+        }
+    };
+    if let Some(mode) = part.permissions {
+        let mut attrs = russh_sftp::protocol::FileAttributes::empty();
+        attrs.permissions = Some(mode & 0o7777);
+        let _ = sftp.set_metadata(part.tmp.as_str(), attrs).await;
+    }
+    let Err(e) = sftp.rename(part.tmp.as_str(), part.target.as_str()).await else {
+        return Ok(n);
+    };
+    if sftp.symlink_metadata(part.target.as_str()).await.is_err() {
+        let _ = sftp.remove_file(part.tmp.as_str()).await;
+        return Err(ferr("rename", e));
+    }
+    match sftp.open_with_flags(part.target.as_str(), russh_sftp::protocol::OpenFlags::WRITE).await {
+        Ok(mut f) => {
+            let _ = f.shutdown().await;
+        }
+        Err(e) => {
+            let _ = sftp.remove_file(part.tmp.as_str()).await;
+            return Err(ferr("create", e));
+        }
+    }
+    if let Err(e) = sftp.remove_file(part.target.as_str()).await {
+        let _ = sftp.remove_file(part.tmp.as_str()).await;
+        return Err(ferr("replace", e));
+    }
+    sftp.rename(part.tmp.as_str(), part.target.as_str())
+        .await
+        .map_err(|e| AppError::Ssh(format!("SFTP rename: {e}. The new content is in {}", part.tmp)))?;
+    Ok(n)
 }
 
 async fn pump<R, W>(reader: &mut R, writer: &mut W, x: &Xfer) -> Result<u64>
@@ -146,17 +220,33 @@ where
 
 async fn download(sftp: &SftpSession, remote: &str, local: &Path, x: &Xfer) -> Result<u64> {
     let mut rf = sftp.open(remote).await.map_err(|e| ferr("open", e))?;
-    let mut lf = tokio::fs::File::create(local)
+    let target = tokio::fs::canonicalize(local).await.unwrap_or_else(|_| local.to_path_buf());
+    let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let part = target.with_file_name(part_name(&name));
+    let mut lf = tokio::fs::File::create(&part)
         .await
         .map_err(|e| ferr("create local file", e))?;
-    match pump(&mut rf, &mut lf, x).await {
-        Ok(n) => Ok(n),
-        Err(e) => {
-            drop(lf);
-            let _ = tokio::fs::remove_file(local).await;
-            Err(e)
+    let pumped = pump(&mut rf, &mut lf, x).await;
+    drop(lf);
+    let result = match pumped {
+        Ok(n) => {
+            #[cfg(unix)]
+            {
+                if let Ok(meta) = tokio::fs::metadata(&target).await {
+                    let _ = tokio::fs::set_permissions(&part, meta.permissions()).await;
+                }
+            }
+            tokio::fs::rename(&part, &target)
+                .await
+                .map(|_| n)
+                .map_err(|e| ferr("save local file", e))
         }
+        Err(e) => Err(e),
+    };
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&part).await;
     }
+    result
 }
 
 fn download_dir<'a>(
@@ -190,20 +280,15 @@ async fn upload(sftp: &SftpSession, local: &Path, remote: &str, x: &Xfer) -> Res
     let mut lf = tokio::fs::File::open(local)
         .await
         .map_err(|e| ferr("read local file", e))?;
-    let mut wf = sftp.create(remote).await.map_err(|e| ferr("create", e))?;
-    match pump(&mut lf, &mut wf, x).await {
-        Ok(n) => {
-            wf.shutdown().await.map_err(|e| ferr("close", e))?;
-            Ok(n)
-        }
+    let (mut wf, part) = create_part(sftp, remote).await?;
+    let result = match pump(&mut lf, &mut wf, x).await {
+        Ok(n) => wf.shutdown().await.map(|_| n).map_err(|e| ferr("close", e)),
         Err(e) => {
             let _ = wf.shutdown().await;
-            if is_cancelled(&e) {
-                let _ = sftp.remove_file(remote).await;
-            }
             Err(e)
         }
-    }
+    };
+    finish_part(sftp, part, result).await
 }
 
 fn upload_dir<'a>(
@@ -239,18 +324,15 @@ fn upload_dir<'a>(
 
 async fn copy_file(src: &SftpSession, from: &str, dst: &SftpSession, to: &str, x: &Xfer) -> Result<u64> {
     let mut rf = src.open(from).await.map_err(|e| ferr("open", e))?;
-    let mut wf = dst.create(to).await.map_err(|e| ferr("create", e))?;
-    match pump(&mut rf, &mut wf, x).await {
-        Ok(n) => {
-            wf.shutdown().await.map_err(|e| ferr("close", e))?;
-            Ok(n)
-        }
+    let (mut wf, part) = create_part(dst, to).await?;
+    let result = match pump(&mut rf, &mut wf, x).await {
+        Ok(n) => wf.shutdown().await.map(|_| n).map_err(|e| ferr("close", e)),
         Err(e) => {
             let _ = wf.shutdown().await;
-            let _ = dst.remove_file(to).await;
             Err(e)
         }
-    }
+    };
+    finish_part(dst, part, result).await
 }
 
 fn copy_dir<'a>(
@@ -376,10 +458,14 @@ impl SftpHandle {
         String::from_utf8(buf).map_err(|_| AppError::Ssh("Not a UTF-8 text file".into()))
     }
     pub async fn write_text(&self, path: &str, content: &str) -> Result<()> {
-        let mut f = self.sftp.create(path).await.map_err(|e| ferr("create", e))?;
-        f.write_all(content.as_bytes()).await.map_err(|e| ferr("write", e))?;
-        f.flush().await.map_err(|e| ferr("flush", e))?;
-        f.shutdown().await.map_err(|e| ferr("close", e))?;
+        let (mut f, part) = create_part(&self.sftp, path).await?;
+        let written = async {
+            f.write_all(content.as_bytes()).await.map_err(|e| ferr("write", e))?;
+            f.flush().await.map_err(|e| ferr("flush", e))
+        }
+        .await;
+        let closed = f.shutdown().await.map_err(|e| ferr("close", e));
+        finish_part(&self.sftp, part, written.and(closed).map(|()| content.len() as u64)).await?;
         Ok(())
     }
     pub async fn mkdir(&self, path: &str) -> Result<()> {

@@ -44,6 +44,7 @@ struct SessionHandle {
     write: Arc<AsyncMutex<WriteHalf>>,
     session: Arc<Session>,
     reader: Option<tokio::task::JoinHandle<()>>,
+    closed: tokio_util::sync::CancellationToken,
 }
 
 #[derive(Default)]
@@ -51,18 +52,40 @@ pub struct Sessions(SessionMap, Mutex<HashMap<String, (u64, tokio_util::sync::Ca
 
 static ATTEMPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
+const TEARDOWN_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 async fn teardown(h: SessionHandle) {
-    {
+    h.closed.cancel();
+    if let Some(reader) = &h.reader {
+        reader.abort();
+    }
+    let _ = tokio::time::timeout(TEARDOWN_WAIT, async {
         let w = h.write.lock().await;
         let _ = w.eof().await;
         let _ = w.close().await;
-    }
-    let _ = h
-        .session
-        .disconnect(russh::Disconnect::ByApplication, "", "")
-        .await;
-    if let Some(reader) = h.reader {
-        reader.abort();
+    })
+    .await;
+    let _ = tokio::time::timeout(
+        TEARDOWN_WAIT,
+        h.session.disconnect(russh::Disconnect::ByApplication, "", ""),
+    )
+    .await;
+}
+
+fn writer_of(sessions: &Sessions, id: &str) -> Option<(Arc<AsyncMutex<WriteHalf>>, tokio_util::sync::CancellationToken)> {
+    let map = sessions.0.lock().unwrap();
+    map.get(id).map(|h| (h.write.clone(), h.closed.clone()))
+}
+
+async fn send_input(app: &tauri::AppHandle, sessions: &Sessions, id: &str, data: &[u8]) {
+    if let Some((writer, closed)) = writer_of(sessions, id) {
+        let failed = tokio::select! {
+            r = async { writer.lock().await.data(data).await } => r.is_err(),
+            _ = closed.cancelled() => false,
+        };
+        if failed {
+            close_dead(app, sessions, id).await;
+        }
     }
 }
 
@@ -119,6 +142,7 @@ pub async fn ssh_open_shell(
 
     let hid = Uuid::parse_str(&host_id).map_err(|_| AppError::NotFound(host_id.clone()))?;
     let host = state.services.hosts.get(hid)?;
+    crate::commands::ensure_reviewed(&state.services, &host)?;
     let password = password.map(zeroize::Zeroizing::new).filter(|p| !p.is_empty());
 
     let notify_with = |stage: &str, detail: &str, data: Option<serde_json::Value>| {
@@ -207,6 +231,7 @@ pub async fn ssh_open_shell(
                 write: Arc::new(AsyncMutex::new(write_half)),
                 session: Arc::new(session),
                 reader: None,
+                closed: tokio_util::sync::CancellationToken::new(),
             },
         )
     };
@@ -242,8 +267,9 @@ pub async fn ssh_open_shell(
         }
         let removed = { map.lock().unwrap().remove(&task_id) };
         let lost = !ended && exit_status.is_none() && signal.is_none();
-        if removed.is_some() {
-            drop(removed);
+        if let Some(h) = removed {
+            h.closed.cancel();
+            drop(h);
             let _ = app_for_reader.emit("session-closed", SessionClosed { id: task_id, exit_status, signal, lost });
         }
     });
@@ -280,15 +306,7 @@ pub async fn ssh_write_bytes(
     id: String,
     data: Vec<u8>,
 ) -> Result<()> {
-    let writer = {
-        let map = sessions.0.lock().unwrap();
-        map.get(&id).map(|h| h.write.clone())
-    };
-    if let Some(writer) = writer {
-        if writer.lock().await.data(&data[..]).await.is_err() {
-            close_dead(&app, &sessions, &id).await;
-        }
-    }
+    send_input(&app, &sessions, &id, &data).await;
     Ok(())
 }
 
@@ -315,16 +333,7 @@ pub async fn ssh_write(
     id: String,
     data: String,
 ) -> Result<()> {
-    let writer = {
-        let map = sessions.0.lock().unwrap();
-        map.get(&id).map(|h| h.write.clone())
-    };
-    if let Some(writer) = writer {
-        let bytes = data.into_bytes();
-        if writer.lock().await.data(&bytes[..]).await.is_err() {
-            close_dead(&app, &sessions, &id).await;
-        }
-    }
+    send_input(&app, &sessions, &id, data.as_bytes()).await;
     Ok(())
 }
 
@@ -336,18 +345,12 @@ pub async fn ssh_resize(
     cols: u32,
     rows: u32,
 ) -> Result<()> {
-    let writer = {
-        let map = sessions.0.lock().unwrap();
-        map.get(&id).map(|h| h.write.clone())
-    };
-    if let Some(writer) = writer {
-        if writer
-            .lock()
-            .await
-            .window_change(cols.max(1), rows.max(1), 0, 0)
-            .await
-            .is_err()
-        {
+    if let Some((writer, closed)) = writer_of(&sessions, &id) {
+        let failed = tokio::select! {
+            r = async { writer.lock().await.window_change(cols.max(1), rows.max(1), 0, 0).await } => r.is_err(),
+            _ = closed.cancelled() => false,
+        };
+        if failed {
             close_dead(&app, &sessions, &id).await;
         }
     }

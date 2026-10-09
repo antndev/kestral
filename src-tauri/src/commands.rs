@@ -89,6 +89,9 @@ pub async fn vault_lock(
     sessions: State<'_, SftpSessions>,
     transfers: State<'_, crate::sftp::Transfers>,
 ) -> Result<()> {
+    for stop in STREAM_RUNS.lock().unwrap().values() {
+        stop.cancel();
+    }
     transfers.cancel_all();
     sessions.clear();
     state.services.ai_pool.clear();
@@ -128,7 +131,7 @@ pub async fn vault_export(
     let password = Zeroizing::new(password);
     tokio::task::spawn_blocking(move || -> Result<()> {
         let bytes = crate::portable::export(&services, password.as_str())?;
-        crate::util::atomic_write(std::path::Path::new(&path), &bytes)?;
+        crate::util::replace_file(std::path::Path::new(&path), &bytes)?;
         Ok(())
     })
     .await
@@ -375,20 +378,13 @@ pub struct HostTestResult {
 #[tauri::command]
 pub async fn host_test(state: State<'_, AppState>, mut host: Host, password: Option<String>) -> Result<HostTestResult> {
     host.normalize();
-    let temp = match password.map(Zeroizing::new) {
-        Some(pw) => {
-            let id = format!("kestral-test-{}", Uuid::new_v4());
-            state.services.vault.put_secret(&id, crate::vault::SecretKind::Password, pw.as_bytes())?;
-            host.auth = crate::model::AuthMethod::Password { secret_id: id.clone() };
-            Some(id)
-        }
-        None => None,
-    };
+    let password = password.map(Zeroizing::new);
     let started = std::time::Instant::now();
-    let result = state.services.ssh.connect_info(&host, &state.services.vault, &|_, _| {}, None).await;
-    if let Some(id) = temp {
-        let _ = state.services.vault.delete_secret(&id);
-    }
+    let result = state
+        .services
+        .ssh
+        .connect_info(&host, &state.services.vault, &|_, _| {}, password.as_ref().map(|p| p.as_str()))
+        .await;
     let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
     Ok(match result {
         Ok(c) => {
@@ -431,7 +427,8 @@ pub async fn host_add(state: State<'_, AppState>, host: NewHost) -> Result<Host>
 }
 
 #[tauri::command]
-pub async fn host_update(state: State<'_, AppState>, host: Host) -> Result<()> {
+pub async fn host_update(state: State<'_, AppState>, mut host: Host) -> Result<()> {
+    host.ai_changed = false;
     let id = host.id;
     let agent = (host.forward_agent, host.agent_keys.clone());
     let before = state.services.hosts.get(id).ok();
@@ -443,6 +440,16 @@ pub async fn host_update(state: State<'_, AppState>, host: Host) -> Result<()> {
                 state.services.ai_pool.forget(h.id).await;
             }
         }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn host_ack_ai_change(state: State<'_, AppState>, host_id: String) -> Result<()> {
+    let mut host = state.services.hosts.get(parse_id(&host_id)?)?;
+    if host.ai_changed {
+        host.ai_changed = false;
+        state.services.hosts.update(host)?;
     }
     Ok(())
 }
@@ -589,8 +596,30 @@ pub async fn snippet_add(state: State<'_, AppState>, snippet: NewSnippet) -> Res
 
 #[tauri::command]
 pub async fn snippet_update(state: State<'_, AppState>, mut snippet: Snippet) -> Result<()> {
-    snippet.ai_edited = false;
+    let stored = state.services.snippets.get(snippet.id)?;
+    snippet.ai_edited = stored.ai_edited
+        && stored.script == snippet.script
+        && stored.target_host_ids == snippet.target_host_ids;
     state.services.snippets.update(snippet)
+}
+
+#[tauri::command]
+pub async fn snippet_mark_reviewed(
+    state: State<'_, AppState>,
+    id: String,
+    script: String,
+    target_host_ids: Vec<String>,
+) -> Result<bool> {
+    let mut stored = state.services.snippets.get(parse_id(&id)?)?;
+    let seen: Option<Vec<Uuid>> = target_host_ids.iter().map(|t| Uuid::parse_str(t).ok()).collect();
+    if stored.script != script || seen.as_ref() != Some(&stored.target_host_ids) {
+        return Ok(false);
+    }
+    if stored.ai_edited {
+        stored.ai_edited = false;
+        state.services.snippets.update(stored)?;
+    }
+    Ok(true)
 }
 
 #[tauri::command]
@@ -867,13 +896,13 @@ pub struct StreamExit {
     pub exit_signal: Option<String>,
 }
 
-type StreamRuns = std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Notify>>>;
+type StreamRuns = std::sync::Mutex<std::collections::HashMap<String, tokio_util::sync::CancellationToken>>;
 static STREAM_RUNS: std::sync::LazyLock<StreamRuns> = std::sync::LazyLock::new(Default::default);
 
 #[tauri::command]
 pub async fn run_command_cancel(run_id: String) -> Result<()> {
-    if let Some(n) = STREAM_RUNS.lock().unwrap().get(&run_id) {
-        n.notify_one();
+    if let Some(stop) = STREAM_RUNS.lock().unwrap().get(&run_id) {
+        stop.cancel();
     }
     Ok(())
 }
@@ -889,15 +918,24 @@ pub async fn run_command_stream(
     on_output: Channel<InvokeResponseBody>,
     run_id: Option<String>,
 ) -> Result<StreamExit> {
-    let stop = Arc::new(tokio::sync::Notify::new());
-    if let Some(id) = &run_id {
-        STREAM_RUNS.lock().unwrap().insert(id.clone(), stop.clone());
-    }
+    let stop = tokio_util::sync::CancellationToken::new();
+    let key = run_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+    STREAM_RUNS.lock().unwrap().insert(key.clone(), stop.clone());
     let result = stream_command(&state, &host_id, &command, &on_output, &stop).await;
-    if let Some(id) = &run_id {
-        STREAM_RUNS.lock().unwrap().remove(id);
-    }
+    STREAM_RUNS.lock().unwrap().remove(&key);
     result
+}
+
+pub(crate) fn ensure_reviewed(services: &crate::state::Services, host: &Host) -> Result<()> {
+    let mut chain = services.ssh.jump_chain(host)?;
+    chain.push(host.clone());
+    if let Some(h) = chain.iter().find(|h| h.ai_changed) {
+        return Err(AppError::Other(format!(
+            "The AI changed {}. Open it from the host list and confirm it before connecting.",
+            h.name
+        )));
+    }
+    Ok(())
 }
 
 async fn stream_command(
@@ -905,21 +943,32 @@ async fn stream_command(
     host_id: &str,
     command: &str,
     on_output: &Channel<InvokeResponseBody>,
-    stop: &tokio::sync::Notify,
+    stop: &tokio_util::sync::CancellationToken,
 ) -> Result<StreamExit> {
+    let not_run = || StreamExit { exit_status: None, exit_signal: Some("cancelled".into()) };
     let host = state.services.hosts.get(parse_id(host_id)?)?;
-    let session = state
-        .services
-        .ssh
-        .connect(&host, &state.services.vault)
-        .await?;
-    let mut channel = session
-        .channel_open_session()
-        .await
-        .map_err(|e| AppError::Ssh(format!("Channel: {e}")))?;
+    ensure_reviewed(&state.services, &host)?;
+    let session = tokio::select! {
+        r = state.services.ssh.connect(&host, &state.services.vault) => r?,
+        _ = stop.cancelled() => return Ok(not_run()),
+    };
+    let opened = tokio::select! {
+        r = session.channel_open_session() => Some(r),
+        _ = stop.cancelled() => None,
+    };
+    let Some(opened) = opened else {
+        let _ = session.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        return Ok(not_run());
+    };
+    let mut channel = opened.map_err(|e| AppError::Ssh(format!("Channel: {e}")))?;
     let _ = channel
         .request_pty(true, "xterm-256color", 120, 34, 0, 0, &[])
         .await;
+    if stop.is_cancelled() {
+        let _ = channel.close().await;
+        let _ = session.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        return Ok(not_run());
+    }
     channel
         .exec(true, command)
         .await
@@ -951,7 +1000,7 @@ async fn stream_command(
     // how much output it keeps.
     let ended = tokio::select! {
         r = tokio::time::timeout(std::time::Duration::from_secs(1800), pump) => r.is_err().then_some("timed out after 30 min"),
-        _ = stop.notified() => Some("cancelled"),
+        _ = stop.cancelled() => Some("cancelled"),
     };
     if let Some(why) = ended {
         exit_signal.get_or_insert_with(|| why.to_string());
@@ -984,6 +1033,7 @@ pub async fn forward_start(
     forward_id: String,
 ) -> Result<()> {
     let host = state.services.hosts.get(parse_id(&host_id)?)?;
+    ensure_reviewed(&state.services, &host)?;
     let fid = parse_id(&forward_id)?;
     let fwd = host
         .forwards
@@ -1040,6 +1090,7 @@ pub async fn sftp_open(
 ) -> Result<String> {
     sessions.remove(&id);
     let host = state.services.hosts.get(parse_id(&host_id)?)?;
+    ensure_reviewed(&state.services, &host)?;
     let handle = crate::sftp::connect(&state.services.ssh, &state.services.vault, &host).await?;
     let home = handle.home().await.unwrap_or_else(|_| "/".to_string());
     sessions.insert(id, Arc::new(handle));

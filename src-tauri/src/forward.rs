@@ -5,10 +5,10 @@
 // keeps its own SSH session alive until it is stopped.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use russh::client;
+use russh::{client, ChannelMsg};
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -27,7 +27,7 @@ struct Active {
     remote_bind: Option<(String, u32)>,
 }
 
-type ActiveMap = Arc<Mutex<HashMap<(Uuid, Uuid), Option<Active>>>>;
+type ActiveMap = Arc<Mutex<HashMap<(Uuid, Uuid), (u64, Option<Active>)>>>;
 
 #[derive(Default)]
 pub struct ForwardManager {
@@ -37,6 +37,7 @@ pub struct ForwardManager {
     // instead of trying to bind the same port twice. Shared (Arc) so the accept
     // loop can drop its own entry when the SSH session dies.
     active: ActiveMap,
+    attempts: AtomicU64,
 }
 
 impl ForwardManager {
@@ -58,6 +59,7 @@ impl ForwardManager {
         fwd: &PortForward,
     ) -> Result<()> {
         let key = (host.id, fwd.id);
+        let attempt = self.attempts.fetch_add(1, Ordering::Relaxed);
 
         // Reserve the slot atomically. If it is already taken, this start is a
         // no-op, which is exactly what a duplicate request should do.
@@ -66,14 +68,17 @@ impl ForwardManager {
             if map.contains_key(&key) {
                 return Ok(());
             }
-            map.insert(key, None);
+            map.insert(key, (attempt, None));
         }
 
-        match self.spawn(ssh, host, vault, fwd, key).await {
+        match self.spawn(ssh, host, vault, fwd, key, attempt).await {
             Ok(()) => Ok(()),
             Err(e) => {
                 // Bind or connect failed: drop the reservation so a retry works.
-                self.active.lock().unwrap().remove(&key);
+                let mut map = self.active.lock().unwrap();
+                if map.get(&key).is_some_and(|(a, _)| *a == attempt) {
+                    map.remove(&key);
+                }
                 Err(e)
             }
         }
@@ -86,6 +91,7 @@ impl ForwardManager {
         vault: &Arc<Vault>,
         fwd: &PortForward,
         key: (Uuid, Uuid),
+        attempt: u64,
     ) -> Result<()> {
         let conns = Arc::new(AtomicU32::new(0));
         let (task, session, remote_bind) = match fwd.kind {
@@ -118,11 +124,11 @@ impl ForwardManager {
         let orphan = {
             let mut map = self.active.lock().unwrap();
             match map.get_mut(&key) {
-                Some(slot) => {
+                Some((a, slot)) if *a == attempt && slot.is_none() => {
                     *slot = Some(active);
                     None
                 }
-                None => Some(active),
+                _ => Some(active),
             }
         };
         if let Some(a) = orphan {
@@ -136,7 +142,7 @@ impl ForwardManager {
             .lock()
             .unwrap()
             .iter()
-            .filter_map(|((_, f), a)| a.as_ref().map(|a| (f.to_string(), a.conns.load(Ordering::Relaxed))))
+            .filter_map(|((_, f), (_, a))| a.as_ref().map(|a| (f.to_string(), a.conns.load(Ordering::Relaxed))))
             .collect()
     }
 
@@ -158,7 +164,7 @@ impl ForwardManager {
         let removed = self.active.lock().unwrap().remove(&(host_id, forward_id));
         // Some(Some(_)): running, tear it down. Some(None): still starting, and
         // removing the reservation tells spawn() to clean up after itself.
-        if let Some(Some(a)) = removed {
+        if let Some((_, Some(a))) = removed {
             // Wait for the accept loop to finish so its listener is dropped and
             // the local port is free before we return; otherwise an immediate
             // restart could hit "address already in use".
@@ -240,7 +246,7 @@ fn watch_closed(session: &Session, active: &ActiveMap, key: (Uuid, Uuid)) -> boo
 
 fn release(session: &Session, active: &ActiveMap, key: (Uuid, Uuid)) {
     let mut map = active.lock().unwrap();
-    if matches!(map.get(&key), Some(Some(a)) if Arc::ptr_eq(&a.session, session)) {
+    if matches!(map.get(&key), Some((_, Some(a))) if Arc::ptr_eq(&a.session, session)) {
         map.remove(&key);
     }
 }
@@ -269,7 +275,7 @@ fn spawn_local(
         loop {
             tokio::select! {
                 accepted = listener.accept() => {
-                    let (mut socket, peer) = match accepted {
+                    let (socket, peer) = match accepted {
                         Ok(a) => a,
                         Err(e) => {
                             accept_failed(e).await;
@@ -291,8 +297,7 @@ fn spawn_local(
                                 return;
                             }
                         };
-                        let mut stream = channel.into_stream();
-                        let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+                        pipe(socket, channel).await;
                     });
                 }
                 _ = watch.tick() => {
@@ -303,6 +308,60 @@ fn spawn_local(
             }
         }
     })
+}
+
+const PIPE_SLOTS: usize = 64;
+const PIPE_STALL: std::time::Duration = std::time::Duration::from_secs(5);
+
+async fn pipe(local: TcpStream, channel: russh::Channel<client::Msg>) {
+    let (mut from_remote, to_remote) = channel.split();
+    let (mut local_rd, mut local_wr) = local.into_split();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(PIPE_SLOTS);
+    let drain = async move {
+        let mut tx = Some(tx);
+        while let Some(msg) = from_remote.wait().await {
+            match msg {
+                ChannelMsg::Data { data } => {
+                    if let Some(t) = &tx {
+                        if !matches!(tokio::time::timeout(PIPE_STALL, t.send(data)).await, Ok(Ok(()))) {
+                            return Err(());
+                        }
+                    }
+                }
+                ChannelMsg::Eof => tx = None,
+                ChannelMsg::Close => break,
+                _ => {}
+            }
+        }
+        Ok(())
+    };
+    let deliver = async move {
+        while let Some(data) = rx.recv().await {
+            local_wr.write_all(&data).await.map_err(|_| ())?;
+        }
+        let _ = local_wr.shutdown().await;
+        Ok::<(), ()>(())
+    };
+    let down = async { tokio::try_join!(drain, deliver) };
+    let up = async {
+        let mut buf = vec![0u8; 32 * 1024];
+        loop {
+            let n = local_rd.read(&mut buf).await.map_err(|_| ())?;
+            if n == 0 {
+                return to_remote.eof().await.map_err(|_| ());
+            }
+            to_remote.data(&buf[..n]).await.map_err(|_| ())?;
+        }
+    };
+    tokio::pin!(down, up);
+    let up_done = tokio::select! {
+        _ = &mut down => false,
+        r = &mut up => r.is_ok(),
+    };
+    if up_done {
+        let _ = down.await;
+    }
+    let _ = to_remote.close().await;
 }
 
 const SOCKS_OK: u8 = 0;
@@ -409,8 +468,7 @@ fn spawn_dynamic(
                             }
                         };
                         socks_reply(&mut socket, SOCKS_OK).await;
-                        let mut stream = channel.into_stream();
-                        let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+                        pipe(socket, channel).await;
                     });
                 }
                 _ = watch.tick() => {
@@ -446,7 +504,7 @@ fn spawn_remote(
                     let guard = ConnGuard::new(&conns);
                     tokio::spawn(async move {
                         let _guard = guard;
-                        let mut local = match TcpStream::connect((host.as_str(), target_port)).await {
+                        let local = match TcpStream::connect((host.as_str(), target_port)).await {
                             Ok(s) => s,
                             Err(e) => {
                                 tracing::warn!("remote forward from {}:{} could not reach {host}:{target_port}: {e}", fc.address, fc.port);
@@ -454,8 +512,7 @@ fn spawn_remote(
                                 return;
                             }
                         };
-                        let mut stream = fc.channel.into_stream();
-                        let _ = tokio::io::copy_bidirectional(&mut local, &mut stream).await;
+                        pipe(local, fc.channel).await;
                     });
                 }
                 _ = watch.tick() => {
