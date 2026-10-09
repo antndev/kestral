@@ -1,7 +1,7 @@
 {
   "name": "kestral",
   "private": true,
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Desktop SSH client with an encrypted vault and a built-in MCP server for controlled AI access to your servers",
   "license": "PolyForm-Noncommercial-1.0.0",
   "author": "antndev <antonkonig691@gmail.com>",

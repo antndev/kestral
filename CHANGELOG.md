@@ -3,6 +3,33 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.7 - 2026-10-10
+
+### Security
+- A host the AI created or redirected is marked and asks for confirmation (address and sign-in shown) before you connect; until then every connection to it, also over a jump host, is refused.
+- The AI can no longer bind a secret of the wrong kind to a host; a private key is never sent as a password.
+- The data folder guard can no longer be bypassed with UNC or device paths, and AI tools stop at once while the vault is locked.
+- Protected paths also catch Windows forms like a trailing dot, alternate streams and 8.3 short names.
+- A retried AI command checks the policy again first, and a jump host change locks its dependents in the same step.
+- Repeated denied AI calls no longer flood the audit log.
+- Imported snippets need a review before they run and only target imported hosts; an import cannot add a second key for a known host.
+- Snippets keep their AI review mark until you review or edit them; the review dialog shows the targets, focuses Cancel and arms after a moment.
+- Pasting with Shift+Insert or the macOS Edit menu is filtered too; terminal links open only with Ctrl or Cmd and only for http(s).
+- Hidden characters are marked in approvals, logs and SFTP file names; long commands must be scrolled to the end before Approve.
+- Approval and host key dialogs re-arm when the window loses focus.
+- Release builds no longer see the signing key; signatures are verified before a release goes live.
+
+### Fixed
+- A failed master password change can no longer leave the vault encrypted with the new password.
+- Unreadable host or snippet data is never overwritten by the next save.
+- Stop also works while a snippet run is still connecting, and locking stops running snippet runs.
+- Closing a terminal no longer hangs after a huge paste.
+- Interrupted SFTP uploads, copies, downloads and editor saves never destroy the original file.
+- Port forwards survive fast start, stop and start, and one slow client no longer stalls the others.
+- The connection test no longer stores the typed password, and exporting no longer clobbers a file next to the target.
+- Locking asks about an unsaved host and saves pending snippet edits; Close other tabs asks once for all unsaved tabs.
+- Forwards autostart after a retried load, the update progress survives leaving Settings, and a few drag and timer leaks are gone.
+
 ## 0.2.6 - 2026-10-08
 
 ### Fixed
