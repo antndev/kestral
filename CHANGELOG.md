@@ -3,6 +3,14 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.10 - 2026-10-10
+
+### Changed
+- A host the AI created or changed has a Confirm host button that shows its address and sign-in and removes the AI mark.
+
+### Fixed
+- The reconnect countdown in the status bar no longer shows a double space.
+
 ## 0.2.9 - 2026-10-10
 
 ### Changed
