@@ -1012,32 +1012,12 @@ export function UpdateDialog({ version, notes, onClose }: { version: string; not
           </div>
         </div>
 
-        <div style={{ height: notes.trim() ? 168 : 64, overflow: "auto", display: "flex", flexDirection: "column", justifyContent: phase === "prompt" ? "flex-start" : "center" }}>
-        {phase === "prompt" && notes.trim() && (
+        <div style={{ height: notes.trim() ? 168 : 64, overflow: "auto", display: "flex", flexDirection: "column" }}>
+        {phase !== "error" && notes.trim() && (
           <div data-selectable style={{ paddingTop: 12, borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--text-2)", overflowWrap: "anywhere" }}>
             <Markdown text={notes.trim()} />
           </div>
         )}
-        {phase === "downloading" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <div
-              role="progressbar"
-              aria-label="Download progress"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={pct ?? undefined}
-              style={{ height: 8, borderRadius: 4, background: "var(--bg-raised)", overflow: "hidden" }}
-            >
-              {pct === null ? (
-                <div ref={indeterminate} style={{ height: "100%", width: "30%", background: "var(--accent)" }} />
-              ) : (
-                <div style={{ height: "100%", width: `${pct}%`, background: "var(--accent)", transition: "width 200ms" }} />
-              )}
-            </div>
-            <span style={{ fontSize: 12, color: "var(--text-2)" }}>{pct === null ? "Downloading…" : `Downloading… ${pct}%`}</span>
-          </div>
-        )}
-        {phase === "done" && <p style={{ margin: 0, color: "var(--text-2)" }}>Installed. Restarting Kestral…</p>}
         {phase === "error" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <p role="alert" style={errLine}>{err}</p>
@@ -1059,11 +1039,33 @@ export function UpdateDialog({ version, notes, onClose }: { version: string; not
           </Actions>
         )}
         {busy && (
-          <Actions>
+          <Actions
+            left={
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div
+                  role="progressbar"
+                  aria-label="Download progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={phase === "done" ? 100 : pct ?? undefined}
+                  style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--bg-raised)", overflow: "hidden" }}
+                >
+                  {pct === null && phase !== "done" ? (
+                    <div ref={indeterminate} style={{ height: "100%", width: "30%", background: "var(--accent)" }} />
+                  ) : (
+                    <div style={{ height: "100%", width: `${phase === "done" ? 100 : pct}%`, background: "var(--accent)", transition: "width 200ms" }} />
+                  )}
+                </div>
+                <span style={{ width: 34, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {phase === "done" ? "100%" : pct === null ? "" : `${pct}%`}
+                </span>
+              </div>
+            }
+          >
             {[
               <Button key="busy" kind="primary" disabled title={phase === "done" ? "Restarting Kestral" : "Installing the update"} onClick={() => {}}>
                 <Spinner />
-                {phase === "done" ? "Restarting" : "Updating"}
+                Updating
               </Button>,
             ]}
           </Actions>

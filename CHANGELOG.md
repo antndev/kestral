@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.12 - 2026-10-10
+
+### Fixed
+- The update popup keeps its size while downloading: the release notes stay, and the progress bar sits next to the Updating button.
+
 ## 0.2.11 - 2026-10-10
 
 ### Changed
