@@ -258,40 +258,79 @@ jobs:
           EOF
           cat latest.json
 
+      - name: Write the API helpers
+        run: |
+          cat > "$RUNNER_TEMP/api.sh" <<'EOF'
+          log="$RUNNER_TEMP/api.log"
+          touch "$log"
+          fail() {
+            echo "::error::$1 ($(tail -n 3 "$log" | uniq | tr '\n' ' ' | sed 's/%/%25/g' | cut -c1-400))"
+            exit 1
+          }
+          retry() {
+            local out=$1 i
+            shift
+            for i in 1 2 3; do
+              "$@" > "$out" 2>> "$log" && return 0
+              [ "$i" = 3 ] || sleep $((i * 10))
+            done
+            return 1
+          }
+          get() {
+            local code i
+            for i in 1 2 3; do
+              code=$(curl -sS -o "$2" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/$1" 2>> "$log") || true
+              case "$code" in 200|404) break ;; esac
+              [ "$i" = 3 ] || sleep $((i * 10))
+            done
+            echo "$code"
+          }
+          EOF
+
       - name: Create or reuse the draft release and upload the files
         id: draft
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          code=$(curl -sS -o "$RUNNER_TEMP/tag.json" -w '%{http_code}' \
-            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/repos/$GH_REPO/git/ref/tags/$TAG")
+          . "$RUNNER_TEMP/api.sh"
+          code=$(get "repos/$GH_REPO/git/ref/tags/$TAG" "$RUNNER_TEMP/tag.json")
           case "$code" in
             404) ;;
             200) [ "$(jq -r .object.sha "$RUNNER_TEMP/tag.json")" = "$GITHUB_SHA" ] || { echo "::error::tag $TAG already exists on another commit"; exit 1; } ;;
-            *) echo "::error::tag lookup for $TAG failed with HTTP $code"; exit 1 ;;
+            *) fail "tag lookup for $TAG failed with HTTP $code" ;;
           esac
 
-          gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
-            | jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag) | {id, draft}]' > "$RUNNER_TEMP/releases.json"
-          if jq -e 'any(.draft | not)' "$RUNNER_TEMP/releases.json" > /dev/null; then
-            echo "::error::$TAG is already published"; exit 1
-          fi
-          case "$(jq length "$RUNNER_TEMP/releases.json")" in
-            0)
-              id=$(gh api -X POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
-                -f name="Kestral $TAG" -f body="$NOTES" -F draft=true -F prerelease=false --jq .id)
-              echo "created draft $id" ;;
-            1)
-              id=$(jq -r '.[0].id' "$RUNNER_TEMP/releases.json")
-              gh api -X PATCH "repos/$GH_REPO/releases/$id" -f target_commitish="$GITHUB_SHA" -f name="Kestral $TAG" -f body="$NOTES" --silent
-              echo "reusing draft $id, target reset to $GITHUB_SHA" ;;
-            *) echo "::error::several drafts for $TAG, delete all but one"; exit 1 ;;
-          esac
+          for i in 1 2 3; do
+            retry "$RUNNER_TEMP/all.json" gh api --paginate "repos/$GH_REPO/releases?per_page=100" || fail "listing the releases failed"
+            jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag) | {id, draft}]' "$RUNNER_TEMP/all.json" > "$RUNNER_TEMP/releases.json"
+            if jq -e 'any(.draft | not)' "$RUNNER_TEMP/releases.json" > /dev/null; then
+              echo "::error::$TAG is already published"; exit 1
+            fi
+            case "$(jq length "$RUNNER_TEMP/releases.json")" in
+              0)
+                if gh api -X POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" \
+                  -f name="Kestral $TAG" -f body="$NOTES" -F draft=true -F prerelease=false --jq .id > "$RUNNER_TEMP/id" 2>> "$log"; then
+                  id=$(cat "$RUNNER_TEMP/id")
+                  echo "created draft $id"
+                  break
+                fi ;;
+              1)
+                id=$(jq -r '.[0].id' "$RUNNER_TEMP/releases.json")
+                retry /dev/null gh api -X PATCH "repos/$GH_REPO/releases/$id" -f target_commitish="$GITHUB_SHA" \
+                  -f name="Kestral $TAG" -f body="$NOTES" --silent || fail "updating draft $id failed"
+                echo "reusing draft $id, target reset to $GITHUB_SHA"
+                break ;;
+              *) echo "::error::several drafts for $TAG, delete all but one"; exit 1 ;;
+            esac
+            if [ "$i" = 3 ]; then fail "creating the draft release for $TAG failed"; fi
+            sleep $((i * 10))
+          done
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
-          gh release upload "$TAG" "$WIN" "$WIN.sig" "$DMG" "$MAC" "$MAC.sig" latest.json --clobber
+          retry /dev/null gh release upload "$TAG" "$WIN" "$WIN.sig" "$DMG" "$MAC" "$MAC.sig" latest.json --clobber \
+            || fail "uploading the release files failed"
 
       - name: Publish
         env:
@@ -299,18 +338,18 @@ jobs:
           GH_REPO: ${{ github.repository }}
           ID: ${{ steps.draft.outputs.id }}
         run: |
-          code=$(curl -sS -o "$RUNNER_TEMP/latest-release.json" -w '%{http_code}' \
-            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "$GITHUB_API_URL/repos/$GH_REPO/releases/latest")
+          . "$RUNNER_TEMP/api.sh"
+          code=$(get "repos/$GH_REPO/releases/latest" "$RUNNER_TEMP/latest-release.json")
           case "$code" in
             200) current=$(jq -r .tag_name "$RUNNER_TEMP/latest-release.json") ;;
             404) current="" ;;
-            *) echo "::error::latest release lookup failed with HTTP $code"; exit 1 ;;
+            *) fail "latest release lookup failed with HTTP $code" ;;
           esac
           latest=true
           if [ -n "$current" ] && [ "$(printf '%s\n' "${current#v}" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
             latest=false
             echo "$current is newer than $TAG, publishing without marking it latest"
           fi
-          gh api -X PATCH "repos/$GH_REPO/releases/$ID" -F draft=false -f make_latest="$latest" --silent
+          retry /dev/null gh api -X PATCH "repos/$GH_REPO/releases/$ID" -F draft=false -f make_latest="$latest" --silent \
+            || fail "publishing $TAG failed"
           echo "published $TAG (latest: $latest)"
