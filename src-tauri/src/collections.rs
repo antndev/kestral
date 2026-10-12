@@ -115,28 +115,6 @@ impl CollectionStore {
         self.write(&c)
     }
 
-    pub fn reorder(&self, order: Vec<String>, used: Vec<String>) -> Result<()> {
-        let _g = self.lock.lock().unwrap();
-        let mut c = self.read()?;
-        let list = &mut c.snippet_folders;
-        let current = merged(list, used);
-        let mut next: Vec<String> = Vec::new();
-        for name in order {
-            if let Some(x) = current.iter().find(|x| same(x, &name)) {
-                if !next.iter().any(|y| same(y, x)) {
-                    next.push(x.clone());
-                }
-            }
-        }
-        for x in current {
-            if !next.iter().any(|y| same(y, &x)) {
-                next.push(x);
-            }
-        }
-        *list = next;
-        self.write(&c)
-    }
-
     pub fn import(&self, incoming: Collections) -> Result<()> {
         let _g = self.lock.lock().unwrap();
         let mut c = self.read()?;

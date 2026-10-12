@@ -222,8 +222,17 @@ async function removeTree(fs: Fs, e: FileEntry): Promise<void> {
   await fs.remove(e.path, e.is_dir);
 }
 
+const NAME_ORDER = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+const sameEntries = (a: FileEntry[], b: FileEntry[]) =>
+  a.length === b.length &&
+  a.every((e, i) => {
+    const o = b[i];
+    return e.path === o.path && e.size === o.size && e.mtime === o.mtime && e.permissions === o.permissions && e.is_dir === o.is_dir && e.is_symlink === o.is_symlink && e.hidden === o.hidden;
+  });
+
 function sortEntries(list: FileEntry[], key: SortKey, asc: boolean): FileEntry[] {
-  const byName = (a: FileEntry, b: FileEntry) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+  const byName = (a: FileEntry, b: FileEntry) => NAME_ORDER.compare(a.name, b.name);
   const cmp = (a: FileEntry, b: FileEntry) => {
     if (key === "size") return a.size - b.size || byName(a, b);
     if (key === "mtime") return (a.mtime ?? 0) - (b.mtime ?? 0) || byName(a, b);
@@ -341,7 +350,7 @@ function usePane(side: Side, initial: Loc, opts: { active: boolean; autoRefresh:
     try {
       const list = await f.list(path);
       if (!mounted.current || my !== reqRef.current || ep !== epoch.current) return false;
-      setEntries(list);
+      setEntries((prev) => (sameEntries(prev, list) ? prev : list));
       setCwd(path);
       if (mode === "navigate") {
         setSelected(new Set());

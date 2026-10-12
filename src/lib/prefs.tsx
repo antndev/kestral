@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { MotionConfig } from "motion/react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TERMINAL_THEMES, DEFAULT_TERM_THEME, termThemeOf, type TermThemeId } from "./terminal-themes";
 
@@ -272,7 +271,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
         setTermRightClick,
       }}
     >
-      <MotionConfig reducedMotion={animScale < 0.05 ? "always" : "user"}>{children}</MotionConfig>
+      {children}
     </PrefsCtx.Provider>
   );
 }

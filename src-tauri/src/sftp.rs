@@ -41,10 +41,33 @@ fn join(dir: &str, name: &str) -> String {
 
 fn is_safe_component(name: &str) -> bool {
     let mut comps = Path::new(name).components();
-    matches!(
+    let single = matches!(
         (comps.next(), comps.next()),
         (Some(std::path::Component::Normal(_)), None)
-    )
+    );
+    single && (!cfg!(windows) || windows_safe(name))
+}
+
+fn windows_safe(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").to_ascii_lowercase();
+    let reserved = matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || (stem.len() == 4
+            && (stem.starts_with("com") || stem.starts_with("lpt"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'));
+    !reserved
+        && !name.ends_with(['.', ' '])
+        && !name.chars().any(|c| c.is_control() || "<>:\"|?*".contains(c))
+}
+
+#[cfg(unix)]
+fn local_mode(meta: &std::fs::Metadata) -> Option<u32> {
+    use std::os::unix::fs::PermissionsExt;
+    Some(meta.permissions().mode() & 0o777)
+}
+
+#[cfg(not(unix))]
+fn local_mode(_meta: &std::fs::Metadata) -> Option<u32> {
+    None
 }
 
 async fn open_subsystem(session: &client::Handle<ClientHandler>) -> Result<SftpSession> {
@@ -126,7 +149,11 @@ struct Part {
     permissions: Option<u32>,
 }
 
-async fn create_part(sftp: &SftpSession, path: &str) -> Result<(russh_sftp::client::fs::File, Option<Part>)> {
+async fn create_part(
+    sftp: &SftpSession,
+    path: &str,
+    source_mode: Option<u32>,
+) -> Result<(russh_sftp::client::fs::File, Option<Part>)> {
     let mut target = path.to_string();
     let mut existing = sftp.symlink_metadata(path).await.ok();
     if existing.as_ref().is_some_and(|m| m.file_type().is_symlink()) {
@@ -136,8 +163,16 @@ async fn create_part(sftp: &SftpSession, path: &str) -> Result<(russh_sftp::clie
         }
     }
     let tmp = remote_part(&target);
-    match sftp.create(tmp.as_str()).await {
-        Ok(f) => Ok((f, Some(Part { tmp, target, permissions: existing.and_then(|m| m.permissions) }))),
+    let permissions = existing.and_then(|m| m.permissions).or(source_mode);
+    let mut attrs = russh_sftp::protocol::FileAttributes::empty();
+    if permissions.is_some() {
+        attrs.permissions = Some(0o600);
+    }
+    let flags = russh_sftp::protocol::OpenFlags::CREATE
+        | russh_sftp::protocol::OpenFlags::TRUNCATE
+        | russh_sftp::protocol::OpenFlags::WRITE;
+    match sftp.open_with_flags_and_attributes(tmp.as_str(), flags, attrs).await {
+        Ok(f) => Ok((f, Some(Part { tmp, target, permissions }))),
         Err(_) => {
             let f = sftp.create(path).await.map_err(|e| ferr("create", e))?;
             Ok((f, None))
@@ -223,17 +258,24 @@ async fn download(sftp: &SftpSession, remote: &str, local: &Path, x: &Xfer) -> R
     let target = tokio::fs::canonicalize(local).await.unwrap_or_else(|_| local.to_path_buf());
     let name = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let part = target.with_file_name(part_name(&name));
-    let mut lf = tokio::fs::File::create(&part)
-        .await
-        .map_err(|e| ferr("create local file", e))?;
+    let mut opts = tokio::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    opts.mode(0o600);
+    #[cfg(unix)]
+    let remote_mode = rf.metadata().await.ok().and_then(|m| m.permissions).map(|m| m & 0o777);
+    let mut lf = opts.open(&part).await.map_err(|e| ferr("create local file", e))?;
     let pumped = pump(&mut rf, &mut lf, x).await;
     drop(lf);
     let result = match pumped {
         Ok(n) => {
             #[cfg(unix)]
             {
+                use std::os::unix::fs::PermissionsExt;
                 if let Ok(meta) = tokio::fs::metadata(&target).await {
                     let _ = tokio::fs::set_permissions(&part, meta.permissions()).await;
+                } else if let Some(mode) = remote_mode {
+                    let _ = tokio::fs::set_permissions(&part, std::fs::Permissions::from_mode(mode)).await;
                 }
             }
             tokio::fs::rename(&part, &target)
@@ -262,11 +304,11 @@ fn download_dir<'a>(
         let entries = list(sftp, &remote).await?;
         let mut total = 0u64;
         for e in entries {
-            if e.is_symlink || !is_safe_component(&e.name) {
+            if !is_safe_component(&e.name) || (e.is_symlink && !links_to_file(sftp, &e.path).await) {
                 continue;
             }
             let child = local.join(&e.name);
-            if e.is_dir {
+            if e.is_dir && !e.is_symlink {
                 total += download_dir(sftp, e.path, child, x).await?;
             } else {
                 total += download(sftp, &e.path, &child, x).await?;
@@ -276,11 +318,16 @@ fn download_dir<'a>(
     })
 }
 
+async fn links_to_file(sftp: &SftpSession, path: &str) -> bool {
+    sftp.metadata(path).await.is_ok_and(|m| m.file_type().is_file())
+}
+
 async fn upload(sftp: &SftpSession, local: &Path, remote: &str, x: &Xfer) -> Result<u64> {
     let mut lf = tokio::fs::File::open(local)
         .await
         .map_err(|e| ferr("read local file", e))?;
-    let (mut wf, part) = create_part(sftp, remote).await?;
+    let mode = lf.metadata().await.ok().as_ref().and_then(local_mode);
+    let (mut wf, part) = create_part(sftp, remote, mode).await?;
     let result = match pump(&mut lf, &mut wf, x).await {
         Ok(n) => wf.shutdown().await.map(|_| n).map_err(|e| ferr("close", e)),
         Err(e) => {
@@ -312,9 +359,11 @@ fn upload_dir<'a>(
             let name = entry.file_name();
             let name = name.to_string_lossy().to_string();
             let child_remote = join(&remote, &name);
+            let file = ft.is_file()
+                || (ft.is_symlink() && tokio::fs::metadata(entry.path()).await.is_ok_and(|m| m.is_file()));
             if ft.is_dir() {
                 total += upload_dir(sftp, entry.path(), child_remote, x).await?;
-            } else if ft.is_file() {
+            } else if file {
                 total += upload(sftp, &entry.path(), &child_remote, x).await?;
             }
         }
@@ -324,7 +373,8 @@ fn upload_dir<'a>(
 
 async fn copy_file(src: &SftpSession, from: &str, dst: &SftpSession, to: &str, x: &Xfer) -> Result<u64> {
     let mut rf = src.open(from).await.map_err(|e| ferr("open", e))?;
-    let (mut wf, part) = create_part(dst, to).await?;
+    let mode = rf.metadata().await.ok().and_then(|m| m.permissions).map(|m| m & 0o777);
+    let (mut wf, part) = create_part(dst, to, mode).await?;
     let result = match pump(&mut rf, &mut wf, x).await {
         Ok(n) => wf.shutdown().await.map(|_| n).map_err(|e| ferr("close", e)),
         Err(e) => {
@@ -346,11 +396,11 @@ fn copy_dir<'a>(
         let _ = dst.create_dir(&to).await;
         let mut total = 0u64;
         for e in list(src, &from).await? {
-            if e.is_symlink || !is_safe_component(&e.name) {
+            if !is_safe_component(&e.name) || (e.is_symlink && !links_to_file(src, &e.path).await) {
                 continue;
             }
             let child = join(&to, &e.name);
-            if e.is_dir {
+            if e.is_dir && !e.is_symlink {
                 total += copy_dir(src, e.path, dst, child, x).await?;
             } else {
                 total += copy_file(src, &e.path, dst, &child, x).await?;
@@ -372,10 +422,13 @@ fn remote_size<'a>(
         let mut total = 0;
         if let Ok(entries) = list(sftp, &path).await {
             for e in entries {
-                if e.is_symlink {
-                    continue;
-                }
-                total += if e.is_dir { remote_size(sftp, e.path, true).await } else { e.size };
+                total += if e.is_symlink {
+                    sftp.metadata(e.path.as_str()).await.ok().filter(|m| m.file_type().is_file()).map_or(0, |m| m.len())
+                } else if e.is_dir {
+                    remote_size(sftp, e.path, true).await
+                } else {
+                    e.size
+                };
             }
         }
         total
@@ -386,6 +439,9 @@ pub fn local_size(path: &Path) -> u64 {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return 0;
     };
+    if meta.is_symlink() {
+        return std::fs::metadata(path).ok().filter(|m| m.is_file()).map_or(0, |m| m.len());
+    }
     if meta.is_file() {
         return meta.len();
     }
@@ -458,7 +514,7 @@ impl SftpHandle {
         String::from_utf8(buf).map_err(|_| AppError::Ssh("Not a UTF-8 text file".into()))
     }
     pub async fn write_text(&self, path: &str, content: &str) -> Result<()> {
-        let (mut f, part) = create_part(&self.sftp, path).await?;
+        let (mut f, part) = create_part(&self.sftp, path, None).await?;
         let written = async {
             f.write_all(content.as_bytes()).await.map_err(|e| ferr("write", e))?;
             f.flush().await.map_err(|e| ferr("flush", e))
@@ -542,6 +598,21 @@ impl Transfers {
         let all: Vec<_> = self.0.lock().unwrap().drain().collect();
         for (_, t) in all {
             t.cancel();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::windows_safe;
+
+    #[test]
+    fn windows_rejects_names_ntfs_cannot_hold() {
+        for bad in ["1234.M1P2.host:2,S", "notes.", "trailing ", "CON", "con.txt", "COM1", "lpt9.log", "a?b", "tab\tname"] {
+            assert!(!windows_safe(bad), "{bad}");
+        }
+        for good in ["report.pdf", "computer", "com10", "console.log", ".env"] {
+            assert!(windows_safe(good), "{good}");
         }
     }
 }

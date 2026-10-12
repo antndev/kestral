@@ -233,22 +233,19 @@ pub fn run() {
 
             let token_path = base_dir.join("mcp_token");
             let token = vault::load_or_create_token(&token_path);
-            let bearer: mcp::Bearer = Arc::new(std::sync::RwLock::new(token.clone()));
+            let bearer: mcp::Bearer = Arc::new(std::sync::RwLock::new(token));
             let mcp = McpInfo {
                 url: format!("http://127.0.0.1:{MCP_PORT}/mcp"),
-                token: token.clone(),
                 running: false,
             };
 
             let ct = tokio_util::sync::CancellationToken::new();
 
             let services_for_mcp = services.clone();
-            let bearer_for_mcp = bearer.clone();
             app.manage(AppState {
                 services,
                 mcp: Mutex::new(mcp),
                 mcp_cancel: ct.clone(),
-                mcp_bearer: bearer,
                 mcp_token_path: token_path,
             });
             app.manage(terminal::Sessions::default());
@@ -330,7 +327,7 @@ pub fn run() {
             let mcp_handle = app.handle().clone();
             let reset_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = mcp::serve(mcp_handle, services_for_mcp, bearer_for_mcp, MCP_PORT, ct).await {
+                if let Err(e) = mcp::serve(mcp_handle, services_for_mcp, bearer, MCP_PORT, ct).await {
                     tracing::error!("MCP server stopped: {e}");
                 }
                 if let Some(state) = reset_handle.try_state::<AppState>() {
@@ -363,7 +360,6 @@ pub fn run() {
             commands::snippet_folder_add,
             commands::snippet_folder_rename,
             commands::snippet_folder_remove,
-            commands::snippet_folder_reorder,
             commands::secret_reveal,
             commands::generate_key,
             commands::key_set_comment,
@@ -402,15 +398,10 @@ pub fn run() {
             commands::snippet_mark_reviewed,
             commands::snippet_delete,
             commands::mcp_info,
-            commands::mcp_rotate_token,
-            commands::mcp_connect_claude_code,
             commands::install_skill,
             commands::uninstall_skill,
             commands::skill_installed,
             commands::data_warnings,
-            commands::mcp_list_registrations,
-            commands::mcp_remove_registration,
-            commands::run_command_ui,
             commands::run_command_stream,
             commands::run_command_cancel,
             commands::forward_start,
@@ -420,9 +411,6 @@ pub fn run() {
             commands::sftp_open,
             commands::sftp_list,
             commands::sftp_download,
-            commands::sftp_download_dir,
-            commands::sftp_upload,
-            commands::sftp_upload_dir,
             commands::sftp_read_text,
             commands::sftp_write_text,
             commands::sftp_mkdir,

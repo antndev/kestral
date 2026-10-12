@@ -113,27 +113,8 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
     for meta in services.vault.list_secrets()? {
         existing.insert(meta.id.clone(), services.vault.get_secret(&meta.id)?);
     }
-    let mut used: HashSet<String> = existing.keys().cloned().collect();
-
-    let mut to_add: Vec<(String, SecretKind, Vec<u8>)> = Vec::new();
-    let mut remap: HashMap<String, String> = HashMap::new();
-    let mut secrets_added = 0;
-    let mut secrets_skipped = 0;
-
-    for s in &bundle.secrets {
-        let raw = Zeroizing::new(b64().decode(&s.value).map_err(|_| AppError::Crypto)?);
-        let existing_val = existing.get(&s.id).map(|z| z.as_slice());
-        match plan_secret(&s.id, raw.as_slice(), existing_val, &mut used) {
-            SecretAction::Skip => secrets_skipped += 1,
-            SecretAction::Add(final_id) => {
-                if final_id != s.id {
-                    remap.insert(s.id.clone(), final_id.clone());
-                }
-                to_add.push((final_id, s.kind, raw.to_vec()));
-                secrets_added += 1;
-            }
-        }
-    }
+    let (to_add, remap, secrets_skipped) = plan_secrets(&bundle.secrets, &existing)?;
+    let secrets_added = to_add.len();
 
     let bundled: HashSet<&str> = bundle.secrets.iter().map(|s| s.id.as_str()).collect();
     let own_secrets = |auth: &AuthMethod| match auth {
@@ -231,6 +212,30 @@ enum SecretAction {
     Add(String),
 }
 
+type SecretPlan = (Vec<(String, SecretKind, Vec<u8>)>, HashMap<String, String>, usize);
+
+fn plan_secrets(secrets: &[ExportedSecret], existing: &HashMap<String, Zeroizing<Vec<u8>>>) -> Result<SecretPlan> {
+    let mut used: HashSet<String> = existing.keys().cloned().collect();
+    used.extend(secrets.iter().map(|s| s.id.clone()));
+    let mut to_add = Vec::new();
+    let mut remap = HashMap::new();
+    let mut skipped = 0;
+    for s in secrets {
+        let raw = Zeroizing::new(b64().decode(&s.value).map_err(|_| AppError::Crypto)?);
+        let existing_val = existing.get(&s.id).map(|z| z.as_slice());
+        match plan_secret(&s.id, raw.as_slice(), existing_val, &mut used) {
+            SecretAction::Skip => skipped += 1,
+            SecretAction::Add(final_id) => {
+                if final_id != s.id {
+                    remap.insert(s.id.clone(), final_id.clone());
+                }
+                to_add.push((final_id, s.kind, raw.to_vec()));
+            }
+        }
+    }
+    Ok((to_add, remap, skipped))
+}
+
 // Decide how one incoming secret is merged: an identical secret already present is
 // skipped; an id that clashes with a *different* value gets a fresh id (so the
 // hosts pointing at it can be rewritten instead of silently inheriting the
@@ -321,6 +326,29 @@ mod tests {
         let json = r#"{"version":1,"secrets":[],"hosts":[],"snippets":[],"collections":{"groups":["Production"],"snippet_folders":["Docker"],"pinned":["a"],"recent":[{"host_id":"a","at":"2026-10-01T10:00:00Z"}]}}"#;
         let bundle: Bundle = serde_json::from_str(json).unwrap();
         assert_eq!(bundle.collections.snippet_folders, vec!["Docker"]);
+    }
+
+    #[test]
+    fn renamed_clash_never_lands_on_an_id_the_bundle_still_uses() {
+        let secret = |id: &str, value: &[u8]| ExportedSecret {
+            id: id.into(),
+            kind: SecretKind::Password,
+            value: b64().encode(value),
+        };
+        let mut existing = HashMap::new();
+        existing.insert("x".to_string(), Zeroizing::new(b"TARGET".to_vec()));
+        let bundle = [secret("x", b"A1"), secret("x-2", b"A2")];
+
+        let (to_add, remap, skipped) = plan_secrets(&bundle, &existing).unwrap();
+
+        assert_eq!(skipped, 0);
+        let ids: HashSet<&str> = to_add.iter().map(|(id, _, _)| id.as_str()).collect();
+        assert_eq!(ids.len(), 2);
+        let a1 = remap.get("x").expect("the clashing id must be renamed");
+        assert_ne!(a1, "x-2");
+        let value_of = |id: &str| to_add.iter().find(|(i, _, _)| i == id).map(|(_, _, v)| v.clone()).unwrap();
+        assert_eq!(value_of(a1), b"A1");
+        assert_eq!(value_of("x-2"), b"A2");
     }
 
     #[test]

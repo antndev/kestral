@@ -108,7 +108,6 @@ let aiExpires: string | null = null;
 let aiCaps = { list_hosts: true, manage_hosts: false, list_snippets: true, manage_snippets: false, list_secrets: false, audit_log: true };
 let protectedPaths = ["~/.ssh/authorized_keys", "~/.ssh/config"];
 let skill = false;
-let registrations = [{ name: "kestral", url: "http://127.0.0.1:4517/mcp", connected: true, is_this_app: true }];
 const audit: Any[] = Array.from({ length: 14 }, (_, i) => ({
   id: uuid(),
   timestamp: new Date(Date.now() - (13 - i) * 3600_000).toISOString(),
@@ -404,7 +403,6 @@ export function installDevMock() {
       case "snippet_folder_add":
       case "snippet_folder_rename":
       case "snippet_folder_remove":
-      case "snippet_folder_reorder":
         return folderOp(cmd.slice(15), p, () => snippets.map((x) => x.folder ?? ""), (from, to) => {
           let n = 0;
           for (const x of snippets) if (x.folder && sameName(x.folder, from)) { x.folder = to; n++; }
@@ -415,7 +413,7 @@ export function installDevMock() {
       case "host_remove": { const i = hosts.findIndex((h) => h.id === p.id); if (i >= 0) hosts.splice(i, 1); return null; }
       case "host_set_policy": { const h = hosts.find((x) => x.id === p.id); if (h) h.ai_policy = p.policy; return null; }
       case "host_set_file_policy": { const h = hosts.find((x) => x.id === p.id); if (h) h.ai_file_policy = p.policy; return null; }
-      case "host_ack_ai_change": { const h = hosts.find((x) => x.id === p.hostId); if (h) h.ai_changed = false; return null; }
+      case "host_ack_ai_change": { const h = hosts.find((x) => x.id === p.seen.id); if (h) h.ai_changed = false; return true; }
       // forwards
       case "forward_active": return [...activeForwards];
       case "forward_start": { await sleep(200); const f = hosts.flatMap((h) => h.forwards).find((x: Any) => x.id === p.forwardId); if (f && f.local_port === 3000) throw "Address already in use (os error 10048)"; activeForwards.add(p.forwardId); return null; }
@@ -428,8 +426,8 @@ export function installDevMock() {
       case "sftp_rename": renameAt(remoteRoot(sftpHost.get(p.id)!), p.from, p.to, false); return null;
       case "sftp_read_text": { const n = find(remoteRoot(sftpHost.get(p.id)!), split(p.path, false)); if (!n || n.dir) throw "Not a file"; return n.text ?? ""; }
       case "sftp_write_text": { const root = remoteRoot(sftpHost.get(p.id)!); const n = find(root, split(p.path, false)); if (n) { n.text = p.content; n.size = p.content.length; n.mtime = now(); } else { const [par, name] = parentAndName(root, p.path, false); par.children!.push({ ...file(name, p.content.length, p.content), mtime: now() }); } return null; }
-      case "sftp_upload": case "sftp_upload_dir": { await sleep(900); const src = find(localRoot, split(p.local, true)); if (!src) throw `Local file not found: ${p.local}`; return copyInto(src, remoteRoot(sftpHost.get(p.id)!), p.remote, false); }
-      case "sftp_download": case "sftp_download_dir": { await sleep(900); const src = find(remoteRoot(sftpHost.get(p.id)!), split(p.remote, false)); if (!src) throw `Remote file not found: ${p.remote}`; return copyInto(src, localRoot, p.local, true); }
+      case "sftp_upload": { await sleep(900); const src = find(localRoot, split(p.local, true)); if (!src) throw `Local file not found: ${p.local}`; return copyInto(src, remoteRoot(sftpHost.get(p.id)!), p.remote, false); }
+      case "sftp_download": { await sleep(900); const src = find(remoteRoot(sftpHost.get(p.id)!), split(p.remote, false)); if (!src) throw `Remote file not found: ${p.remote}`; return copyInto(src, localRoot, p.local, true); }
       case "sftp_transfer": {
         const remote = remoteRoot(sftpHost.get(p.id)!);
         const src = p.upload ? find(localRoot, split(p.local, true)) : find(remote, split(p.remote, false));
@@ -488,7 +486,6 @@ export function installDevMock() {
         return true;
       }
       case "snippet_delete": { const i = snippets.findIndex((s) => s.id === p.id); if (i >= 0) snippets.splice(i, 1); return null; }
-      case "run_command_ui": { await sleep(400); const fake: Shell = { id: "", host: hosts.find((h) => h.id === p.hostId) ?? {}, channel: null, idx: 0, line: "", cwd: "~" }; return { stdout: String(p.command).split("\n").map((l: string) => runLine(fake, l)).join("").replace(/\r\n/g, "\n"), stderr: "", exit_status: 0 }; }
       case "run_command_stream": return streamCommand(p);
       case "run_command_cancel": mockRuns.delete(p.runId); return null;
       // ai / mcp / audit
@@ -507,11 +504,7 @@ export function installDevMock() {
       }
       case "audit_user_command": return null;
       case "app_changelog": return "## 0.1.56\n- New design\n\n## 0.1.55\n- AI file transfers can use any local path\n";
-      case "mcp_info": return { url: "http://127.0.0.1:4517/mcp", token: "kst_9f2c4e7a1b3d5f6e8a0c2e4f6a8b0d1e", running: true };
-      case "mcp_rotate_token": return { info: { url: "http://127.0.0.1:4517/mcp", token: "kst_" + uuid().replace(/-/g, ""), running: true }, reconnected: true, message: "Token rotated and Claude Code reconnected." };
-      case "mcp_connect_claude_code": return { ok: true, message: "Claude Code is connected to Kestral." };
-      case "mcp_list_registrations": return registrations;
-      case "mcp_remove_registration": registrations = registrations.filter((r) => r.name !== p.name); return "Removed";
+      case "mcp_info": return { url: "http://127.0.0.1:4517/mcp", running: true };
       case "install_skill": skill = true; return { skill_path: "C:\\Users\\anton\\.claude\\skills\\kestral\\SKILL.md", script_path: "C:\\Users\\anton\\.claude\\skills\\kestral\\kestral.py", runtime: "python", message: "Skill installed." };
       case "uninstall_skill": skill = false; return "Skill removed.";
       case "skill_installed": return skill;

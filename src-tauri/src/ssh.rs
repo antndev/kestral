@@ -343,7 +343,7 @@ impl SshManager {
                 .connect_one(jump, vault, via.take(), &|_, _| {}, None, None)
                 .await
                 .map_err(|e| match e {
-                    AppError::AuthFailed { .. } | AppError::Canceled => e,
+                    AppError::Canceled => e,
                     other => AppError::Ssh(format!("Jump host {}: {other}", jump.name)),
                 })?;
             on_stage("jumped", &jump.name);
@@ -580,23 +580,11 @@ impl SshManager {
         Ok((first, "Password".into()))
     }
 
-    pub async fn run_command_opts(
-        &self,
-        host: &Host,
-        vault: &Arc<Vault>,
-        command: &str,
-        pty: bool,
-    ) -> Result<CommandOutput> {
-        let session = self.connect(host, vault).await?;
-        self.exec_on(&session, host, command, pty).await
-    }
-
     pub async fn exec_on(
         &self,
         session: &client::Handle<ClientHandler>,
         host: &Host,
         command: &str,
-        pty: bool,
     ) -> Result<CommandOutput> {
         let mut channel = session
             .channel_open_session()
@@ -607,16 +595,11 @@ impl SshManager {
                 tracing::warn!("requesting agent forwarding failed: {e}");
             }
         }
-        if pty {
-            channel
-                .request_pty(true, "xterm-256color", 120, 34, 0, 0, &[])
-                .await
-                .map_err(|e| AppError::Ssh(format!("PTY: {e}")))?;
-        }
         channel
             .exec(true, command)
             .await
             .map_err(|e| AppError::Ssh(format!("exec: {e}")))?;
+        let _ = channel.eof().await;
 
         const MAX_OUTPUT: usize = 16 * 1024 * 1024;
 

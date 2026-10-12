@@ -8,7 +8,7 @@ name: Release
 on:
   push:
     branches: [main]
-    paths: [package.json]
+    paths: [package.json, .github/workflows/release.yml]
   workflow_dispatch:
 
 permissions: {}
@@ -140,6 +140,10 @@ jobs:
 
       - name: Build without updater artifacts
         run: npx tauri build --config "${{ runner.temp }}/ci.conf.json" ${{ matrix.args }}
+
+      - name: Run the Rust tests
+        if: matrix.name == 'windows'
+        run: cargo test --release --manifest-path src-tauri/Cargo.toml
 
       - name: Collect the release files
         shell: bash

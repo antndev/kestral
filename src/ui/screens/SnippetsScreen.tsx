@@ -238,6 +238,7 @@ interface ScriptRun {
 }
 
 const MAX_OUTPUT = 4 * 1024 * 1024;
+const MAX_RUNS = 20;
 let runStore: ScriptRun[] = [];
 const runListeners = new Set<() => void>();
 
@@ -331,7 +332,7 @@ async function startRun(snippetId: string, script: string, targets: Host[], para
         error: "",
       })),
     },
-    ...cur,
+    ...cur.filter((r, i) => i < MAX_RUNS - 1 || r.results.some((x) => isLive(x.status))),
   ]);
 
   const runOne = async (h: Host) => {
@@ -1802,7 +1803,7 @@ function RunBlock({ run, latest }: { run: ScriptRun; latest: boolean }) {
       {run.results.length === 0 ? (
         <p style={{ margin: 0, ...muted }}>No hosts to run on.</p>
       ) : (
-        run.results.map((r) => <HostResult key={r.hostId} result={r} defaultOpen={latest && run.results.length <= 3} />)
+        run.results.map((r) => <HostResult key={`${r.hostId}:${latest}`} result={r} defaultOpen={latest && run.results.length <= 3} />)
       )}
     </div>
   );

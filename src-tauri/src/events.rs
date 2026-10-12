@@ -13,3 +13,7 @@ pub fn data_changed(kind: &str) {
         let _ = app.emit("data-changed", kind);
     }
 }
+
+pub fn app() -> Option<&'static AppHandle> {
+    APP.get()
+}

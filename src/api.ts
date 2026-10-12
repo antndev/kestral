@@ -125,7 +125,6 @@ export interface AiCaps {
 
 export interface McpInfo {
   url: string;
-  token: string;
   running: boolean;
 }
 
@@ -145,12 +144,6 @@ export interface AuditEntry {
   exit_status: number | null;
   success: boolean;
   detail: string | null;
-}
-
-export interface CommandOutput {
-  stdout: string;
-  stderr: string;
-  exit_status: number | null;
 }
 
 export interface ApprovalRequest {
@@ -259,7 +252,7 @@ export const hostList = () => invoke<Host[]>("host_list");
 export const hostAdd = (host: NewHost) => invoke<Host>("host_add", { host });
 export const hostUpdate = (host: Host) => invoke<void>("host_update", { host });
 export const hostRemove = (id: string) => invoke<void>("host_remove", { id });
-export const hostAckAiChange = (hostId: string) => invoke<void>("host_ack_ai_change", { hostId });
+export const hostAckAiChange = (seen: Host) => invoke<boolean>("host_ack_ai_change", { seen });
 export const hostSetPolicy = (id: string, policy: AiPolicy) =>
   invoke<void>("host_set_policy", { id, policy });
 export const hostSetFilePolicy = (id: string, policy: AiPolicy) =>
@@ -283,12 +276,6 @@ export const sftpList = (id: string, path: string) =>
   invoke<FileEntry[]>("sftp_list", { id, path });
 export const sftpDownload = (id: string, remote: string, local: string) =>
   invoke<number>("sftp_download", { id, remote, local });
-export const sftpDownloadDir = (id: string, remote: string, local: string) =>
-  invoke<number>("sftp_download_dir", { id, remote, local });
-export const sftpUpload = (id: string, local: string, remote: string) =>
-  invoke<number>("sftp_upload", { id, local, remote });
-export const sftpUploadDir = (id: string, local: string, remote: string) =>
-  invoke<number>("sftp_upload_dir", { id, local, remote });
 export const sftpReadText = (id: string, path: string) =>
   invoke<string>("sftp_read_text", { id, path });
 export const sftpWriteText = (id: string, path: string, content: string) =>
@@ -323,9 +310,6 @@ export const sftpCopyRemote = (
   onProgress: Channel<TransferProgress>,
 ) => invoke<number>("sftp_copy_remote", { srcId, dstId, transferId, srcPath, dstPath, isDir, onProgress });
 export const sftpCancel = (transferId: string) => invoke<void>("sftp_cancel", { transferId });
-
-export const sshWriteBytes = (id: string, data: number[]) => invoke<void>("ssh_write_bytes", { id, data });
-export const sshPing = (id: string) => invoke<number | null>("ssh_ping", { id });
 
 export interface Snippet {
   id: string;
@@ -362,7 +346,6 @@ export const snippetFolderList = () => invoke<string[]>("snippet_folder_list");
 export const snippetFolderAdd = (name: string) => invoke<string>("snippet_folder_add", { name });
 export const snippetFolderRename = (from: string, to: string) => invoke<string>("snippet_folder_rename", { from, to });
 export const snippetFolderRemove = (name: string) => invoke<number>("snippet_folder_remove", { name });
-export const snippetFolderReorder = (order: string[]) => invoke<void>("snippet_folder_reorder", { order });
 
 export const aiStatus = () => invoke<AiStatus>("ai_status");
 export const aiEnable = (minutes?: number) => invoke<void>("ai_enable", { minutes });
@@ -377,25 +360,10 @@ export const approvalRespond = (id: string, approved: boolean) =>
 
 export const auditList = () => invoke<AuditEntry[]>("audit_list");
 export const auditSince = (after: string | null, limit?: number) => invoke<{ full: boolean; entries: AuditEntry[] }>("audit_since", { after, limit });
-export const auditUserCommand = (hostId: string, command: string) =>
-  invoke<void>("audit_user_command", { hostId, command });
 
 export const appChangelog = () => invoke<string>("app_changelog");
 export const mcpInfo = () => invoke<McpInfo>("mcp_info");
 export const dataWarnings = () => invoke<string[]>("data_warnings");
-export interface RotateResult {
-  info: McpInfo;
-  reconnected: boolean;
-  message: string;
-}
-export const mcpRotateToken = (name: string) =>
-  invoke<RotateResult>("mcp_rotate_token", { name });
-export interface ConnectResult {
-  ok: boolean;
-  message: string;
-}
-export const mcpConnectClaudeCode = (name: string) =>
-  invoke<ConnectResult>("mcp_connect_claude_code", { name });
 
 export interface InstallResult {
   skill_path: string;
@@ -406,16 +374,6 @@ export interface InstallResult {
 export const installSkill = () => invoke<InstallResult>("install_skill");
 export const uninstallSkill = () => invoke<string>("uninstall_skill");
 export const skillInstalled = () => invoke<boolean>("skill_installed");
-
-export interface Registration {
-  name: string;
-  url: string;
-  connected: boolean;
-  is_this_app: boolean;
-}
-export const mcpListRegistrations = () => invoke<Registration[]>("mcp_list_registrations");
-export const mcpRemoveRegistration = (name: string) =>
-  invoke<string>("mcp_remove_registration", { name });
 
 // ---- Known hosts (~/.ssh/known_hosts) ----
 export interface KnownHostEntry {
@@ -512,9 +470,6 @@ export interface SshConfigHost {
   proxy_jump: string | null;
 }
 export const sshConfigHosts = () => invoke<SshConfigHost[]>("ssh_config_hosts");
-
-export const runCommandUi = (hostId: string, command: string, pty = false) =>
-  invoke<CommandOutput>("run_command_ui", { hostId, command, pty });
 
 export interface StreamExit {
   exit_status: number | null;

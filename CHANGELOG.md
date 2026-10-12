@@ -3,6 +3,29 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.14 - 2026-10-12
+
+### Security
+- Saving a host from Port forwarding or the Keychain no longer clears its AI mark. Only Confirm host does, and only if the host still matches what you saw in the dialog.
+- The AI can no longer run commands or transfer files on a host, or through a jump host, that it changed until you confirm it.
+- Importing an export could give a host another host's password when two saved passwords had ids like `x` and `x-2`.
+- A protected path written as `~/...` now also trips the kill switch when it appears in a command.
+- Locking a host closes the AI's open connection to it right away.
+
+### Fixed
+- When the AI edits a host without naming a sign-in, the sign-in is kept, so tags or a new name no longer reset the host. When it does change the target, running port forwards are stopped.
+- When the AI edits a snippet without naming hosts, the snippet keeps its hosts.
+- AI commands that wait for input end right away instead of hanging for five minutes.
+- AI transfers ask for an absolute local path instead of writing next to the app.
+- A failed sign-in at a jump host shows that error instead of asking for the target host's password.
+- Snippets use agent forwarding when the host has it on.
+- New files from SFTP keep the permissions of the source on macOS, so a private file stays private.
+- Folder transfers include symlinked files, and on Windows skip names that cannot be stored instead of failing.
+- Snippet output keeps the last 20 runs, and the SFTP list no longer redraws an unchanged folder every few seconds.
+
+### Removed
+- Unused internal commands and unused packages.
+
 ## 0.2.13 - 2026-10-10
 
 ### Fixed

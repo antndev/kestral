@@ -18,7 +18,6 @@ use crate::vault::{SecretStore, Vault};
 #[derive(Debug, Clone, Serialize)]
 pub struct McpInfo {
     pub url: String,
-    pub token: String,
     pub running: bool,
 }
 
@@ -133,6 +132,9 @@ impl Services {
             ));
         }
 
+        if self.policy.is_active() {
+            crate::commands::ensure_reviewed(self, &host)?;
+        }
         match self.policy.gate(host.ai_policy) {
             Gate::Denied(reason) => {
                 self.record_denied(&host_id_s, &host.name, command, reason);
@@ -205,6 +207,7 @@ impl Services {
 
     fn regate(&self, host_id: Uuid, files: bool) -> Result<()> {
         let host = self.hosts.get(host_id)?;
+        crate::commands::ensure_reviewed(self, &host)?;
         let policy = if files { host.ai_file_policy } else { host.ai_policy };
         match self.policy.gate(policy) {
             Gate::Denied(reason) => Err(reason_to_err(reason)),
@@ -257,6 +260,9 @@ impl Services {
         action: &str,
     ) -> Result<(Host, &'static str)> {
         let host = self.hosts.get(host_id)?;
+        if self.policy.is_active() {
+            crate::commands::ensure_reviewed(self, &host)?;
+        }
         let hid = host.id.to_string();
         let gate = self.policy.gate(host.ai_file_policy);
         if let Gate::Denied(reason) = gate {
@@ -319,7 +325,7 @@ impl Services {
     async fn pooled_exec(&self, host: &Host, command: &str) -> Result<CommandOutput> {
         let allowed = || self.regate(host.id, false);
         let session = self.ai_pool.session(&self.ssh, &self.vault, host, &allowed).await?;
-        let result = self.ssh.exec_on(&session, host, command, false).await;
+        let result = self.ssh.exec_on(&session, host, command).await;
         let Err(e) = &result else {
             return result;
         };
@@ -330,7 +336,7 @@ impl Services {
         }
         allowed()?;
         let session = self.ai_pool.session(&self.ssh, &self.vault, host, &allowed).await?;
-        self.ssh.exec_on(&session, host, command, false).await
+        self.ssh.exec_on(&session, host, command).await
     }
 
     async fn pooled_sftp(&self, host: &Host) -> Result<sftp::SftpHandle> {
@@ -412,6 +418,9 @@ impl Services {
 
     async fn guard_local(&self, host_id: Uuid, action: &str, raw: &str, path: &std::path::Path) -> Result<()> {
         self.guard_protected(host_id, action, raw).await?;
+        if !path.is_absolute() {
+            return Err(AppError::PathNotAllowed("use an absolute local path or one starting with ~/".into()));
+        }
         if !plain_local(path) {
             return Err(self.refuse_share(host_id, action));
         }
@@ -474,7 +483,6 @@ pub struct AppState {
     pub services: Services,
     pub mcp: Mutex<McpInfo>,
     pub mcp_cancel: tokio_util::sync::CancellationToken,
-    pub mcp_bearer: crate::mcp::Bearer,
     pub mcp_token_path: std::path::PathBuf,
 }
 

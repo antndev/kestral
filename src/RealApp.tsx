@@ -493,7 +493,13 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         width: 460,
         body: <AiHostFacts hosts={changed} all={hostsRef.current} identities={identities} />,
         onConfirm: async () => {
-          for (const h of changed) await api.hostAckAiChange(h.id);
+          const results: boolean[] = [];
+          for (const h of changed) results.push(await api.hostAckAiChange(h));
+          if (results.includes(false)) {
+            await refreshHosts();
+            toast("error", "The AI changed this host again. Check it once more.");
+            return;
+          }
           const acked = new Set(changed.map((h) => h.id));
           hostsRef.current = hostsRef.current.map((h) => (acked.has(h.id) ? { ...h, ai_changed: false } : h));
           setHosts(hostsRef.current);
@@ -501,7 +507,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         },
       });
     })();
-  }, []);
+  }, [refreshHosts, toast]);
 
   // ---------------------------------------------------------------- sessions
   const openTerminalNow = useCallback((host: Host, initialCommand?: string, password?: string | null) => {

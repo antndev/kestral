@@ -91,7 +91,9 @@ struct UpdateHostArgs {
     hostname: String,
     port: u16,
     username: String,
-    auth_kind: String,
+    /// Sign-in method: password, key or agent. Omit to keep the current sign-in.
+    #[serde(default)]
+    auth_kind: Option<String>,
     #[serde(default)]
     secret_id: Option<String>,
     /// New group name. Omit to keep the current group, empty string to ungroup.
@@ -118,8 +120,9 @@ struct UpdateSnippetArgs {
     snippet_id: String,
     label: String,
     script: String,
+    /// Hosts the snippet runs on. Omit to keep the current targets.
     #[serde(default)]
-    target_host_ids: Vec<String>,
+    target_host_ids: Option<Vec<String>>,
     /// New folder name. Omit to keep the current folder, empty string for none.
     #[serde(default)]
     folder: Option<String>,
@@ -312,7 +315,7 @@ impl KestralMcp {
     }
 
     #[tool(
-        description = "Update an existing host's connection fields. If the hostname, port, username or sign-in (auth_kind, secret_id, identity) changes, the per-host AI policies are reset to locked so the user has to re-grant access. The AI can never widen a policy."
+        description = "Update an existing host's connection fields. If the hostname, port, username or sign-in (auth_kind, secret_id) changes, the per-host AI policies are reset to locked so the user has to re-grant access. Omit auth_kind and secret_id to keep the current sign-in. The AI can never widen a policy."
     )]
     async fn update_host(
         &self,
@@ -337,9 +340,17 @@ impl KestralMcp {
             Ok(h) => h,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
         };
-        let auth = match build_auth(&a.auth_kind, a.secret_id, &self.services.vault) {
-            Ok(au) => au,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        let auth = match (a.auth_kind, a.secret_id) {
+            (None, None) => existing.auth.clone(),
+            (None, Some(_)) => {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    "auth_kind is required when secret_id is given",
+                )]))
+            }
+            (Some(kind), secret_id) => match build_auth(&kind, secret_id, &self.services.vault) {
+                Ok(au) => au,
+                Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+            },
         };
         let target_changed = a.hostname != existing.hostname
             || a.port != existing.port
@@ -389,6 +400,12 @@ impl KestralMcp {
         };
         match self.services.hosts.update_relocking(updated.clone(), target_changed) {
             Ok(dependents) => {
+                if target_changed {
+                    if let Some(app) = crate::events::app() {
+                        use tauri::Manager;
+                        app.state::<crate::forward::ForwardManager>().stop_host(id).await;
+                    }
+                }
                 for d in &dependents {
                     self.services.ai_pool.forget(*d).await;
                 }
@@ -493,13 +510,14 @@ impl KestralMcp {
                 ))]))
             }
         };
-        let targets = match parse_host_ids(&a.target_host_ids) {
-            Ok(t) => t,
-            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
-        };
         let existing = match self.services.snippets.get(id) {
             Ok(s) => s,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        };
+        let targets = match a.target_host_ids.as_deref().map(parse_host_ids) {
+            None => existing.target_host_ids.clone(),
+            Some(Ok(t)) => t,
+            Some(Err(e)) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
         let updated = Snippet {
             id,

@@ -368,7 +368,10 @@ impl PolicyEngine {
         inner
             .protected
             .iter()
-            .map(|p| p.trim())
+            .map(|p| {
+                let p = p.trim();
+                p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")).unwrap_or(p)
+            })
             .filter(|p| !p.is_empty())
             .flat_map(with_companions)
             .any(|p| normalized.contains(&collapse_slashes(p).to_lowercase()))
@@ -521,6 +524,15 @@ mod tests {
         let p = engine(&[".ssh/authorized_keys"]);
         assert!(p.mentions_protected("echo key >> ~/.ssh/authorized_keys"));
         assert!(p.mentions_protected("tee -a /root/.ssh/authorized_keys"));
+        assert!(!p.mentions_protected("cat /etc/hostname"));
+    }
+
+    #[test]
+    fn command_tripwire_matches_home_relative_patterns() {
+        let p = engine(&["~/.ssh/id_ed25519", "~/"]);
+        assert!(p.mentions_protected("cat /home/u/.ssh/id_ed25519"));
+        assert!(p.mentions_protected("cat $HOME/.ssh/id_ed25519"));
+        assert!(p.mentions_protected("cat ~/.ssh/id_ed25519"));
         assert!(!p.mentions_protected("cat /etc/hostname"));
     }
 
