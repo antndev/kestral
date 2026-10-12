@@ -143,10 +143,7 @@ pub fn installed() -> bool {
 }
 
 fn home() -> Result<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-        .ok_or_else(|| AppError::Other("no home directory found".into()))
+    crate::util::home_dir().ok_or_else(|| AppError::Other("no home directory found".into()))
 }
 
 fn find_python() -> Option<String> {

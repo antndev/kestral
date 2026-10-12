@@ -7,12 +7,6 @@ export type DragHandlers = {
   onEnd(): void;
 };
 
-let dragging = false;
-
-export function isDragging() {
-  return dragging;
-}
-
 export function beginDrag(e: ReactMouseEvent, h: DragHandlers) {
   if (e.button !== 0) return;
   const origin = e.currentTarget as HTMLElement;
@@ -30,7 +24,6 @@ export function beginDrag(e: ReactMouseEvent, h: DragHandlers) {
     ghost = null;
     document.documentElement.style.cursor = "";
     document.documentElement.style.userSelect = "";
-    dragging = false;
   };
 
   const swallowClick = () => {
@@ -50,7 +43,6 @@ export function beginDrag(e: ReactMouseEvent, h: DragHandlers) {
     if (!active) {
       if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 5) return;
       active = true;
-      dragging = true;
       ghost = document.createElement("div");
       ghost.textContent = h.label;
       Object.assign(ghost.style, {

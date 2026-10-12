@@ -46,8 +46,9 @@ impl ForwardManager {
         self.active
             .lock()
             .unwrap()
-            .keys()
-            .map(|(_, f)| *f)
+            .iter()
+            .filter(|(_, (_, a))| !a.as_ref().is_some_and(|a| a.session.is_closed()))
+            .map(|((_, f), _)| *f)
             .collect()
     }
 
@@ -63,12 +64,20 @@ impl ForwardManager {
 
         // Reserve the slot atomically. If it is already taken, this start is a
         // no-op, which is exactly what a duplicate request should do.
-        {
+        let stale = {
             let mut map = self.active.lock().unwrap();
-            if map.contains_key(&key) {
+            let stale = if matches!(map.get(&key), Some((_, Some(a))) if a.session.is_closed()) {
+                map.remove(&key).and_then(|(_, a)| a)
+            } else if map.contains_key(&key) {
                 return Ok(());
-            }
+            } else {
+                None
+            };
             map.insert(key, (attempt, None));
+            stale
+        };
+        if let Some(a) = stale {
+            shutdown(a).await;
         }
 
         match self.spawn(ssh, host, vault, fwd, key, attempt).await {

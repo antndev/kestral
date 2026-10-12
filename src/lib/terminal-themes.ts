@@ -220,32 +220,6 @@ export function termThemeOf(id: TermThemeId): TermTheme {
   return TERMINAL_THEMES[id] ?? TERMINAL_THEMES[DEFAULT_TERM_THEME];
 }
 
-export function terminalTheme(id: TermThemeId, colors: boolean): ITheme {
-  const base = termThemeOf(id).theme;
-  if (colors) return base;
-  const fg = base.foreground ?? "#d4d4d4";
-  const dim = base.brightBlack ?? "#888888";
-  return {
-    ...base,
-    black: fg,
-    red: fg,
-    green: fg,
-    yellow: fg,
-    blue: fg,
-    magenta: fg,
-    cyan: fg,
-    white: fg,
-    brightBlack: dim,
-    brightRed: fg,
-    brightGreen: fg,
-    brightYellow: fg,
-    brightBlue: fg,
-    brightMagenta: fg,
-    brightCyan: fg,
-    brightWhite: fg,
-  };
-}
-
 export type Tone = "dark" | "light";
 export function toneOf(el: Element | null): Tone {
   return el?.closest(".t-dark, .t-light")?.classList.contains("t-light") ? "light" : "dark";

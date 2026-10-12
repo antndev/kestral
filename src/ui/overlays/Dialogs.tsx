@@ -5,8 +5,9 @@ import { addedLabel } from "../../api";
 import type { ApprovalRequest, HostKeyChanged, HostKeyRequest, KnownHostEntry } from "../../api";
 import { IS_MAC, MONO, errText } from "../mock";
 import { CheckIcon, CopyIcon, CpuIcon, DownloadIcon, ShieldIcon, WarningIcon } from "../icons";
-import { updateLock } from "../../lib/updateLock";
+import { RELEASES_URL, friendlyUpdateError, installUpdate } from "../../lib/updateLock";
 import { Markdown } from "../Markdown";
+import { useAlive } from "../kit";
 
 /* ---------- modal layer: topmost-only Escape, focus trap, focus restore ---------- */
 
@@ -31,21 +32,13 @@ function topLayer(): Layer | undefined {
   return top;
 }
 
-export function isModalOpen(): boolean {
-  return layers.length > 0;
-}
-
-export function topModalKind(): string | null {
-  return topLayer()?.opts.current.kind ?? null;
-}
-
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** App shortcut keys (with Ctrl, or Cmd on macOS) that must not act on what lies behind a modal. */
-const APP_SHORTCUT_KEYS = new Set(["tab", "k", "p", "t", "w", "d", "l", ",", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+const APP_SHORTCUT_KEYS = new Set(["tab", "k", "t", "w", "d", "l", ",", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 /** The palette lets its own open shortcuts through so pressing one again closes it. */
-const PALETTE_KEYS = new Set(["k", "p", "t"]);
+const PALETTE_KEYS = new Set(["k", "t"]);
 
 function onModalKeyDown(e: KeyboardEvent) {
   const top = topLayer();
@@ -252,17 +245,6 @@ const ArrowUpRightIcon = ({ size = 14 }: { size?: number }) => (
     <path d="M5 11 11 5M6 5h5v5" />
   </svg>
 );
-
-function useAlive() {
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  return alive;
-}
 
 export function useArmed(delay = 750) {
   const [armed, setArmed] = useState(false);
@@ -869,90 +851,6 @@ export function AiStoppedDialog({ info, onClose }: { info: { host_name: string; 
 }
 
 /* ---------- UpdateDialog ---------- */
-
-const RELEASES_URL = "https://github.com/antndev/kestral/releases/latest";
-
-type DownloadEvent = { event: string; data?: { contentLength?: number; chunkLength?: number } };
-type PendingUpdate = { version: string; body?: string; downloadAndInstall(cb: (e: DownloadEvent) => void): Promise<void> };
-type UpdateWindow = { __kestralUpdate?: PendingUpdate };
-
-async function pendingUpdate(): Promise<PendingUpdate> {
-  const w = window as unknown as UpdateWindow;
-  if (w.__kestralUpdate) return w.__kestralUpdate;
-  const { check } = await import("@tauri-apps/plugin-updater");
-  const found = await check();
-  if (!found) throw "No update to install";
-  w.__kestralUpdate = found;
-  return found;
-}
-
-/** Downloads, installs and relaunches. `onPct` gets null while the size is unknown. */
-async function installUpdate(report: (pct: number | null) => void) {
-  if (updateLock.busy) throw new Error("An update is already installing.");
-  const update = await pendingUpdate();
-  updateLock.busy = true;
-  const onPct = (pct: number | null) => {
-    updateLock.setPhase({ kind: "downloading", pct });
-    report(pct);
-  };
-  onPct(0);
-
-  const runDownload = async () => {
-    let total = 0;
-    let got = 0;
-    await update.downloadAndInstall((e) => {
-      if (e.event === "Started") {
-        total = e.data?.contentLength ?? 0;
-        onPct(total ? 0 : null);
-      } else if (e.event === "Progress") {
-        got += e.data?.chunkLength ?? 0;
-        onPct(total ? Math.min(100, Math.round((got / total) * 100)) : null);
-      }
-    });
-  };
-
-  // GitHub's release CDN and some antivirus scanners drop the connection now and
-  // then ("error sending request"). A retry usually succeeds, so try a few times.
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      await runDownload();
-      updateLock.setPhase({ kind: "ready" });
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
-      return;
-    } catch (e) {
-      lastErr = e;
-      const msg = String(e).toLowerCase();
-      const retryable = ["error sending request", "connect", "timed out", "timeout", "request", "network", "reset"].some((k) => msg.includes(k));
-      if (!retryable || attempt === 2) break;
-      onPct(0);
-      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-    }
-  }
-  updateLock.busy = false;
-  updateLock.setPhase({ kind: "error", message: friendlyUpdateError(lastErr) });
-  throw lastErr;
-}
-
-function friendlyUpdateError(e: unknown): string {
-  const raw = errText(e).toLowerCase();
-  if (["error sending request", "connect", "timed out", "timeout", "dns", "network", "tcp", "request"].some((k) => raw.includes(k))) {
-    return "Couldn't reach GitHub to fetch the update. Check your connection, VPN or firewall, then try again.";
-  }
-  if (raw.includes("signature") || raw.includes("verif")) {
-    return "The update's signature couldn't be verified. Try again; if it keeps failing, install the latest release from GitHub.";
-  }
-  if (raw.includes("permission") || raw.includes("denied") || raw.includes("os error 5")) {
-    return IS_MAC
-      ? "Your system blocked the update. Install the latest release from GitHub yourself, or allow it in your security software."
-      : "Windows blocked the update. Close Kestral and run the installer yourself, or allow it in your antivirus.";
-  }
-  if (raw.includes("not found") || raw.includes("404")) {
-    return "The update file wasn't available yet. It may still be publishing; try again in a few minutes.";
-  }
-  return "The update couldn't be completed. Please try again.";
-}
 
 export function UpdateDialog({ version, notes, onClose }: { version: string; notes: string; onClose(): void }) {
   const ref = useRef<HTMLElement>(null);

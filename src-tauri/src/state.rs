@@ -40,15 +40,14 @@ pub struct Services {
 // directly; the protected-path kill switch (checked separately, for local paths
 // too) is what keeps sensitive files off limits.
 fn resolve_local(path: &str) -> PathBuf {
-    let home = || std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
     if path == "~" {
-        if let Some(h) = home() {
-            return PathBuf::from(h);
+        if let Some(h) = crate::util::home_dir() {
+            return h;
         }
     }
     if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
-        if let Some(h) = home() {
-            return PathBuf::from(h).join(rest);
+        if let Some(h) = crate::util::home_dir() {
+            return h.join(rest);
         }
     }
     PathBuf::from(path)

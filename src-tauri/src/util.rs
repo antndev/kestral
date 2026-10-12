@@ -171,7 +171,10 @@ pub fn harden_dir(path: &Path) {
     {
         use std::os::windows::process::CommandExt;
         if let Some(user) = std::env::var_os("USERNAME") {
-            let user = user.to_string_lossy();
+            let user = match std::env::var_os("USERDOMAIN").filter(|d| !d.is_empty()) {
+                Some(domain) => format!("{}\\{}", domain.to_string_lossy(), user.to_string_lossy()),
+                None => user.to_string_lossy().into_owned(),
+            };
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             let _ = std::process::Command::new("icacls")
                 .arg(path)

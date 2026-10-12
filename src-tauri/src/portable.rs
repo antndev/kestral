@@ -98,7 +98,10 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
         return Err(AppError::VaultLocked);
     }
 
-    let plaintext = crate::vault::open_with_password(file_bytes, password)?;
+    let plaintext = crate::vault::open_with_password(file_bytes, password).map_err(|e| match e {
+        AppError::VaultAuth => AppError::Other("Wrong password for this export file, or the file is damaged.".into()),
+        other => other,
+    })?;
     let bundle: Bundle = serde_json::from_slice(&plaintext)?;
     if bundle.version != BUNDLE_VERSION {
         return Err(AppError::Other(format!(

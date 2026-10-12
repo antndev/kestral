@@ -13,8 +13,10 @@ import { Markdown } from "../Markdown";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import { HELLO_AUTO_KEY } from "../LockScreen";
-import { updateLock } from "../../lib/updateLock";
+import { RELEASES_URL, friendlyUpdateError, installUpdate, knownUpdate, rememberUpdate, updateLock } from "../../lib/updateLock";
+import type { PendingUpdate } from "../../lib/updateLock";
 import { SegGroup, segItem } from "../SegGroup";
+import { useAlive } from "../kit";
 
 /* ---------- shared bits (also used by WelcomeScreen) ---------- */
 
@@ -23,18 +25,6 @@ export const btnPrimary: CSSProperties = { height: 32, padding: "0 16px", border
 export const inputStyle: CSSProperties = { width: "100%", height: 32, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
 const disabledLook: CSSProperties = { opacity: 0.5, cursor: "default" };
 export const withDisabled = (base: CSSProperties, disabled: boolean): CSSProperties => (disabled ? { ...base, ...disabledLook } : base);
-
-/** Returns a ref that is false once the component has unmounted, to drop late async results. */
-export function useAlive() {
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  return alive;
-}
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -218,7 +208,6 @@ function FontSelect({ value, onChange }: { value: string; onChange(v: string): v
     </div>
   );
 }
-const RELEASES_URL = "https://github.com/antndev/kestral/releases/latest";
 
 function Toggle({ on, onChange, labelledBy, disabled, title }: { on: boolean; onChange: (v: boolean) => void; labelledBy: string; disabled?: boolean; title?: string }) {
   return (
@@ -359,13 +348,6 @@ function SchemeCard({ id, colors, selected, onSelect }: { id: string; colors: bo
   );
 }
 
-type UpdateHandle = {
-  version: string;
-  body?: string;
-  downloadAndInstall: (cb: (e: { event: string; data?: { contentLength?: number; chunkLength?: number } }) => void) => Promise<void>;
-};
-type UpdateWindow = { __kestralUpdate?: UpdateHandle };
-const updateWindow = window as unknown as UpdateWindow;
 // One install at a time, even if Settings is closed and reopened while it runs.
 
 const MIN_CHECK_MS = 500;
@@ -379,22 +361,13 @@ type UpdateState =
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
-function friendlyUpdateError(e: unknown): string {
-  const raw = errText(e).toLowerCase();
-  if (["error sending request", "connect", "timed out", "timeout", "dns", "network", "tcp", "request"].some((s) => raw.includes(s))) return "Couldn't reach GitHub. Check your connection.";
-  if (raw.includes("signature") || raw.includes("verif")) return "The update's signature couldn't be verified.";
-  if (raw.includes("permission") || raw.includes("denied") || raw.includes("os error 5")) return IS_MAC ? "macOS blocked the update." : "Windows blocked the update.";
-  if (raw.includes("not found") || raw.includes("404")) return "The update isn't published yet. Try again later.";
-  return "The update couldn't be completed.";
-}
-
-function plural(n: number, w: string) {
-  return `${n} ${w}${n === 1 ? "" : "s"}`;
+function plural(n: number, w: string, many = `${w}s`) {
+  return `${n} ${n === 1 ? w : many}`;
 }
 
 function importSummary(r: ImportReport): string {
-  const skipped = r.hosts_skipped + r.secrets_skipped + r.snippets_skipped;
-  return `Imported ${plural(r.hosts_added, "host")}, ${plural(r.secrets_added, "secret")} and ${plural(r.snippets_added, "snippet")}.${skipped > 0 ? ` Skipped ${skipped} already present.` : ""}`;
+  const skipped = r.hosts_skipped + r.secrets_skipped + r.snippets_skipped + r.identities_skipped;
+  return `Imported ${plural(r.hosts_added, "host")}, ${plural(r.secrets_added, "secret")}, ${plural(r.snippets_added, "snippet")} and ${plural(r.identities_added, "identity", "identities")}.${skipped > 0 ? ` Skipped ${skipped} already present.` : ""}`;
 }
 
 function ExportDialog({ onClose, onDone }: { onClose: () => void; onDone: (path: string) => void }) {
@@ -566,7 +539,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
   const install = useSyncExternalStore(updateLock.subscribe, updateLock.phase);
   const upd: UpdateState = install.kind === "idle" ? checkState : install;
   const [pending, setPending] = useState<{ version: string; notes: string } | null>(null);
-  const updRef = useRef<UpdateHandle | null>(null);
+  const updRef = useRef<PendingUpdate | null>(null);
   const [linkErr, setLinkErr] = useState("");
 
   const queryRef = useRef(query);
@@ -598,7 +571,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
     if (aboutSeen && upd.kind === "idle") void checkUpdate();
   }, [aboutSeen]);
 
-  function found(u: UpdateHandle) {
+  function found(u: PendingUpdate) {
     updRef.current = u;
     setPending({ version: u.version, notes: u.body?.trim() ?? "" });
     setUpd({ kind: "available", version: u.version });
@@ -609,7 +582,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
     if (updateLock.busy) return;
     updateLock.setPhase({ kind: "idle" });
     // Reuse an update the app already found at startup or from the menu.
-    const known = updateWindow.__kestralUpdate;
+    const known = knownUpdate();
     if (known) {
       found(known);
       return;
@@ -619,8 +592,8 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
     const settle = () => new Promise((r) => window.setTimeout(r, Math.max(0, MIN_CHECK_MS - (Date.now() - started))));
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
-      const u = (await check()) as UpdateHandle | null;
-      if (u) updateWindow.__kestralUpdate = u;
+      const u = await check();
+      if (u) rememberUpdate(u);
       await settle();
       if (!alive.current) return;
       if (u) found(u);
@@ -634,41 +607,11 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
     }
   }
 
-  async function installUpdate() {
-    const u = updRef.current;
-    if (!u) return void checkUpdate();
+  async function runUpdate() {
+    if (!updRef.current) return void checkUpdate();
     if (updateLock.busy) return;
-    updateLock.busy = true;
     setLinkErr("");
-    updateLock.setPhase({ kind: "downloading", pct: 0 });
-    // The release CDN and some antivirus scanners drop connections now and then; a retry usually works.
-    let last: unknown;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        let total = 0;
-        let got = 0;
-        await u.downloadAndInstall((e) => {
-          if (e.event === "Started") total = e.data?.contentLength ?? 0;
-          else if (e.event === "Progress") {
-            got += e.data?.chunkLength ?? 0;
-            updateLock.setPhase({ kind: "downloading", pct: total ? Math.round((got / total) * 100) : 0 });
-          }
-        });
-        updateLock.setPhase({ kind: "ready" });
-        const { relaunch } = await import("@tauri-apps/plugin-process");
-        await relaunch();
-        return;
-      } catch (e) {
-        last = e;
-        const msg = errText(e).toLowerCase();
-        const retryable = ["error sending request", "connect", "timed out", "timeout", "request", "network", "reset"].some((s) => msg.includes(s));
-        if (!retryable || attempt === 2) break;
-        updateLock.setPhase({ kind: "downloading", pct: 0 });
-        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-      }
-    }
-    updateLock.busy = false;
-    updateLock.setPhase({ kind: "error", message: friendlyUpdateError(last) });
+    await installUpdate().catch(() => {});
   }
 
   function openReleases() {
@@ -1055,9 +998,9 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
             </div>
             <div style={ctlBox}>
               {upd.kind === "available" ? (
-                <button type="button" onClick={() => void installUpdate()} style={{ ...btnPrimary, height: 30 }}>Update now</button>
+                <button type="button" onClick={() => void runUpdate()} style={{ ...btnPrimary, height: 30 }}>Update now</button>
               ) : (
-                <button type="button" disabled={busy} onClick={() => (upd.kind === "error" && updRef.current ? void installUpdate() : void checkUpdate())} style={withDisabled(rowBtn, busy)}>
+                <button type="button" disabled={busy} onClick={() => (upd.kind === "error" && updRef.current ? void runUpdate() : void checkUpdate())} style={withDisabled(rowBtn, busy)}>
                   <Stable text={upd.kind === "checking" ? "Checking…" : upd.kind === "downloading" ? "Updating…" : upd.kind === "ready" ? "Restarting…" : upd.kind === "error" ? "Try again" : "Check for updates"} alts={["Check for updates", "Checking…", "Updating…", "Restarting…", "Try again"]} />
                 </button>
               )}

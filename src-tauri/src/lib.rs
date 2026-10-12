@@ -98,10 +98,9 @@ fn kestral_data_dir() -> std::path::PathBuf {
     {
         return PathBuf::from(dir);
     }
-    let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) else {
+    let Some(home) = crate::util::home_dir() else {
         return PathBuf::from(".");
     };
-    let home = PathBuf::from(home);
     let dir = home.join(".kestral");
     let old = home.join(".helmsman");
 

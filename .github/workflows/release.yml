@@ -134,12 +134,8 @@ jobs:
 
       - run: npm ci --no-audit --no-fund
 
-      - name: Write the CI config
-        shell: bash
-        run: echo '{"bundle":{"createUpdaterArtifacts":false}}' > "$RUNNER_TEMP/ci.conf.json"
-
       - name: Build without updater artifacts
-        run: npx tauri build --config "${{ runner.temp }}/ci.conf.json" ${{ matrix.args }}
+        run: npx tauri build ${{ matrix.args }}
 
       - name: Run the Rust tests
         if: matrix.name == 'windows'

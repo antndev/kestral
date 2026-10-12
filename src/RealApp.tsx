@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import * as api from "./api";
 import type { ApprovalRequest, Host, HostKeyChanged, HostKeyRequest, Identity, KnownHostEntry, NewHost, Snippet } from "./api";
 import { usePrefs } from "./lib/prefs";
+import { rememberUpdate } from "./lib/updateLock";
 import { Shell, type Tab } from "./ui/Shell";
 import { IS_MAC, MONO, errText, readJson, writeJson, type SectionId, type Status } from "./ui/mock";
 import { LockIcon, CloseIcon } from "./ui/icons";
@@ -379,7 +380,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         const { check } = await import("@tauri-apps/plugin-updater");
         const u = await check();
         if (alive && u) {
-          (window as unknown as { __kestralUpdate?: unknown }).__kestralUpdate = u;
+          rememberUpdate(u);
           setUpdate({ version: u.version, notes: u.body || "" });
         }
       } catch {

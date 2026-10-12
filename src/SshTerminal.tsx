@@ -59,8 +59,8 @@ function isAppShortcut(e: KeyboardEvent): boolean {
   const mod = IS_MAC ? e.metaKey : e.ctrlKey;
   if (!mod || e.altKey) return false;
   if (k === "tab") return true;
-  if (IS_MAC) return ["k", "p", "t", "w", "l", ",", "d"].includes(k) || (!e.shiftKey && /^[1-9]$/.test(k));
-  return e.shiftKey && ["k", "p", "t", "w", "d", "l"].includes(k);
+  if (IS_MAC) return ["k", "t", "w", "l", ",", "d"].includes(k) || (!e.shiftKey && /^[1-9]$/.test(k));
+  return e.shiftKey && ["k", "t", "w", "d", "l"].includes(k);
 }
 
 let audioCtx: AudioContext | null = null;

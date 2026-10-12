@@ -165,8 +165,16 @@ def main():
         names = [t.get("name") for t in result.get("tools", [])]
         print("app:        reachable")
         print("tools:      %d available" % len(names))
-        probe = call("get_audit_log") if "get_audit_log" in names else ""
-        print("ai access:  %s" % ("on" if probe != "" else "on or restricted"))
+        state = "unknown"
+        if "get_audit_log" in names:
+            probe = rpc("tools/call", {"name": "get_audit_log", "arguments": {"limit": 1}})
+            if not probe.get("isError"):
+                state = "on"
+            elif "AI access is disabled" in text_of(probe):
+                state = "off"
+            else:
+                state = "on but restricted"
+        print("ai access:  %s" % state)
         return 0
 
     if cmd == "tools":

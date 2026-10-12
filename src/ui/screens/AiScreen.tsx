@@ -8,7 +8,7 @@ import { MONO, errText } from "../mock";
 import { PlusIcon, TrashIcon } from "../icons";
 import { ConfirmDialog } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
-import { ListFilter, ScreenHeader, oneLine, pageBtn, sectionLabel, smallBtn, td, th } from "../kit";
+import { ListFilter, ScreenHeader, oneLine, pageBtn, sectionLabel, smallBtn, td, th, useAlive } from "../kit";
 
 const DURATIONS = [
   { minutes: 15, label: "15m" },
@@ -48,17 +48,6 @@ const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyC
 
 function dim(off: boolean): CSSProperties {
   return off ? { opacity: 0.6, cursor: "default" } : {};
-}
-
-function useAlive() {
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  return alive;
 }
 
 function Toggle({ on, label, disabled, title, onChange }: { on: boolean; label: string; disabled?: boolean; title?: string; onChange(v: boolean): void }) {
@@ -242,7 +231,6 @@ function MasterCard({ onAiChanged }: { onAiChanged?(active: boolean): void }) {
       if (!alive.current || mine !== seq.current || busyRef.current) return;
       setStatus(s);
       setLoadErr(null);
-      changedRef.current?.(s.active);
     } catch (e) {
       if (alive.current && mine === seq.current) setLoadErr(errText(e));
     }

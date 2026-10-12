@@ -5,7 +5,7 @@ import { readText as clipReadText, writeText as clipWriteText } from "@tauri-app
 import * as api from "../../api";
 import type { AiPolicy, AuthMethod, ForwardKind, Host, Identity, KeyAlgorithm, LocalAgentInfo, NewHost, PortForward, PubkeyInfo, SecretMeta } from "../../api";
 import { TERMINAL_THEMES } from "../../lib/terminal-themes";
-import { IS_MAC, MONO, errText } from "../mock";
+import { IS_MAC, MONO, cleanText, errText } from "../mock";
 import { CheckIcon, ChevronIcon, CloseIcon, CopyIcon, PlusIcon, TrashIcon } from "../icons";
 import { ConfirmDialog, Overlay, useModalLayer } from "./Dialogs";
 import { Stable } from "../Stable";
@@ -76,10 +76,6 @@ function btn(kind: "primary" | "secondary" | "danger", opts: { small?: boolean; 
 }
 const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, padding: 0, border: 0, borderRadius: 6, background: "transparent", color: "var(--text-2)", cursor: "pointer", flex: "none" };
 
-/** Strips invisible characters that sneak in when pasting from web pages and chat apps. */
-function cleanText(text: string): string {
-  return text.replace(/﻿/g, "").replace(/[​-‍⁠]/g, "").replace(/ /g, " ").replace(/\r\n?/g, "\n");
-}
 function pasteClean(e: ClipboardEvent<HTMLInputElement>, onChange: (v: string) => void) {
   const raw = e.clipboardData.getData("text");
   if (!raw) return;

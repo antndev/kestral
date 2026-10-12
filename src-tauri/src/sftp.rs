@@ -133,7 +133,7 @@ fn cancelled() -> AppError {
 }
 
 fn part_name(name: &str) -> String {
-    format!(".{name}.{}.part", uuid::Uuid::new_v4().simple())
+    format!(".{}.{}.part", &name[..name.floor_char_boundary(64)], uuid::Uuid::new_v4().simple())
 }
 
 fn remote_part(path: &str) -> String {

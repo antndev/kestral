@@ -28,6 +28,14 @@ const MAX_ENTRIES: usize = 5000;
 const MAX_LINES: usize = 20_000;
 const DENIAL_WINDOW: Duration = Duration::from_secs(60);
 
+struct Throttle {
+    at: Instant,
+    count: u32,
+    host_id: String,
+    host_name: String,
+    command: String,
+}
+
 pub struct AuditLog {
     entries: Mutex<Vec<AuditEntry>>,
     pending: Mutex<Vec<AuditEntry>>,
@@ -39,7 +47,7 @@ pub struct AuditLog {
     // Serializes all disk mutation, so a concurrent append can never interleave
     // with a compaction's rewrite-and-rename and be lost.
     disk_lock: Mutex<()>,
-    denials: Mutex<HashMap<(String, String), (Instant, u32)>>,
+    denials: Mutex<HashMap<(String, String), Throttle>>,
 }
 
 impl AuditLog {
@@ -122,6 +130,45 @@ impl AuditLog {
         success: bool,
         detail: Option<String>,
     ) {
+        self.flush_denials();
+        self.write(host_id, host_name, command, decision, exit_status, success, detail);
+    }
+
+    fn flush_denials(&self) {
+        let due: Vec<((String, String), Throttle)> = {
+            let mut denials = self.denials.lock().unwrap();
+            let expired: Vec<(String, String)> = denials
+                .iter()
+                .filter(|(_, t)| t.at.elapsed() >= DENIAL_WINDOW)
+                .map(|(k, _)| k.clone())
+                .collect();
+            expired
+                .into_iter()
+                .filter_map(|k| denials.remove_entry(&k))
+                .filter(|(_, t)| t.count > 0)
+                .collect()
+        };
+        for ((_, reason), t) in due {
+            let detail = if t.count > 1 {
+                format!("{reason}, {} more not logged", t.count - 1)
+            } else {
+                reason
+            };
+            self.write(t.host_id, t.host_name, t.command, "denied", None, false, Some(detail));
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn write(
+        &self,
+        host_id: String,
+        host_name: String,
+        command: String,
+        decision: &str,
+        exit_status: Option<i32>,
+        success: bool,
+        detail: Option<String>,
+    ) {
         let entry = AuditEntry {
             id: Uuid::new_v4().to_string(),
             timestamp: Utc::now(),
@@ -170,14 +217,23 @@ impl AuditLog {
         let suppressed = {
             let mut denials = self.denials.lock().unwrap();
             let key = (scope.to_string(), reason.to_string());
-            if let Some((at, count)) = denials.get_mut(&key) {
-                if at.elapsed() < DENIAL_WINDOW {
-                    *count += 1;
+            if let Some(t) = denials.get_mut(&key) {
+                if t.at.elapsed() < DENIAL_WINDOW {
+                    t.count += 1;
+                    t.host_id = host_id.to_string();
+                    t.host_name = host_name.to_string();
+                    t.command = command.to_string();
                     return;
                 }
             }
-            denials.retain(|_, (at, count)| *count > 0 || at.elapsed() < DENIAL_WINDOW);
-            denials.insert(key, (Instant::now(), 0)).map_or(0, |(_, n)| n)
+            let fresh = Throttle {
+                at: Instant::now(),
+                count: 0,
+                host_id: host_id.to_string(),
+                host_name: host_name.to_string(),
+                command: command.to_string(),
+            };
+            denials.insert(key, fresh).map_or(0, |t| t.count)
         };
         let detail = if suppressed > 0 {
             format!("{reason}, {suppressed} more not logged")
@@ -391,14 +447,42 @@ mod tests {
         assert_eq!(log.list().len(), 2);
 
         let past = Instant::now().checked_sub(DENIAL_WINDOW + Duration::from_secs(1)).unwrap();
-        for (at, _) in log.denials.lock().unwrap().values_mut() {
-            *at = past;
+        for t in log.denials.lock().unwrap().values_mut() {
+            t.at = past;
         }
         log.record_denied("", "h1", "homelab", "uptime", "AI off");
         let entries = log.list();
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[2].detail.as_deref(), Some("host locked"));
+        assert_eq!(entries[3].detail.as_deref(), Some("AI off, 50 more not logged"));
+        assert_eq!(entries[3].decision, "denied");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn expired_denial_counts_are_written_with_the_next_entry() {
+        let dir = std::env::temp_dir().join(format!("kestral_audit_{}", random_token()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault = Arc::new(crate::vault::Vault::new(dir.join("vault.json")));
+        vault.create("pw").unwrap();
+        let log = AuditLog::new(dir.join("audit.log"), vault.clone());
+
+        log.record_denied("h1", "h1", "homelab", "ls", "host locked");
+        log.record_denied("h1", "h1", "homelab", "df", "host locked");
+        log.record_denied("h1", "h1", "homelab", "uptime", "host locked");
+        let past = Instant::now().checked_sub(DENIAL_WINDOW + Duration::from_secs(1)).unwrap();
+        for t in log.denials.lock().unwrap().values_mut() {
+            t.at = past;
+        }
+        log.record("h2".into(), "other".into(), "whoami".into(), "allowed", Some(0), true, None);
+
+        let entries = log.list();
         assert_eq!(entries.len(), 3);
-        assert_eq!(entries[2].detail.as_deref(), Some("AI off, 50 more not logged"));
-        assert_eq!(entries[2].decision, "denied");
+        assert_eq!(entries[1].command, "uptime");
+        assert_eq!(entries[1].detail.as_deref(), Some("host locked, 1 more not logged"));
+        assert_eq!(entries[2].command, "whoami");
+        assert!(log.denials.lock().unwrap().is_empty());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

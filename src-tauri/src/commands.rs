@@ -1023,7 +1023,10 @@ pub async fn sftp_transfer(
         let p = local_path.clone();
         crate::util::blocking(move || Ok(crate::sftp::local_size(&p))).await.ok()
     } else {
-        Some(h.size(&remote, is_dir).await)
+        tokio::select! {
+            n = h.size(&remote, is_dir) => Some(n),
+            _ = cancel.cancelled() => None,
+        }
     };
     run_transfer(&transfers, &transfer_id, cancel, total, on_progress, |x| async move {
         match (upload, is_dir) {
@@ -1052,7 +1055,10 @@ pub async fn sftp_copy_remote(
     let src = sftp_handle(&sessions, &src_id)?;
     let dst = sftp_handle(&sessions, &dst_id)?;
     let cancel = transfers.register(&transfer_id);
-    let total = Some(src.size(&src_path, is_dir).await);
+    let total = tokio::select! {
+        n = src.size(&src_path, is_dir) => Some(n),
+        _ = cancel.cancelled() => None,
+    };
     run_transfer(&transfers, &transfer_id, cancel, total, on_progress, |x| async move {
         src.copy_to(&src_path, &dst, &dst_path, is_dir, &x).await
     })

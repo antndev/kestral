@@ -489,19 +489,28 @@ impl Store {
     }
 
     pub fn known_algorithms(&self, host: &str, port: u16) -> Vec<ssh_key::Algorithm> {
-        let mut out: Vec<ssh_key::Algorithm> = Vec::new();
+        let mut exact: Vec<ssh_key::Algorithm> = Vec::new();
+        let mut wild: Vec<ssh_key::Algorithm> = Vec::new();
         for rec in records(&self.content) {
-            if rec.marker.is_some() || !hosts_match(&rec.hosts, host, port) {
+            if rec.marker.is_some() {
                 continue;
             }
+            let Some(is_exact) = match_kind(&rec.hosts, host, port) else {
+                continue;
+            };
             if let Some(k) = rec.key() {
+                let out = if is_exact { &mut exact } else { &mut wild };
                 let a = k.algorithm();
                 if !out.contains(&a) {
                     out.push(a);
                 }
             }
         }
-        out
+        if exact.is_empty() {
+            wild
+        } else {
+            exact
+        }
     }
 
     /// Records `host:port` with `key`, unless that exact entry is already present.
@@ -755,6 +764,19 @@ mod tests {
         assert!(matches!(verify_in(&s, "example.org", 22, &key(ED_B)), Verdict::Changed(_)));
         assert_eq!(verify_in(&s, "example.org", 22, &key(ED_A)), Verdict::Trusted);
         assert_eq!(verify_in(&s, "other.org", 22, &key(ED_B)), Verdict::Trusted);
+    }
+
+    #[test]
+    fn known_algorithms_prefer_exact_entries() {
+        let ec = "AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBCl2/zD+yn0BBC/J57sYbyl7sJkWqrSP4jRmOdiTseqOs3EvD18q6JL45k3F1k6DrE4kH60HrWsjq7SWwLNju/o=";
+        let store = Store::from_content(
+            format!("nas.lan ecdsa-sha2-nistp256 {ec}
+*.lan ssh-ed25519 {ED_A}
+").into_bytes(),
+            "t0",
+        );
+        assert_eq!(store.known_algorithms("nas.lan", 22), vec![key(ec).algorithm()]);
+        assert_eq!(store.known_algorithms("tv.lan", 22), vec![ssh_key::Algorithm::Ed25519]);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import type { CSSProperties, KeyboardEvent, ReactNode, Ref } from "react";
 import { SearchIcon } from "./icons";
 import { MONO } from "./mock";
@@ -15,6 +15,18 @@ export const muted: CSSProperties = { color: "var(--text-3)" };
 export const chip: CSSProperties = { display: "inline-flex", alignItems: "center", maxWidth: 200, height: 24, padding: "0 10px", borderRadius: 12, background: "var(--bg-raised)", color: "var(--text)", fontSize: 12, boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 export const th: CSSProperties = { height: 32, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 export const td: CSSProperties = { height: 40, padding: "0 12px", borderBottom: "1px solid var(--line-soft)" };
+
+/** Returns a ref that is false once the component has unmounted, to drop late async results. */
+export function useAlive() {
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  return alive;
+}
 
 export function ScreenHeader({ title, meta, children }: { title: string; meta?: ReactNode; children?: ReactNode }) {
   return (

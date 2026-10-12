@@ -34,6 +34,14 @@ export function errText(e: unknown): string {
   return typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
 }
 
+// Zero-width and no-break spaces that sneak in when keys or passwords are copied from web pages.
+const INVISIBLE = new RegExp(`[${String.fromCharCode(0xfeff, 0x200b, 0x200c, 0x200d, 0x2060)}]`, "g");
+const NBSP = new RegExp(String.fromCharCode(0xa0), "g");
+
+export function cleanText(text: string): string {
+  return text.replace(INVISIBLE, "").replace(NBSP, " ").replace(/\r\n?/g, "\n");
+}
+
 export function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
   const u = ["KB", "MB", "GB", "TB"];

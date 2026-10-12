@@ -68,6 +68,13 @@ struct RunCommandArgs {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct AuditLogArgs {
+    /// Return only the newest this many entries. Omit for all.
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct CreateHostArgs {
     name: String,
     hostname: String,
@@ -176,6 +183,9 @@ impl KestralMcp {
         if !self.services.policy.caps().list_hosts {
             return Ok(Self::cap_denied("listing hosts"));
         }
+        if !self.services.vault.is_unlocked() {
+            return Ok(Self::locked());
+        }
         let views = host_views(&self.services);
         let json = serde_json::to_string_pretty(&views).unwrap_or_else(|_| "[]".into());
         Ok(CallToolResult::success(vec![Content::text(json)]))
@@ -214,14 +224,20 @@ impl KestralMcp {
     }
 
     #[tool(description = "Return the audit log of AI-issued actions as JSON.")]
-    async fn get_audit_log(&self) -> Result<CallToolResult, McpError> {
+    async fn get_audit_log(
+        &self,
+        Parameters(a): Parameters<AuditLogArgs>,
+    ) -> Result<CallToolResult, McpError> {
         if !self.services.policy.is_active() {
             return Ok(Self::disabled());
         }
         if !self.services.policy.caps().audit_log {
             return Ok(Self::cap_denied("reading the audit log"));
         }
-        let entries = self.services.audit.list_ai();
+        let mut entries = self.services.audit.list_ai();
+        if let Some(n) = a.limit {
+            entries.drain(..entries.len().saturating_sub(n));
+        }
         let json = serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".into());
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
@@ -233,6 +249,9 @@ impl KestralMcp {
         }
         if !self.services.policy.caps().list_snippets {
             return Ok(Self::cap_denied("listing scripts"));
+        }
+        if !self.services.vault.is_unlocked() {
+            return Ok(Self::locked());
         }
         let items = self.services.snippets.list();
         let json = serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".into());
@@ -688,6 +707,12 @@ impl KestralMcp {
     fn disabled() -> CallToolResult {
         CallToolResult::error(vec![Content::text(
             "AI access is disabled. Enable it in Kestral first.",
+        )])
+    }
+
+    fn locked() -> CallToolResult {
+        CallToolResult::error(vec![Content::text(
+            "The vault is locked. Ask the user to unlock Kestral.",
         )])
     }
 

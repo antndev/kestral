@@ -3,6 +3,25 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.15 - 2026-10-12
+
+### Fixed
+- The AI gets a clear "vault is locked" answer instead of an empty host or snippet list.
+- Denied AI requests that were grouped to keep the log short are now always counted in the audit log.
+- Hosts with a wildcard entry in known hosts no longer raise a false "host key changed" alarm.
+- Port forwards come back after a short network drop instead of staying off.
+- Cancelling a folder download stops right away, even while the size is still being counted.
+- Files with very long names can be transferred.
+- A wrong password for an export file says so instead of blaming the master password.
+- The import message counts identities too.
+- On Windows the data folder is locked to the signed in account even when a local account has the same name.
+- Settings and the update popup use the same update logic, with the same progress and error texts.
+- Ctrl+Shift+P reaches the terminal again.
+- Right clicking a host while the editor is open no longer opens a stray menu later.
+
+### Removed
+- More unused code and an old icon file.
+
 ## 0.2.14 - 2026-10-12
 
 ### Security

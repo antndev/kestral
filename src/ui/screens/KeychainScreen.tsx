@@ -3,11 +3,12 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { readText as clipRead, writeText as clipWrite } from "@tauri-apps/plugin-clipboard-manager";
 import * as api from "../../api";
 import type { AuthMethod, Host, Identity, KeyAlgorithm, SecretKind, SecretMeta } from "../../api";
-import { IS_MAC, MONO, errText } from "../mock";
+import { IS_MAC, MONO, cleanText, errText } from "../mock";
 import { CheckIcon, CopyIcon, DownloadIcon, KeyIcon, LockIcon, PlusIcon, RefreshIcon, SearchIcon, ShieldIcon, TrashIcon, WarningIcon } from "../icons";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import { SegGroup, segItem } from "../SegGroup";
+import { useAlive } from "../kit";
 
 /* ---------- styles (from the design) ---------- */
 
@@ -67,17 +68,6 @@ const FAMILIES: { id: Family; label: string; sizes: { id: KeyAlgorithm; label: s
 ];
 type DirectAuth = Exclude<AuthMethod, { kind: "identity" }>;
 
-function useAlive() {
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  return alive;
-}
-
 /** True for a short moment after trigger() was called, for "Copied" feedback. */
 function useFlash(ms = 1400): [boolean, () => void] {
   const [on, setOn] = useState(false);
@@ -120,14 +110,6 @@ function plural(n: number, word: string): string {
 
 function names(hosts: Host[]): string {
   return hosts.map((h) => h.name).join(", ");
-}
-
-// Zero-width and no-break spaces that sneak in when keys or passwords are copied from web pages.
-const INVISIBLE = new RegExp(`[${String.fromCharCode(0xfeff, 0x200b, 0x200c, 0x200d, 0x2060)}]`, "g");
-const NBSP = new RegExp(String.fromCharCode(0xa0), "g");
-
-function cleanText(text: string): string {
-  return text.replace(INVISIBLE, "").replace(NBSP, " ").replace(/\r\n?/g, "\n");
 }
 
 /** ~/.ssh on this machine, as a starting folder for file dialogs. Undefined when unknown. */

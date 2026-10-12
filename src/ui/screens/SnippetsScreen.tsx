@@ -425,7 +425,6 @@ function isOnTop(el: HTMLElement): boolean {
 
 export function SnippetsScreen({
   hosts,
-  hasActiveTerminal,
   pasteTarget,
   onRunInTabs,
   onPasteToActive,
@@ -434,7 +433,6 @@ export function SnippetsScreen({
   focusRequest,
 }: {
   hosts: Host[];
-  hasActiveTerminal?: boolean;
   pasteTarget?: { name: string; connected: boolean } | null;
   onRunInTabs(script: string, hostIds: string[]): void;
   onPasteToActive(script: string): void;
@@ -802,7 +800,7 @@ export function SnippetsScreen({
   }
 
   const hostById = useMemo(() => new Map(hosts.map((h) => [h.id, h])), [hosts]);
-  const pasteTo = pasteTarget !== undefined ? pasteTarget : hasActiveTerminal ? { name: "", connected: true } : null;
+  const pasteTo = pasteTarget ?? null;
 
   function blockFor(s: Snippet) {
     const targets = s.target_host_ids.map((id) => hostById.get(id)).filter((h): h is Host => !!h);

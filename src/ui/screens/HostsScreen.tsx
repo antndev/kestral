@@ -4,10 +4,9 @@ import { identityList, type Host, type Identity, type NewHost, type PortForward 
 import { HostEditor } from "../overlays/HostEditor";
 import { Status, statusColor } from "../mock";
 import { CheckIcon, DotsIcon, HostsIcon, PlusIcon, WarningIcon } from "../icons";
-import { useAlive } from "./SettingsScreen";
 import type { DragHost } from "../Shell";
 import { parseTarget, type QuickConnect, type Target } from "../target";
-import { Block, Blocks, DetailHead, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, chip, mono, muted, oneLine, pageBtn, primaryBtn, srOnly, type Fact } from "../kit";
+import { Block, Blocks, DetailHead, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, chip, mono, muted, oneLine, pageBtn, primaryBtn, srOnly, useAlive, type Fact } from "../kit";
 
 export type { QuickConnect } from "../target";
 
@@ -512,6 +511,7 @@ export function HostsScreen(p: {
                     if (h) p.onDragHost?.(e, h.id, h.name);
                   }}
                   onContextMenu={(e) => {
+                    if (p.editor) return;
                     const h = itemHost(e);
                     if (!h) return;
                     setSel(h.id);
