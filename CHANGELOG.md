@@ -3,6 +3,15 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.19 - 2026-10-16
+
+### Changed
+- New lock screen: "Welcome back!", a password field with a show and hide eye, an Unlock button and Unlock with Windows Hello. The app name sits in the title bar.
+- The interface uses the system font: San Francisco on macOS, Segoe UI Variable on Windows 11.
+
+### Fixed
+- The switches on AI access no longer animate when you open the screen.
+
 ## 0.2.18 - 2026-10-16
 
 ### Changed

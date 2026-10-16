@@ -2,7 +2,7 @@
 // (File name kept for import stability; it no longer holds mock data.)
 
 export const MONO = "ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace";
-export const SANS = "system-ui, -apple-system, 'Segoe UI', sans-serif";
+export const SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif";
 
 /** Connection state shown as a dot: ok = connected, warn = connecting/reconnecting, err = failed, idle = no session. */
 export type Status = "ok" | "idle" | "warn" | "err";

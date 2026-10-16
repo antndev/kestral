@@ -51,6 +51,10 @@ function dim(off: boolean): CSSProperties {
 }
 
 function Toggle({ on, label, disabled, title, onChange }: { on: boolean; label: string; disabled?: boolean; title?: string; onChange(v: boolean): void }) {
+  const settled = useRef(false);
+  useEffect(() => {
+    if (!disabled) settled.current = true;
+  }, [disabled]);
   return (
     <button
       type="button"
@@ -62,7 +66,7 @@ function Toggle({ on, label, disabled, title, onChange }: { on: boolean; label: 
       onClick={() => onChange(!on)}
       style={{ position: "relative", display: "block", flex: "none", width: 30, height: 18, padding: 0, border: 0, borderRadius: 9, background: on ? "var(--ok)" : "var(--light-ring)", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.6 : 1 }}
     >
-      <span aria-hidden="true" style={{ position: "absolute", top: 2, left: on ? 14 : 2, width: 14, height: 14, borderRadius: "50%", background: "#FFFFFF", transition: "left 120ms ease-out" }} />
+      <span aria-hidden="true" style={{ position: "absolute", top: 2, left: on ? 14 : 2, width: 14, height: 14, borderRadius: "50%", background: "#FFFFFF", transition: settled.current ? "left 120ms ease-out" : "none" }} />
     </button>
   );
 }

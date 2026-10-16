@@ -11,9 +11,13 @@ const LOCK_CSS = `@keyframes kst-shake-a ${SHAKE_FRAMES} @keyframes kst-shake-b 
 .kst-lock-input::placeholder { color: var(--text-3) }`;
 const shakeAnim = (n: number) => (n ? `${n % 2 ? "kst-shake-a" : "kst-shake-b"} 300ms ease-in-out` : undefined);
 
-const iconBtn: CSSProperties = { display: "grid", placeItems: "center", width: 34, height: 34, flex: "none", border: 0, borderRadius: 9, background: "transparent", color: "var(--text-2)", cursor: "pointer" };
+const title: CSSProperties = { margin: "0 0 10px", textAlign: "center", fontSize: 20, fontWeight: 600, letterSpacing: "-0.015em" };
+const fieldBox: CSSProperties = { display: "flex", alignItems: "center", height: 42, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", boxSizing: "border-box", transition: "border-color 160ms" };
+const wide: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 38, width: "100%", borderRadius: 8, fontSize: 13.5, boxSizing: "border-box" };
+const primary: CSSProperties = { ...wide, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
+const secondary: CSSProperties = { ...wide, border: "1px solid var(--line)", background: "transparent", color: "var(--text)" };
 const card: CSSProperties = { display: "flex", flexDirection: "column", gap: 16, padding: 24, border: "1px solid var(--line)", borderRadius: 12, background: "var(--bg)", boxShadow: "0 16px 48px rgba(0,0,0,.28)" };
-const button: CSSProperties = { display: "grid", placeItems: "center", height: 32, padding: "0 16px", border: "1px solid var(--btn-line)", borderRadius: 6, background: "var(--btn)", color: "var(--btn-text)", fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", boxSizing: "border-box" };
+const smallBtn: CSSProperties = { display: "grid", placeItems: "center", height: 32, padding: "0 16px", border: "1px solid var(--btn-line)", borderRadius: 6, background: "var(--btn)", color: "var(--btn-text)", fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", boxSizing: "border-box" };
 
 function Spinner() {
   return <span aria-hidden="true" style={{ width: 14, height: 14, border: "2px solid color-mix(in srgb, currentColor 25%, transparent)", borderTopColor: "currentColor", borderRadius: "50%", boxSizing: "border-box", animation: "kst-spin 0.7s linear infinite" }} />;
@@ -21,7 +25,7 @@ function Spinner() {
 
 function PasskeyIcon() {
   return (
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="9.5" cy="7.5" r="3.5" />
       <path d="M3 20c0-3.6 2.9-6.5 6.5-6.5 1.1 0 2.2.3 3.1.8" />
       <circle cx="17.5" cy="14" r="2.5" />
@@ -30,15 +34,15 @@ function PasskeyIcon() {
   );
 }
 
-function ArrowIcon() {
+function EyeIcon({ off }: { off: boolean }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M5 12h14M13 6l6 6-6 6" />
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z" />
+      <circle cx="12" cy="12" r="2.8" />
+      {off && <path d="M4 4l16 16" />}
     </svg>
   );
 }
-
-const fieldBox = (border: string, light: boolean): CSSProperties => ({ display: "flex", alignItems: "center", height: 46, border: `1px solid ${border}`, borderRadius: 12, background: "var(--bg-sunken)", boxShadow: light ? "0 8px 24px rgba(0,0,0,.05)" : "0 10px 30px rgba(0,0,0,.22)", boxSizing: "border-box", transition: "border-color 160ms" });
 
 function LockFrame({ className, children }: { className: string; children: ReactNode }) {
   return (
@@ -46,13 +50,13 @@ function LockFrame({ className, children }: { className: string; children: React
       className={className}
       style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
       <style>{LOCK_CSS}</style>
-      <header data-tauri-drag-region style={{ position: "relative", display: "flex", justifyContent: "flex-end", height: 40, flex: "none" }}>
+      <header data-tauri-drag-region style={{ position: "relative", display: "flex", alignItems: "center", height: 40, flex: "none", paddingLeft: IS_MAC ? 0 : 16 }}>
+        <span data-tauri-drag-region style={{ fontSize: 13, fontWeight: 600, color: "var(--text-2)", ...(IS_MAC ? { position: "absolute", left: 0, right: 0, textAlign: "center" } : {}) }}>Kestral</span>
+        <span data-tauri-drag-region style={{ flex: 1, alignSelf: "stretch" }} />
         {!IS_MAC && <WindowControls />}
       </header>
       <main style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: "0 24px 64px", overflow: "auto" }}>
-        <div style={{ width: "100%", maxWidth: 340 }}>
-          {children}
-        </div>
+        <div style={{ width: "100%", maxWidth: 340 }}>{children}</div>
       </main>
     </div>
   );
@@ -67,11 +71,11 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   const [busy, setBusy] = useState(false);
   const [caps, setCaps] = useState(false);
   const [focus, setFocus] = useState<"pw" | "pw2" | null>(null);
+  const [reveal, setReveal] = useState(false);
   const [hello, setHello] = useState<api.HelloStatus | null>(null);
   const [helloBusy, setHelloBusy] = useState(false);
   const pwRef = useRef<HTMLInputElement | null>(null);
   const prompted = useRef(false);
-  const light = className.includes("t-light");
 
   useEffect(() => {
     if (!exists) return;
@@ -151,91 +155,90 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   const shown = err || error;
   const ready = !!pw && (exists || !!pw2);
 
-  const box = (id: "pw" | "pw2"): CSSProperties => {
+  const field = (id: "pw" | "pw2", label: string, eye: boolean) => {
     const bad = !!err && errField === id;
-    const border = bad ? "var(--err)" : focus === id ? "color-mix(in srgb, var(--text) 26%, var(--line))" : "var(--line)";
-    return fieldBox(border, light);
+    const value = id === "pw" ? pw : pw2;
+    return (
+      <div style={{ ...fieldBox, borderColor: bad ? "var(--err)" : focus === id ? "color-mix(in srgb, var(--text) 26%, var(--line))" : "var(--line)" }}>
+        <input
+          id={id === "pw" ? "lock-pw" : undefined}
+          ref={id === "pw" ? pwRef : undefined}
+          className="kst-lock-input"
+          autoFocus={id === "pw"}
+          type={reveal ? "text" : "password"}
+          autoComplete="off"
+          spellCheck={false}
+          aria-label={label}
+          placeholder={label}
+          aria-invalid={bad || undefined}
+          value={value}
+          onChange={(e) => {
+            (id === "pw" ? setPw : setPw2)(e.target.value);
+            if (err) setErr("");
+          }}
+          onKeyDown={onKey}
+          onKeyUp={onKey}
+          onFocus={() => setFocus(id)}
+          onBlur={() => setFocus(null)}
+          style={{ flex: 1, minWidth: 0, height: "100%", padding: eye ? "0 0 0 13px" : "0 13px", border: 0, background: "transparent", color: "var(--text)", fontSize: 14, letterSpacing: value && !reveal ? "0.16em" : undefined, outline: "none" }}
+        />
+        {eye && (
+          <button type="button" aria-label={reveal ? "Hide password" : "Show password"} title={reveal ? "Hide password" : "Show password"} onClick={() => setReveal((r) => !r)} style={{ display: "grid", placeItems: "center", width: 34, height: 34, marginRight: 4, flex: "none", border: 0, borderRadius: 6, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}>
+            <EyeIcon off={reveal} />
+          </button>
+        )}
+      </div>
+    );
   };
 
-  const input = (id: "pw" | "pw2", label: string) => (
-    <input
-      id={id === "pw" ? "lock-pw" : undefined}
-      ref={id === "pw" ? pwRef : undefined}
-      className="kst-lock-input"
-      autoFocus={id === "pw"}
-      type="password"
-      aria-label={label}
-      placeholder={label}
-      aria-invalid={err && errField === id ? true : undefined}
-      value={id === "pw" ? pw : pw2}
-      onChange={(e) => {
-        (id === "pw" ? setPw : setPw2)(e.target.value);
-        if (err) setErr("");
-      }}
-      onKeyDown={onKey}
-      onKeyUp={onKey}
-      onFocus={() => setFocus(id)}
-      onBlur={() => setFocus(null)}
-      style={{ flex: 1, minWidth: 0, height: "100%", padding: "0 0 0 15px", border: 0, background: "transparent", color: "var(--text)", fontSize: 15, letterSpacing: (id === "pw" ? pw : pw2) ? "0.18em" : undefined, outline: "none" }}
-    />
-  );
-
-  const actions = (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 6 }}>
-      {exists && hello?.enabled && (
-        <button type="button" aria-label={`Use ${hello.method}`} title={`Use ${hello.method}`} disabled={helloBusy || busy} onClick={() => void unlockWithHello()} style={{ ...iconBtn, cursor: helloBusy || busy ? "default" : "pointer" }}>
-          {helloBusy ? <Spinner /> : <PasskeyIcon />}
-        </button>
-      )}
-      <button
-        type="submit"
-        aria-label={exists ? "Unlock" : "Create vault"}
-        title={exists ? "Unlock" : "Create vault"}
-        disabled={!ready || busy}
-        style={{ ...iconBtn, background: ready ? "var(--text)" : "var(--bg-raised)", color: ready ? "var(--bg-side)" : "var(--text-3)", cursor: ready && !busy ? "pointer" : "default", transition: "background 140ms, color 140ms" }}
-      >
-        {busy ? <Spinner /> : <ArrowIcon />}
-      </button>
-    </div>
-  );
-
   const note = (
-    <div role={shown ? "alert" : undefined} title={shown || undefined} style={{ height: 18, fontSize: 12.5, lineHeight: "18px", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: shown ? "var(--err)" : caps ? "var(--warn)" : "var(--text-3)" }}>
+    <div role={shown ? "alert" : undefined} title={shown || undefined} style={{ height: 18, fontSize: 12.5, lineHeight: "18px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: shown ? "var(--err)" : caps ? "var(--warn)" : "var(--text-3)" }}>
       {shown || (caps ? "Caps Lock is on" : exists ? "" : "There is no way to recover it if you forget it.")}
     </div>
   );
 
   return (
     <LockFrame className={className}>
-      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <h1 style={title}>{exists ? "Welcome back!" : "Welcome!"}</h1>
         {exists ? (
-          <div style={{ ...box("pw"), animation: shakeAnim(shake) }}>
-            {input("pw", "Password")}
-            {actions}
-          </div>
+          <div style={{ animation: shakeAnim(shake) }}>{field("pw", "Password", true)}</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, animation: shakeAnim(shake) }}>
-            <div style={box("pw")}>{input("pw", "New master password")}</div>
-            <div style={box("pw2")}>
-              {input("pw2", "Repeat password")}
-              {actions}
-            </div>
+            {field("pw", "Password", true)}
+            {field("pw2", "Repeat password", false)}
           </div>
         )}
         {note}
+        <button type="submit" disabled={!ready || busy} style={{ ...primary, opacity: ready || busy ? 1 : 0.5, cursor: ready && !busy ? "pointer" : "default" }}>
+          {busy ? <Spinner /> : exists ? "Unlock" : "Create vault"}
+        </button>
+        {exists && (
+          <div style={{ height: 38 }}>
+            {hello?.enabled && (
+              <button type="button" disabled={helloBusy || busy} onClick={() => void unlockWithHello()} style={{ ...secondary, cursor: helloBusy || busy ? "default" : "pointer" }}>
+                {helloBusy ? <Spinner /> : <PasskeyIcon />}
+                Unlock with {hello.method}
+              </button>
+            )}
+          </div>
+        )}
       </form>
     </LockFrame>
   );
 }
 
-/** Shown while the vault locks: the lock screen fades in with its field, before the real one takes over. */
+/** Shown while the vault locks: the unlock screen fades in before the real one takes over at the same spot. */
 export function LockingScreen({ className }: { className: string }) {
   return (
     <LockFrame className={className}>
-      <div role="status" aria-label="Locking" style={{ ...fieldBox("var(--line)", className.includes("t-light")), padding: "0 15px", fontSize: 15, color: "var(--text-3)" }}>
-        Password
+      <div role="status" aria-label="Locking" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <h1 style={title}>Welcome back!</h1>
+        <div style={{ ...fieldBox, padding: "0 13px", fontSize: 14, color: "var(--text-3)" }}>Password</div>
+        <div style={{ height: 18 }} />
+        <div style={{ ...primary, opacity: 0.5 }}>Unlock</div>
+        <div style={{ height: 38 }} />
       </div>
-      <div style={{ height: 28 }} />
     </LockFrame>
   );
 }
@@ -248,7 +251,7 @@ export function BootScreen({ className, error, onRetry }: { className: string; e
           <h1 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Could not reach the Kestral backend</h1>
           <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-2)", wordBreak: "break-word" }}>{error}</p>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button type="button" onClick={onRetry} style={{ ...button, cursor: "pointer" }}>
+            <button type="button" onClick={onRetry} style={{ ...smallBtn, cursor: "pointer" }}>
               Retry
             </button>
           </div>
