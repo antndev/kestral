@@ -3,58 +3,54 @@ import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent, Rea
 import * as api from "../api";
 import { IS_MAC, SANS, errText, readJson } from "./mock";
 import { WindowControls } from "./Shell";
-import { DotField } from "./DotField";
 
 export const HELLO_AUTO_KEY = "kestral-hello-auto";
 
 const SHAKE_FRAMES = "{ 20%, 80% { transform: translateX(-2px) } 40% { transform: translateX(4px) } 60% { transform: translateX(-4px) } }";
-const SHAKE = `@keyframes kst-shake-a ${SHAKE_FRAMES} @keyframes kst-shake-b ${SHAKE_FRAMES}`;
+const LOCK_CSS = `@keyframes kst-shake-a ${SHAKE_FRAMES} @keyframes kst-shake-b ${SHAKE_FRAMES}
+.kst-lock-input::placeholder { color: var(--text-3) }`;
 const shakeAnim = (n: number) => (n ? `${n % 2 ? "kst-shake-a" : "kst-shake-b"} 300ms ease-in-out` : undefined);
 
-const field: CSSProperties = { width: "100%", height: 36, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", color: "var(--text)", fontSize: 13, boxSizing: "border-box", outline: "none" };
-const button: CSSProperties = { display: "grid", placeItems: "center", height: 32, padding: "0 16px", border: "1px solid var(--btn-line)", borderRadius: 6, background: "var(--btn)", color: "var(--btn-text)", fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", boxSizing: "border-box" };
+const iconBtn: CSSProperties = { display: "grid", placeItems: "center", width: 34, height: 34, flex: "none", border: 0, borderRadius: 9, background: "transparent", color: "var(--text-2)", cursor: "pointer" };
 const card: CSSProperties = { display: "flex", flexDirection: "column", gap: 16, padding: 24, border: "1px solid var(--line)", borderRadius: 12, background: "var(--bg)", boxShadow: "0 16px 48px rgba(0,0,0,.28)" };
-const heading: CSSProperties = { margin: 0, fontSize: 16, fontWeight: 600 };
-const lead: CSSProperties = { margin: "4px 0 0", fontSize: 12.5, lineHeight: 1.45, color: "var(--text-3)" };
-const actions: CSSProperties = { display: "flex", alignItems: "center", gap: 8, minHeight: 32, marginTop: -4 };
+const button: CSSProperties = { display: "grid", placeItems: "center", height: 32, padding: "0 16px", border: "1px solid var(--btn-line)", borderRadius: 6, background: "var(--btn)", color: "var(--btn-text)", fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", boxSizing: "border-box" };
 
 function Spinner() {
   return <span aria-hidden="true" style={{ width: 14, height: 14, border: "2px solid color-mix(in srgb, currentColor 25%, transparent)", borderTopColor: "currentColor", borderRadius: "50%", boxSizing: "border-box", animation: "kst-spin 0.7s linear infinite" }} />;
 }
 
-function SubmitButton({ label, busy, ready }: { label: string; busy: boolean; ready: boolean }) {
+function PasskeyIcon() {
   return (
-    <button type="submit" disabled={!ready || busy} aria-label={busy ? `${label}…` : label} style={{ ...button, opacity: ready || busy ? 1 : 0.5, cursor: ready && !busy ? "pointer" : "default" }}>
-      <span style={{ gridArea: "1 / 1", opacity: busy ? 0 : 1, transition: "opacity 120ms" }}>{label}</span>
-      <span style={{ gridArea: "1 / 1", display: "flex", opacity: busy ? 1 : 0, transition: "opacity 120ms" }}>
-        <Spinner />
-      </span>
-    </button>
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9.5" cy="7.5" r="3.5" />
+      <path d="M3 20c0-3.6 2.9-6.5 6.5-6.5 1.1 0 2.2.3 3.1.8" />
+      <circle cx="17.5" cy="14" r="2.5" />
+      <path d="M17.5 16.5V22M17.5 19.5h2M17.5 21.5h1.5" />
+    </svg>
   );
 }
 
-function FaceIcon() {
+function ArrowIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01" />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12h14M13 6l6 6-6 6" />
     </svg>
   );
 }
 
 function LockFrame({ className, children }: { className: string; children: ReactNode }) {
+  const light = className.includes("t-light");
   return (
     <div
       className={className}
-      style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg-side)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
-      <style>{SHAKE}</style>
-      <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", maskImage: "radial-gradient(circle at center, transparent 12%, #000 68%)", WebkitMaskImage: "radial-gradient(circle at center, transparent 12%, #000 68%)" }}>
-        {className.includes("t-light") ? <DotField from="rgba(70,70,80,.38)" to="rgba(70,70,80,.12)" /> : <DotField from="rgba(150,150,162,.5)" to="rgba(150,150,162,.16)" />}
-      </div>
+      style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: light ? "var(--bg-side)" : "#0A0A0B", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
+      <style>{LOCK_CSS}</style>
+      <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", background: `radial-gradient(70% 55% at 50% -10%, ${light ? "rgba(0,0,0,.04)" : "rgba(255,255,255,.07)"} 0%, transparent 70%)` }} />
       <header data-tauri-drag-region style={{ position: "relative", display: "flex", justifyContent: "flex-end", height: 40, flex: "none" }}>
         {!IS_MAC && <WindowControls />}
       </header>
       <main style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: "0 24px 64px", overflow: "auto" }}>
-        <div data-anim="screen" style={{ width: "100%", maxWidth: 360 }}>
+        <div data-anim="screen" style={{ width: "100%", maxWidth: 340 }}>
           {children}
         </div>
       </main>
@@ -75,6 +71,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   const [helloBusy, setHelloBusy] = useState(false);
   const pwRef = useRef<HTMLInputElement | null>(null);
   const prompted = useRef(false);
+  const light = className.includes("t-light");
 
   useEffect(() => {
     if (!exists) return;
@@ -151,22 +148,20 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   }
 
   const onKey = (e: ReactKeyboardEvent) => setCaps(e.getModifierState("CapsLock"));
-  const ring = (f: "pw" | "pw2"): CSSProperties => {
-    const bad = !!err && errField === f;
-    const color = bad ? "var(--err)" : focus === f ? "var(--focus)" : "var(--line)";
-    return { borderColor: color, boxShadow: bad || focus === f ? `0 0 0 1px ${color}` : "none", transition: "border-color 120ms, box-shadow 120ms" };
-  };
   const shown = err || error;
-  const note = (
-    <div style={{ flex: 1, minWidth: 0, fontSize: 12, lineHeight: "15px", maxHeight: 30, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", color: shown ? "var(--err)" : "var(--warn)" }} role={shown ? "alert" : undefined}>
-      {shown || (caps ? "Caps Lock is on" : "")}
-    </div>
-  );
+  const ready = !!pw && (exists || !!pw2);
+
+  const box = (id: "pw" | "pw2"): CSSProperties => {
+    const bad = !!err && errField === id;
+    const border = bad ? "var(--err)" : focus === id ? "color-mix(in srgb, var(--text) 26%, var(--line))" : "var(--line)";
+    return { display: "flex", alignItems: "center", height: 46, border: `1px solid ${border}`, borderRadius: 12, background: light ? "var(--bg)" : "#161616", boxShadow: light ? "0 8px 24px rgba(0,0,0,.06)" : "0 10px 30px rgba(0,0,0,.3)", boxSizing: "border-box", transition: "border-color 160ms" };
+  };
 
   const input = (id: "pw" | "pw2", label: string) => (
     <input
       id={id === "pw" ? "lock-pw" : undefined}
       ref={id === "pw" ? pwRef : undefined}
+      className="kst-lock-input"
       autoFocus={id === "pw"}
       type="password"
       aria-label={label}
@@ -181,55 +176,53 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
       onKeyUp={onKey}
       onFocus={() => setFocus(id)}
       onBlur={() => setFocus(null)}
-      style={{ ...field, ...ring(id) }}
+      style={{ flex: 1, minWidth: 0, height: "100%", padding: "0 0 0 15px", border: 0, background: "transparent", color: "var(--text)", fontSize: 15, letterSpacing: (id === "pw" ? pw : pw2) ? "0.18em" : undefined, outline: "none" }}
     />
   );
 
-  if (exists) {
-    return (
-      <LockFrame className={className}>
-        <form onSubmit={submit} style={card}>
-          <div>
-            <h1 style={heading}>Unlock vault</h1>
-            <p style={lead}>Enter your master password to continue.</p>
-          </div>
-          <div style={{ animation: shakeAnim(shake) }}>{input("pw", "Master password")}</div>
-          <div style={actions}>
-            {note}
-            {hello?.enabled && (
-              <button
-                type="button"
-                aria-label={`Use ${hello.method}`}
-                title={`Use ${hello.method}`}
-                disabled={helloBusy || busy}
-                onClick={() => void unlockWithHello()}
-                style={{ ...button, width: 32, padding: 0, cursor: helloBusy || busy ? "default" : "pointer" }}
-              >
-                {helloBusy ? <Spinner /> : <FaceIcon />}
-              </button>
-            )}
-            <SubmitButton label="Unlock" busy={busy} ready={!!pw} />
-          </div>
-        </form>
-      </LockFrame>
-    );
-  }
+  const actions = (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 6 }}>
+      {exists && hello?.enabled && (
+        <button type="button" aria-label={`Use ${hello.method}`} title={`Use ${hello.method}`} disabled={helloBusy || busy} onClick={() => void unlockWithHello()} style={{ ...iconBtn, cursor: helloBusy || busy ? "default" : "pointer" }}>
+          {helloBusy ? <Spinner /> : <PasskeyIcon />}
+        </button>
+      )}
+      <button
+        type="submit"
+        aria-label={exists ? "Unlock" : "Create vault"}
+        title={exists ? "Unlock" : "Create vault"}
+        disabled={!ready || busy}
+        style={{ ...iconBtn, background: ready ? "var(--text)" : "var(--bg-raised)", color: ready ? "var(--bg-side)" : "var(--text-3)", cursor: ready && !busy ? "pointer" : "default", transition: "background 140ms, color 140ms" }}
+      >
+        {busy ? <Spinner /> : <ArrowIcon />}
+      </button>
+    </div>
+  );
+
+  const note = (
+    <div role={shown ? "alert" : undefined} title={shown || undefined} style={{ height: 18, fontSize: 12.5, lineHeight: "18px", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: shown ? "var(--err)" : caps ? "var(--warn)" : "var(--text-3)" }}>
+      {shown || (caps ? "Caps Lock is on" : exists ? "" : "There is no way to recover it if you forget it.")}
+    </div>
+  );
 
   return (
     <LockFrame className={className}>
-      <form onSubmit={submit} style={card}>
-        <div>
-          <h1 style={heading}>Create your vault</h1>
-          <p style={lead}>Everything in Kestral is encrypted with this password. It cannot be recovered if you forget it.</p>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, animation: shakeAnim(shake) }}>
-          {input("pw", "Master password")}
-          {input("pw2", "Repeat password")}
-        </div>
-        <div style={actions}>
-          {note}
-          <SubmitButton label="Create vault" busy={busy} ready={!!pw} />
-        </div>
+      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {exists ? (
+          <div style={{ ...box("pw"), animation: shakeAnim(shake) }}>
+            {input("pw", "Password")}
+            {actions}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, animation: shakeAnim(shake) }}>
+            <div style={box("pw")}>{input("pw", "New master password")}</div>
+            <div style={box("pw2")}>
+              {input("pw2", "Repeat password")}
+              {actions}
+            </div>
+          </div>
+        )}
+        {note}
       </form>
     </LockFrame>
   );
@@ -240,7 +233,7 @@ export function BootScreen({ className, error, onRetry }: { className: string; e
     <LockFrame className={className}>
       {error && (
         <div style={card}>
-          <h1 style={heading}>Could not reach the Kestral backend</h1>
+          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Could not reach the Kestral backend</h1>
           <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-2)", wordBreak: "break-word" }}>{error}</p>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button type="button" onClick={onRetry} style={{ ...button, cursor: "pointer" }}>

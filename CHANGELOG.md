@@ -3,6 +3,12 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.17 - 2026-10-16
+
+### Changed
+- New lock screen: just one password field on a dark background, with Windows Hello and Unlock inside the field. No card, no extra text.
+- Windows Hello uses the passkey symbol instead of the face.
+
 ## 0.2.16 - 2026-10-16
 
 ### Changed
