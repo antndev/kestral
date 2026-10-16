@@ -3,6 +3,13 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.20 - 2026-10-16
+
+### Changed
+- The lock screen shows the Kestral bird next to the app name in the title bar, top left on Windows and top right on macOS.
+- Unlock sits right under the password field. A wrong password shakes the field and marks it red, and Caps Lock shows as a small symbol inside the field.
+- Windows and Linux use Inter, a font close to the San Francisco font on macOS.
+
 ## 0.2.19 - 2026-10-16
 
 ### Changed

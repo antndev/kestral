@@ -3,6 +3,7 @@ import type { CSSProperties, FormEvent, KeyboardEvent as ReactKeyboardEvent, Rea
 import * as api from "../api";
 import { IS_MAC, SANS, errText, readJson } from "./mock";
 import { WindowControls } from "./Shell";
+import bird from "../assets/bird.png";
 
 export const HELLO_AUTO_KEY = "kestral-hello-auto";
 
@@ -34,6 +35,14 @@ function PasskeyIcon() {
   );
 }
 
+function CapsIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 4 4 12h4.5v4h7v-4H20L12 4ZM8.5 20h7" />
+    </svg>
+  );
+}
+
 function EyeIcon({ off }: { off: boolean }) {
   return (
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -44,16 +53,25 @@ function EyeIcon({ off }: { off: boolean }) {
   );
 }
 
+function Brand() {
+  return (
+    <span data-tauri-drag-region style={{ display: "flex", alignItems: "center", gap: 8, flexDirection: IS_MAC ? "row-reverse" : "row" }}>
+      <span data-tauri-drag-region aria-hidden="true" style={{ width: 17, height: 18, flex: "none", background: "var(--text-2)", WebkitMask: `url(${bird}) center / contain no-repeat`, mask: `url(${bird}) center / contain no-repeat` }} />
+      <span data-tauri-drag-region style={{ fontSize: 13, fontWeight: 600, color: "var(--text-2)" }}>Kestral</span>
+    </span>
+  );
+}
+
 function LockFrame({ className, children }: { className: string; children: ReactNode }) {
   return (
     <div
       className={className}
       style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
       <style>{LOCK_CSS}</style>
-      <header data-tauri-drag-region style={{ position: "relative", display: "flex", alignItems: "center", height: 40, flex: "none", paddingLeft: IS_MAC ? 0 : 16 }}>
-        <span data-tauri-drag-region style={{ fontSize: 13, fontWeight: 600, color: "var(--text-2)", ...(IS_MAC ? { position: "absolute", left: 0, right: 0, textAlign: "center" } : {}) }}>Kestral</span>
+      <header data-tauri-drag-region style={{ display: "flex", alignItems: "center", height: 40, flex: "none", padding: IS_MAC ? "0 14px 0 0" : "0 0 0 12px" }}>
+        {!IS_MAC && <Brand />}
         <span data-tauri-drag-region style={{ flex: 1, alignSelf: "stretch" }} />
-        {!IS_MAC && <WindowControls />}
+        {IS_MAC ? <Brand /> : <WindowControls />}
       </header>
       <main style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: "0 24px 64px", overflow: "auto" }}>
         <div style={{ width: "100%", maxWidth: 340 }}>{children}</div>
@@ -152,7 +170,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   }
 
   const onKey = (e: ReactKeyboardEvent) => setCaps(e.getModifierState("CapsLock"));
-  const shown = err || error;
+  const shown = exists ? error : err || error;
   const ready = !!pw && (exists || !!pw2);
 
   const field = (id: "pw" | "pw2", label: string, eye: boolean) => {
@@ -182,6 +200,11 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
           onBlur={() => setFocus(null)}
           style={{ flex: 1, minWidth: 0, height: "100%", padding: eye ? "0 0 0 13px" : "0 13px", border: 0, background: "transparent", color: "var(--text)", fontSize: 14, letterSpacing: value && !reveal ? "0.16em" : undefined, outline: "none" }}
         />
+        {caps && focus === id && (
+          <span role="img" aria-label="Caps Lock is on" title="Caps Lock is on" style={{ display: "grid", placeItems: "center", width: 26, height: 34, marginRight: eye ? 0 : 6, flex: "none", color: "var(--warn)" }}>
+            <CapsIcon />
+          </span>
+        )}
         {eye && (
           <button type="button" aria-label={reveal ? "Hide password" : "Show password"} title={reveal ? "Hide password" : "Show password"} onClick={() => setReveal((r) => !r)} style={{ display: "grid", placeItems: "center", width: 34, height: 34, marginRight: 4, flex: "none", border: 0, borderRadius: 6, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}>
             <EyeIcon off={reveal} />
@@ -192,14 +215,14 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   };
 
   const note = (
-    <div role={shown ? "alert" : undefined} title={shown || undefined} style={{ height: 18, fontSize: 12.5, lineHeight: "18px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: shown ? "var(--err)" : caps ? "var(--warn)" : "var(--text-3)" }}>
-      {shown || (caps ? "Caps Lock is on" : exists ? "" : "There is no way to recover it if you forget it.")}
+    <div role={shown ? "alert" : undefined} title={shown || undefined} style={{ position: "absolute", left: 0, right: 0, top: exists && !hello?.enabled ? "calc(100% - 38px)" : "100%", marginTop: exists && !hello?.enabled ? 4 : 14, fontSize: 12.5, lineHeight: "18px", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: shown ? "var(--err)" : "var(--text-3)" }}>
+      {shown || (exists ? "" : "There is no way to recover it if you forget it.")}
     </div>
   );
 
   return (
     <LockFrame className={className}>
-      <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <form onSubmit={submit} style={{ position: "relative", display: "flex", flexDirection: "column", gap: 10 }}>
         <h1 style={title}>{exists ? "Welcome back!" : "Welcome!"}</h1>
         {exists ? (
           <div style={{ animation: shakeAnim(shake) }}>{field("pw", "Password", true)}</div>
@@ -209,7 +232,6 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
             {field("pw2", "Repeat password", false)}
           </div>
         )}
-        {note}
         <button type="submit" disabled={!ready || busy} style={{ ...primary, opacity: ready || busy ? 1 : 0.5, cursor: ready && !busy ? "pointer" : "default" }}>
           {busy ? <Spinner /> : exists ? "Unlock" : "Create vault"}
         </button>
@@ -223,6 +245,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
             )}
           </div>
         )}
+        {note}
       </form>
     </LockFrame>
   );
@@ -232,10 +255,9 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
 export function LockingScreen({ className }: { className: string }) {
   return (
     <LockFrame className={className}>
-      <div role="status" aria-label="Locking" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div role="status" aria-label="Locking" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <h1 style={title}>Welcome back!</h1>
         <div style={{ ...fieldBox, padding: "0 13px", fontSize: 14, color: "var(--text-3)" }}>Password</div>
-        <div style={{ height: 18 }} />
         <div style={{ ...primary, opacity: 0.5 }}>Unlock</div>
         <div style={{ height: 38 }} />
       </div>
