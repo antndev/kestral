@@ -38,19 +38,19 @@ function ArrowIcon() {
   );
 }
 
+const fieldBox = (border: string, light: boolean): CSSProperties => ({ display: "flex", alignItems: "center", height: 46, border: `1px solid ${border}`, borderRadius: 12, background: "var(--bg-sunken)", boxShadow: light ? "0 8px 24px rgba(0,0,0,.05)" : "0 10px 30px rgba(0,0,0,.22)", boxSizing: "border-box", transition: "border-color 160ms" });
+
 function LockFrame({ className, children }: { className: string; children: ReactNode }) {
-  const light = className.includes("t-light");
   return (
     <div
       className={className}
-      style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: light ? "var(--bg-side)" : "#0A0A0B", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
+      style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
       <style>{LOCK_CSS}</style>
-      <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", background: `radial-gradient(70% 55% at 50% -10%, ${light ? "rgba(0,0,0,.04)" : "rgba(255,255,255,.07)"} 0%, transparent 70%)` }} />
       <header data-tauri-drag-region style={{ position: "relative", display: "flex", justifyContent: "flex-end", height: 40, flex: "none" }}>
         {!IS_MAC && <WindowControls />}
       </header>
       <main style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: "0 24px 64px", overflow: "auto" }}>
-        <div data-anim="screen" style={{ width: "100%", maxWidth: 340 }}>
+        <div style={{ width: "100%", maxWidth: 340 }}>
           {children}
         </div>
       </main>
@@ -154,7 +154,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   const box = (id: "pw" | "pw2"): CSSProperties => {
     const bad = !!err && errField === id;
     const border = bad ? "var(--err)" : focus === id ? "color-mix(in srgb, var(--text) 26%, var(--line))" : "var(--line)";
-    return { display: "flex", alignItems: "center", height: 46, border: `1px solid ${border}`, borderRadius: 12, background: light ? "var(--bg)" : "#161616", boxShadow: light ? "0 8px 24px rgba(0,0,0,.06)" : "0 10px 30px rgba(0,0,0,.3)", boxSizing: "border-box", transition: "border-color 160ms" };
+    return fieldBox(border, light);
   };
 
   const input = (id: "pw" | "pw2", label: string) => (
@@ -224,6 +224,18 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
         )}
         {note}
       </form>
+    </LockFrame>
+  );
+}
+
+/** Shown while the vault locks: the lock screen fades in with its field, before the real one takes over. */
+export function LockingScreen({ className }: { className: string }) {
+  return (
+    <LockFrame className={className}>
+      <div role="status" aria-label="Locking" style={{ ...fieldBox("var(--line)", className.includes("t-light")), padding: "0 15px", fontSize: 15, color: "var(--text-3)" }}>
+        Password
+      </div>
+      <div style={{ height: 28 }} />
     </LockFrame>
   );
 }

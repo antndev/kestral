@@ -6,8 +6,8 @@ import { usePrefs } from "./lib/prefs";
 import { rememberUpdate } from "./lib/updateLock";
 import { Shell, type Tab } from "./ui/Shell";
 import { IS_MAC, MONO, errText, readJson, writeJson, type SectionId, type Status } from "./ui/mock";
-import { LockIcon, CloseIcon } from "./ui/icons";
-import { BootScreen, LockScreen } from "./ui/LockScreen";
+import { CloseIcon } from "./ui/icons";
+import { BootScreen, LockScreen, LockingScreen } from "./ui/LockScreen";
 import { termBus, TerminalSession, type SessionStatus } from "./ui/screens/TerminalSession";
 import type { PaneStage } from "./ui/termBus";
 import { PanePool, type PoolPane } from "./ui/PanePool";
@@ -369,13 +369,14 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   }, [loaded, hostsError, hosts, toast]);
 
   // Startup checks: data warnings, tray onboarding, updates.
+  const checkUpdateRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     let alive = true;
     api
       .dataWarnings()
       .then((ws) => alive && ws.forEach((w) => toast("error", w, true)))
       .catch(() => {});
-    const checkUpdate = async () => {
+    const checkUpdate = (checkUpdateRef.current = async () => {
       try {
         const { check } = await import("@tauri-apps/plugin-updater");
         const u = await check();
@@ -386,7 +387,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       } catch {
         /* offline or updater unavailable */
       }
-    };
+    });
     void checkUpdate();
     const every = window.setInterval(() => void checkUpdate(), 6 * 60 * 60 * 1000);
     return () => {
@@ -1281,7 +1282,10 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       aiActive={aiActive}
       aiUntil={aiUntil}
       updateReady={!!update}
-      onUpdate={() => setUpdateOpen(true)}
+      onUpdate={() => {
+        void checkUpdateRef.current();
+        setUpdateOpen(true);
+      }}
       onToggleSidebar={() => setSidebarOpen((o) => !o)}
       onSelectSection={goSection}
       onDragTab={(e, id, label) => startDrag(e, { kind: "tab", tabId: id }, label)}
@@ -1430,11 +1434,8 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       )}
       <Toasts items={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
       {locking && (
-        <div role="status" style={{ position: "fixed", inset: 0, zIndex: 100001, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, background: "var(--bg)", color: "var(--text)" }}>
-          <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 56, height: 56, borderRadius: 14, background: "var(--bg)", boxShadow: "var(--shadow)" }}>
-            <LockIcon size={24} />
-          </span>
-          <span style={{ fontSize: 13, color: "var(--text-2)" }}>Locking…</span>
+        <div style={{ position: "fixed", inset: 0, zIndex: 100001, animation: "kst-fade calc(220ms * var(--anim-scale, 1)) ease-out backwards" }}>
+          <LockingScreen className={theme === "light" ? "t-light" : "t-dark"} />
         </div>
       )}
     </Shell>

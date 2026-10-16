@@ -3,6 +3,16 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.18 - 2026-10-16
+
+### Changed
+- The lock screen uses the same grey as the rest of the app.
+- Locking no longer shows a lock icon in the middle: the lock screen simply fades in.
+
+### Fixed
+- Updating always installs the newest version, even when a newer one came out after the app found the first.
+- The sidebar highlight appears on the section you click when nothing was selected before, instead of sliding in from the last one.
+
 ## 0.2.17 - 2026-10-16
 
 ### Changed

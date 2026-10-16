@@ -35,10 +35,12 @@ export function rememberUpdate(u: PendingUpdate) {
 }
 
 async function pendingUpdate(): Promise<PendingUpdate> {
-  const known = knownUpdate();
-  if (known) return known;
   const { check } = await import("@tauri-apps/plugin-updater");
-  const found = await check();
+  const found = await check().catch((e) => {
+    const known = knownUpdate();
+    if (known) return known;
+    throw e;
+  });
   if (!found) throw "No update to install";
   rememberUpdate(found);
   return found;

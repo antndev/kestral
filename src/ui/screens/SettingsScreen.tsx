@@ -13,7 +13,7 @@ import { Markdown } from "../Markdown";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import { HELLO_AUTO_KEY } from "../LockScreen";
-import { RELEASES_URL, friendlyUpdateError, installUpdate, knownUpdate, rememberUpdate, updateLock } from "../../lib/updateLock";
+import { RELEASES_URL, friendlyUpdateError, installUpdate, rememberUpdate, updateLock } from "../../lib/updateLock";
 import type { PendingUpdate } from "../../lib/updateLock";
 import { SegGroup, segItem } from "../SegGroup";
 import { useAlive } from "../kit";
@@ -581,12 +581,6 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
     setLinkErr("");
     if (updateLock.busy) return;
     updateLock.setPhase({ kind: "idle" });
-    // Reuse an update the app already found at startup or from the menu.
-    const known = knownUpdate();
-    if (known) {
-      found(known);
-      return;
-    }
     setUpd({ kind: "checking" });
     const started = Date.now();
     const settle = () => new Promise((r) => window.setTimeout(r, Math.max(0, MIN_CHECK_MS - (Date.now() - started))));

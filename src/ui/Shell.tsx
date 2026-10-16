@@ -515,14 +515,14 @@ function Sidebar({
   onOpenPalette: () => void;
 }) {
   const navRef = useRef<HTMLElement | null>(null);
-  const [pill, setPill] = useState<{ top: number; h: number; on: boolean } | null>(null);
+  const [pill, setPill] = useState<{ top: number; h: number; on: boolean; jump: boolean } | null>(null);
   const [ready, setReady] = useState(false);
   useLayoutEffect(() => {
     const nav = navRef.current;
     if (!nav) return;
     const measure = () => {
       const b = nav.querySelector<HTMLElement>('[aria-current="page"]');
-      setPill((p) => (b ? { top: b.offsetTop, h: b.offsetHeight, on: true } : p ? { ...p, on: false } : null));
+      setPill((p) => (b ? { top: b.offsetTop, h: b.offsetHeight, on: true, jump: !p?.on || p.jump && p.top === b.offsetTop } : p ? { ...p, on: false } : null));
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -542,7 +542,7 @@ function Sidebar({
       </button>
 
       <nav ref={navRef} aria-label="Sections" style={{ position: "relative", display: "flex", flexDirection: "column", gap: 2, flex: 1, minHeight: 0, overflow: "auto" }}>
-        {pill && <span aria-hidden="true" style={{ position: "absolute", top: 0, left: 0, right: 0, height: pill.h, borderRadius: 6, background: "var(--sel)", opacity: pill.on ? 1 : 0, transform: `translateY(${pill.top}px)`, transition: ready ? "transform 240ms var(--ease-out), opacity 120ms" : "none", pointerEvents: "none" }} />}
+        {pill && <span aria-hidden="true" style={{ position: "absolute", top: 0, left: 0, right: 0, height: pill.h, borderRadius: 6, background: "var(--sel)", opacity: pill.on ? 1 : 0, transform: `translateY(${pill.top}px)`, transition: !ready ? "none" : pill.jump ? "opacity 120ms" : "transform 240ms var(--ease-out), opacity 120ms", pointerEvents: "none" }} />}
         {NAV.map((n) => {
           const active = vaultActive && section === n.id;
           const hot = n.id === "ai" && aiActive;
