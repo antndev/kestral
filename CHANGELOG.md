@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.21 - 2026-10-16
+
+### Changed
+- Windows uses its own Segoe UI Variable font again instead of Inter.
+
 ## 0.2.20 - 2026-10-16
 
 ### Changed

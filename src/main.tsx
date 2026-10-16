@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import RealApp from "./RealApp";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PrefsProvider } from "./lib/prefs";
-import "@fontsource-variable/inter";
 import "./index.css";
 import "./tokens.css";
 
