@@ -1,9 +1,10 @@
-import { Fragment, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { MouseEvent as ReactMouseEvent, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { writeText as clipWriteText } from "@tauri-apps/plugin-clipboard-manager";
 import { identityList, type Host, type Identity, type NewHost, type PortForward } from "../../api";
 import { HostEditor } from "../overlays/HostEditor";
 import { Status, statusColor } from "../mock";
-import { CheckIcon, DotsIcon, HostsIcon, PlusIcon, WarningIcon } from "../icons";
+import { CheckIcon, HostsIcon, PlusIcon, WarningIcon } from "../icons";
+import { ItemMenu, MoreButton, useMenu, type MenuEntry, type MenuState } from "../Menu";
 import type { DragHost } from "../Shell";
 import { parseTarget, type QuickConnect, type Target } from "../target";
 import { Block, Blocks, DetailHead, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, chip, mono, muted, oneLine, pageBtn, primaryBtn, srOnly, useAlive, type Fact } from "../kit";
@@ -55,145 +56,6 @@ function forwardLabel(f: PortForward): string {
   return `L ${local} → ${withPort(f.remote_host, f.remote_port)}`;
 }
 
-interface MenuItem {
-  label: string;
-  danger?: boolean;
-  onSelect(): void | Promise<void>;
-}
-
-type MenuAt = "button" | { x: number; y: number } | null;
-
-function menuPoint(e: ReactMouseEvent): MenuAt {
-  e.preventDefault();
-  return e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : "button";
-}
-
-function MoreMenu({ hostName, items, at, note, onAt }: { hostName: string; items: MenuItem[]; at: MenuAt; note: Note | null; onAt(at: MenuAt): void }) {
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const [hover, setHover] = useState(-1);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const open = at !== null;
-
-  useLayoutEffect(() => {
-    setHover(-1);
-    if (!at || !btnRef.current || !menuRef.current) {
-      setPos(null);
-      return;
-    }
-    const b = btnRef.current.getBoundingClientRect();
-    const m = menuRef.current.getBoundingClientRect();
-    const [x, below, above] = at === "button" ? [b.right - m.width, b.bottom + 4, b.top - 4 - m.height] : [at.x, at.y, at.y - m.height];
-    setPos({ top: below + m.height <= window.innerHeight - 8 ? below : Math.max(8, above), left: Math.max(8, Math.min(x, window.innerWidth - m.width - 8)) });
-  }, [at]);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = () => onAt(null);
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current?.contains(e.target as Node) || btnRef.current?.contains(e.target as Node)) return;
-      close();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        close();
-        btnRef.current?.focus();
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, true);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
-    };
-  }, [open, onAt]);
-
-  useEffect(() => {
-    if (open && pos) menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
-  }, [open, pos]);
-
-  function onMenuKey(e: ReactKeyboardEvent) {
-    const btns = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]") ?? []);
-    const i = btns.indexOf(document.activeElement as HTMLButtonElement);
-    const go = (n: number) => {
-      e.preventDefault();
-      btns[(n + btns.length) % btns.length]?.focus();
-    };
-    if (e.key === "ArrowDown") go(i + 1);
-    else if (e.key === "ArrowUp") go(i < 0 ? -1 : i - 1);
-    else if (e.key === "Home") go(0);
-    else if (e.key === "End") go(btns.length - 1);
-    else if (e.key === "Tab") {
-      e.preventDefault();
-      onAt(null);
-      btnRef.current?.focus();
-    }
-  }
-
-  return (
-    <>
-      <button
-        ref={btnRef}
-        type="button"
-        aria-label={`More actions for ${hostName}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={note?.text}
-        onClick={() => onAt(open ? null : "button")}
-        style={{ ...pageBtn, width: 32, padding: 0, justifyContent: "center", background: open ? "var(--bg-raised)" : "var(--bg)", color: note ? (note.err ? "var(--err)" : "var(--ok)") : "var(--text-2)" }}
-      >
-        {note ? note.err ? <WarningIcon size={14} /> : <CheckIcon size={14} /> : <DotsIcon />}
-      </button>
-      {open && (
-        <div
-          ref={menuRef}
-          role="menu"
-          tabIndex={-1}
-          aria-label={`Actions for ${hostName}`}
-          onKeyDown={onMenuKey}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onBlur={(e) => {
-            const to = e.relatedTarget as Node | null;
-            if (to && (menuRef.current?.contains(to) || btnRef.current?.contains(to))) return;
-            onAt(null);
-          }}
-          style={{ position: "fixed", top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? "visible" : "hidden", zIndex: 90, minWidth: 160, display: "flex", flexDirection: "column", padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", boxSizing: "border-box", outline: "none" }}
-        >
-          {items.map((it, i) => (
-            <Fragment key={it.label}>
-              {it.danger && <div aria-hidden style={{ height: 1, margin: "4px 2px", background: "var(--line-soft)" }} />}
-              <button
-                type="button"
-                role="menuitem"
-                onMouseEnter={() => setHover(i)}
-                onMouseLeave={() => setHover(-1)}
-                onFocus={(e) => e.currentTarget.matches(":focus-visible") && setHover(i)}
-                onBlur={() => setHover(-1)}
-                onClick={() => {
-                  btnRef.current?.focus();
-                  onAt(null);
-                  void it.onSelect();
-                }}
-                style={{ display: "flex", alignItems: "center", height: 28, padding: "0 10px", border: 0, borderRadius: 4, background: hover === i ? "var(--sel)" : "transparent", color: it.danger ? "var(--err)" : "var(--text)", fontSize: 13, textAlign: "left", cursor: "pointer", outline: "none" }}
-              >
-                {it.label}
-              </button>
-            </Fragment>
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
 const AI_MARK = "Changed by AI, you are asked to check it before the next connection";
 
 function AiMark() {
@@ -226,16 +88,14 @@ interface DetailProps {
   identities: Identity[] | null;
   status: Status;
   note: Note | null;
-  menu: MenuItem[];
-  menuAt: MenuAt;
-  onMenuAt(at: MenuAt): void;
+  menu: MenuState<string>;
   onConnect(): void;
   onSftp(): void;
   onEdit(): void;
   onConfirmAi(): void;
 }
 
-function HostDetail({ host, user, via, identity, identities, status, note, menu, menuAt, onMenuAt, onConnect, onSftp, onEdit, onConfirmAi }: DetailProps) {
+function HostDetail({ host, user, via, identity, identities, status, note, menu, onConnect, onSftp, onEdit, onConfirmAi }: DetailProps) {
   const addr = hostAddress({ ...host, username: user });
   return (
     <>
@@ -262,7 +122,14 @@ function HostDetail({ host, user, via, identity, identities, status, note, menu,
             <button type="button" aria-label={`Connect to ${host.name}`} onClick={onConnect} style={primaryBtn}>Connect</button>
             <button type="button" aria-label={`Open SFTP for ${host.name}`} onClick={onSftp} style={pageBtn}>SFTP</button>
             <button type="button" aria-label={`Edit ${host.name}`} onClick={onEdit} style={pageBtn}>Edit</button>
-            <MoreMenu hostName={host.name} items={menu} at={menuAt} note={note} onAt={onMenuAt} />
+            <MoreButton
+              menu={menu}
+              itemKey={host.id}
+              label={`More actions for ${host.name}`}
+              icon={note ? note.err ? <WarningIcon size={14} /> : <CheckIcon size={14} /> : undefined}
+              color={note ? (note.err ? "var(--err)" : "var(--ok)") : undefined}
+              title={note?.text}
+            />
             {host.ai_changed && (
               <button type="button" onClick={onConfirmAi} title="The AI created this host or changed where it connects. Review and confirm it." style={pageBtn}>
                 Confirm host
@@ -341,7 +208,7 @@ export function HostsScreen(p: {
   const [quickErr, setQuickErr] = useState("");
   const [notes, setNotes] = useState<Record<string, Note>>({});
   const [sel, setSel] = useState<string | null>(null);
-  const [menuAt, setMenuAt] = useState<MenuAt>(null);
+  const menu = useMenu<string>();
   const [identities, setIdentities] = useState<Identity[] | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const alive = useAlive();
@@ -421,10 +288,15 @@ export function HostsScreen(p: {
     }, note.err ? 3000 : 1500);
   };
 
-  const menuFor = (h: Host): MenuItem[] => [
-    ...(menuAt !== null && menuAt !== "button" ? [{ label: "Edit…", onSelect: () => p.onEdit(h) }] : []),
+  const menuHost = hosts.find((h) => h.id === menu.open?.key);
+  const menuFor = (h: Host, fromButton: boolean): MenuEntry[] => [
+    !fromButton && { label: "Connect", onSelect: () => p.onConnect(h) },
+    !fromButton && { label: "Open SFTP", onSelect: () => p.onSftp(h) },
+    !fromButton && { label: "Edit…", onSelect: () => p.onEdit(h) },
+    null,
     { label: "Duplicate", onSelect: () => p.onDuplicate(h) },
     { label: "Copy address", onSelect: () => copyAddress(h) },
+    null,
     { label: "Delete", danger: true, onSelect: () => p.onDelete(h) },
   ];
 
@@ -515,7 +387,7 @@ export function HostsScreen(p: {
                     const h = itemHost(e);
                     if (!h) return;
                     setSel(h.id);
-                    setMenuAt(menuPoint(e));
+                    menu.openAt(e, h.id, h.id === current?.id ? undefined : itemRefs.current.get(h.id));
                   }}
                 >
                   <List label="Hosts">
@@ -576,9 +448,7 @@ export function HostsScreen(p: {
               identities={identities}
               status={statuses[current.id] ?? "idle"}
               note={notes[current.id] ?? null}
-              menu={menuFor(current)}
-              menuAt={menuAt}
-              onMenuAt={setMenuAt}
+              menu={menu}
               onConnect={() => p.onConnect(current)}
               onSftp={() => p.onSftp(current)}
               onEdit={() => p.onEdit(current)}
@@ -592,6 +462,7 @@ export function HostsScreen(p: {
       {hosts.map((h) => (
         <Live key={h.id} host={h} status={statuses[h.id] ?? "idle"} note={notes[h.id] ?? null} />
       ))}
+      {menuHost && <ItemMenu menu={menu} label={`Actions for ${menuHost.name}`} items={(_, fromButton) => menuFor(menuHost, fromButton)} />}
     </main>
   );
 }

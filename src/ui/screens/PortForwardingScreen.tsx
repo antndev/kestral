@@ -5,6 +5,7 @@ import type { ForwardKind, Host, PortForward } from "../../api";
 import { MONO, errText } from "../mock";
 import { ForwardIcon, PlusIcon, TrashIcon } from "../icons";
 import { ConfirmDialog as SharedConfirm } from "../overlays/Dialogs";
+import { ItemMenu, MoreButton, useMenu, type MenuState } from "../Menu";
 import { Stable } from "../Stable";
 import { SegGroup, segItem } from "../SegGroup";
 import { Block, Blocks, DetailHead, EditFooter, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, mono, muted, oneLine, pageBtn, primaryBtn } from "../kit";
@@ -196,6 +197,8 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
   const [confirmDelete, setConfirmDelete] = useState<Row | null>(null);
   const [drafts, setDraftsState] = useState<Record<string, Draft>>(keptDrafts);
   const [filter, setFilter] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
+  const menu = useMenu<string>();
   const alive = useRef(true);
   const focusName = useRef(false);
   const nameRef = useRef<HTMLInputElement | null>(null);
@@ -401,6 +404,14 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
                         sub={<span title={routeOf(it)}>{routeOf(it)}</span>}
                         selected={it.id === selectedId}
                         onSelect={() => select(it.id)}
+                        onMenu={
+                          r && !formOpen
+                            ? (e) => {
+                                select(it.id);
+                                menu.openAt(e, it.id);
+                              }
+                            : undefined
+                        }
                         onKeyDown={(e) => arrowNav(shown, i, e, select, (id) => itemRefs.current.get(id)?.focus())}
                         trailing={
                           r ? (
@@ -445,6 +456,8 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
                 });
               }}
               nameRef={nameRef}
+              menu={menu}
+              onFormOpen={setFormOpen}
               onToggle={() => {
                 if (current) void toggle(current);
               }}
@@ -502,6 +515,8 @@ function RuleDetail({
   draft: kept,
   onDraft,
   nameRef,
+  menu,
+  onFormOpen,
   onToggle,
   onDelete,
   onCancel,
@@ -520,6 +535,8 @@ function RuleDetail({
   draft: Draft | null;
   onDraft(d: Draft | null): void;
   nameRef: RefObject<HTMLInputElement | null>;
+  menu: MenuState<string>;
+  onFormOpen(open: boolean): void;
   onToggle(): void;
   onDelete(): void;
   onCancel(): void;
@@ -551,6 +568,12 @@ function RuleDetail({
     if (to === "name") nameRef.current?.focus();
     else if (to === "edit") editRef.current?.focus();
   }, [editMode, nameRef]);
+
+  const closeMenu = menu.close;
+  useEffect(() => {
+    onFormOpen(editMode);
+    if (editMode) closeMenu();
+  }, [editMode, onFormOpen, closeMenu]);
 
   const dirty = !saved || !sameDraft(draft, saved);
   const set = (patch: Partial<Draft>) => {
@@ -712,6 +735,7 @@ function RuleDetail({
             : { dot: "var(--ring-idle)", text: "Stopped" };
 
   const web = row ? webUrl(row.f) : null;
+  const openWeb = (url: string) => void openUrl(url).catch((e) => setFormErr(errText(e)));
   const exposure = exposureOf(draft);
   const msg: { tone: "err" | "warn" | "muted"; text: string; title?: string } | null = formErr
     ? { tone: "err", text: formErr }
@@ -760,7 +784,7 @@ function RuleDetail({
         <span title={status.text} style={oneLine}>{status.text}</span>
       </span>
       {web && (
-        <button type="button" disabled={!active} onClick={() => void openUrl(web).catch((e) => setFormErr(errText(e)))} style={{ ...linkBtn, visibility: active ? "visible" : "hidden" }}>
+        <button type="button" disabled={!active} onClick={() => openWeb(web)} style={{ ...linkBtn, visibility: active ? "visible" : "hidden" }}>
           Open in browser
         </button>
       )}
@@ -775,6 +799,7 @@ function RuleDetail({
     const reach = exposureOf(saved);
     const note = formErr ? { err: true, text: formErr } : formWarn ? { err: false, text: formWarn } : null;
     const busy = !!pending || saving;
+    const toggleLabel = pending === "start" ? "Starting…" : pending === "stop" ? "Stopping…" : active ? "Stop" : "Start";
     return (
       <>
         <DetailHead
@@ -783,17 +808,28 @@ function RuleDetail({
           actions={
             <>
               <button type="button" onClick={onToggle} disabled={busy} style={off(primaryBtn, busy)}>
-                <Stable text={pending === "start" ? "Starting…" : pending === "stop" ? "Stopping…" : active ? "Stop" : "Start"} alts={["Start", "Stop", "Starting…", "Stopping…"]} />
+                <Stable text={toggleLabel} alts={["Start", "Stop", "Starting…", "Stopping…"]} />
               </button>
               <button ref={editRef} type="button" aria-label={`Edit ${title}`} onClick={startEdit} style={pageBtn}>
                 Edit
               </button>
-              <button type="button" aria-label={`Delete ${title}`} onClick={onDelete} disabled={locked} title={pending ? "Wait until the tunnel has started or stopped" : undefined} style={off(pageBtn, locked)}>
-                Delete
-              </button>
+              <MoreButton menu={menu} itemKey={id} label={`More actions for ${title}`} />
             </>
           }
         />
+        {menu.open?.key === id && (
+          <ItemMenu
+            menu={menu}
+            label={`Actions for ${title}`}
+            items={(_, fromButton) => [
+              !fromButton && { label: toggleLabel, disabled: busy, onSelect: onToggle },
+              !fromButton && { label: "Edit…", onSelect: startEdit },
+              active && web ? { label: "Open in browser", onSelect: () => openWeb(web) } : false,
+              null,
+              { label: "Delete rule", danger: true, disabled: locked, title: pending ? "Wait until the tunnel has started or stopped" : undefined, onSelect: onDelete },
+            ]}
+          />
+        )}
 
         <Blocks>
           <Block title="Forwarding">

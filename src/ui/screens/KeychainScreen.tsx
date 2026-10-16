@@ -4,11 +4,13 @@ import { readText as clipRead, writeText as clipWrite } from "@tauri-apps/plugin
 import * as api from "../../api";
 import type { AuthMethod, Host, Identity, KeyAlgorithm, SecretKind, SecretMeta } from "../../api";
 import { IS_MAC, MONO, cleanText, errText } from "../mock";
-import { CheckIcon, CopyIcon, DownloadIcon, KeyIcon, LockIcon, PlusIcon, RefreshIcon, SearchIcon, ShieldIcon, TrashIcon, WarningIcon } from "../icons";
+import { CheckIcon, CopyIcon, DownloadIcon, KeyIcon, LockIcon, PlusIcon, RefreshIcon, SearchIcon, ShieldIcon, WarningIcon } from "../icons";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import { SegGroup, segItem } from "../SegGroup";
 import { useAlive } from "../kit";
+import { ItemMenu, MoreButton, useMenu } from "../Menu";
+import type { MenuState } from "../Menu";
 
 /* ---------- styles (from the design) ---------- */
 
@@ -270,6 +272,7 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
   const [sel, setSel] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [dialog, setDialog] = useState<"generate" | "import" | null>(null);
+  const keyMenu = useMenu();
 
   // The app keeps its own copy of the secret list, so tell it about every vault change.
   const hostsChanged = useRef(p.onHostsChanged);
@@ -518,7 +521,7 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
             {filtered.length === 0 ? (
               <p style={{ margin: "8px", fontSize: 12, color: "var(--text-2)" }}>No keys match “{filter.trim()}”.</p>
             ) : (
-              <KeyList keys={filtered} info={info} sel={sel} onSelect={setSel} hostCount={hostCount} />
+              <KeyList keys={filtered} info={info} sel={sel} onSelect={setSel} hostCount={hostCount} menu={keyMenu} />
             )}
           </div>
 
@@ -539,6 +542,7 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
                 onDelete={() => deleteSecret(current.id)}
                 onRetry={() => retryKey(current.id)}
                 onEditHost={p.onEditHost}
+                menu={keyMenu}
               />
               </div>
             )}
@@ -601,7 +605,7 @@ async function undoRename(cause: unknown, oldId: string, newId: string, moved: H
 
 /* ---------- keys tab ---------- */
 
-function KeyList(p: { keys: SecretMeta[]; info: Record<string, KeyInfo>; sel: string | null; onSelect(id: string): void; hostCount(id: string): number }) {
+function KeyList(p: { keys: SecretMeta[]; info: Record<string, KeyInfo>; sel: string | null; onSelect(id: string): void; hostCount(id: string): number; menu: MenuState }) {
   const refs = useRef(new Map<string, HTMLButtonElement>());
   function move(from: number, delta: number) {
     const next = p.keys[Math.min(p.keys.length - 1, Math.max(0, from + delta))];
@@ -626,6 +630,10 @@ function KeyList(p: { keys: SecretMeta[]; info: Record<string, KeyInfo>; sel: st
               type="button"
               aria-current={active}
               onClick={() => p.onSelect(k.id)}
+              onContextMenu={(e) => {
+                p.onSelect(k.id);
+                p.menu.openAt(e, k.id, e.currentTarget);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                   e.preventDefault();
@@ -678,6 +686,7 @@ function KeyDetail(p: {
   onRetry(): void;
   onEditHost?(h: Host): void;
   onShowIdentities(): void;
+  menu: MenuState;
 }) {
   const alive = useAlive();
   const ok = p.info?.ok === true ? p.info : null;
@@ -780,10 +789,7 @@ function KeyDetail(p: {
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, overflowWrap: "anywhere" }}>{p.secret.id}</h2>
           <p style={{ margin: "4px 0 0", color: "var(--text-2)" }}>{[ok ? ok.algo.replace(/ \d+$/, "") : p.info ? "Private key" : "Reading…", ok && keyBits(ok.pub) ? `${keyBits(ok.pub)} bit` : "", createdLabel(p.secret.created_at)].filter(Boolean).join(", ")}</p>
         </div>
-        <button type="button" onClick={() => setModal("delete")} disabled={renaming} title={busyTip} style={{ ...dangerOutlineBtn, flex: "none", ...disabledLook(renaming) }}>
-          <TrashIcon />
-          Delete
-        </button>
+        <MoreButton menu={p.menu} itemKey={p.secret.id} label={`More actions for ${p.secret.id}`} />
       </div>
 
       {failed && (
@@ -926,6 +932,25 @@ function KeyDetail(p: {
         </div>
       )}
 
+      {p.menu.open?.key === p.secret.id && (
+        <ItemMenu
+          menu={p.menu}
+          label={`Actions for ${p.secret.id}`}
+          items={() => [
+            {
+              label: "Copy public key",
+              disabled: !ok,
+              title: needKey,
+              onSelect: () => {
+                if (ok) void copy(ok.pub, flashPub);
+              },
+            },
+            { label: "Export .pub…", disabled: !ok, title: needKey, onSelect: exportPub },
+            null,
+            { label: "Delete key…", danger: true, disabled: renaming, title: busyTip, onSelect: () => setModal("delete") },
+          ]}
+        />
+      )}
       {modal === "show" && <ShowPrivateKeyDialog id={p.secret.id} onClose={() => setModal(null)} />}
       {modal === "export" && (
         <ExportKeyDialog
@@ -994,6 +1019,8 @@ function IdentitiesTab(p: {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
+  const idMenu = useMenu();
+  const pwMenu = useMenu();
 
   const hosts = useMemo(() => [...p.hosts].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })), [p.hosts]);
   const identities = useMemo(() => [...p.identities].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })), [p.identities]);
@@ -1077,14 +1104,14 @@ function IdentitiesTab(p: {
                 <th scope="col" style={th}>User</th>
                 <th scope="col" style={th}>Credential</th>
                 <th scope="col" style={th}>Used by</th>
-                <th scope="col" style={{ width: 96, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
+                <th scope="col" style={{ width: 42, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {identities.map((i) => {
                 const users = hostsOfIdentity(i.id);
                 return (
-                  <tr key={i.id}>
+                  <tr key={i.id} data-reveal onContextMenu={(e) => idMenu.openAt(e, i.id)}>
                     <td style={{ ...cell, height: 40 }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
                         <span style={{ display: "flex", color: "var(--text-2)" }}><ShieldIcon size={14} /></span>
@@ -1103,19 +1130,7 @@ function IdentitiesTab(p: {
                       )}
                     </td>
                     <td style={{ ...cell, padding: "0 8px" }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 2 }}>
-                        <button type="button" onClick={() => setIdDialog({ identity: i })} style={{ height: 26, padding: "0 8px", border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", fontSize: 12, cursor: "pointer" }}>Edit</button>
-                        <button
-                          type="button"
-                          aria-label={`Delete identity ${i.name}`}
-                          title={users.length > 0 ? `Used by ${names(users)}. Pick another sign-in method there first.` : "Delete"}
-                          disabled={users.length > 0}
-                          onClick={() => setIdentityToDelete(i)}
-                          style={{ ...iconBtn, ...disabledLook(users.length > 0) }}
-                        >
-                          <TrashIcon />
-                        </button>
-                      </div>
+                      <MoreButton menu={idMenu} itemKey={i.id} label={`More actions for ${i.name}`} small hidden />
                     </td>
                   </tr>
                 );
@@ -1143,7 +1158,7 @@ function IdentitiesTab(p: {
               <tr>
                 <th scope="col" style={th}>Name</th>
                 <th scope="col" style={th}>Used by</th>
-                <th scope="col" style={{ width: 150, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
+                <th scope="col" style={{ width: 70, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -1151,7 +1166,7 @@ function IdentitiesTab(p: {
                 const users = usersOf(s.id);
                 const idents = identitiesOf(s.id);
                 return (
-                  <tr key={s.id}>
+                  <tr key={s.id} data-reveal onContextMenu={(e) => pwMenu.openAt(e, s.id)}>
                     <td style={{ ...cell, height: 40 }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
                         <span style={{ display: "flex", color: "var(--text-2)" }}><LockIcon size={14} /></span>
@@ -1178,8 +1193,7 @@ function IdentitiesTab(p: {
                         <button type="button" aria-label={`Copy password ${s.id}`} title={copiedId === s.id ? "Copied" : "Copy password to the clipboard"} onClick={() => copyPassword(s)} style={{ ...iconBtn, color: copiedId === s.id ? "var(--ok)" : "var(--text-2)" }}>
                           {copiedId === s.id ? <CheckIcon size={14} /> : <CopyIcon />}
                         </button>
-                        <button type="button" onClick={() => setPwDialog({ secret: s })} style={{ height: 26, padding: "0 8px", border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", fontSize: 12, cursor: "pointer" }}>Change</button>
-                        <button type="button" aria-label={`Delete password ${s.id}`} title="Delete" onClick={() => setToDelete(s)} style={iconBtn}><TrashIcon /></button>
+                        <MoreButton menu={pwMenu} itemKey={s.id} label={`More actions for ${s.id}`} small hidden />
                       </div>
                     </td>
                   </tr>
@@ -1190,6 +1204,34 @@ function IdentitiesTab(p: {
         )}
       </section>
 
+      <ItemMenu
+        menu={idMenu}
+        label="Identity actions"
+        items={(key) => {
+          const i = identities.find((x) => x.id === key);
+          if (!i) return [];
+          const users = hostsOfIdentity(i.id);
+          return [
+            { label: "Edit…", onSelect: () => setIdDialog({ identity: i }) },
+            null,
+            { label: "Delete", danger: true, disabled: users.length > 0, title: users.length > 0 ? `Used by ${names(users)}. Pick another sign-in method there first.` : undefined, onSelect: () => setIdentityToDelete(i) },
+          ];
+        }}
+      />
+      <ItemMenu
+        menu={pwMenu}
+        label="Password actions"
+        items={(key, fromButton) => {
+          const s = p.passwords.find((x) => x.id === key);
+          if (!s) return [];
+          return [
+            !fromButton && { label: "Copy password", onSelect: () => copyPassword(s) },
+            { label: "Change…", onSelect: () => setPwDialog({ secret: s }) },
+            null,
+            { label: "Delete", danger: true, onSelect: () => setToDelete(s) },
+          ];
+        }}
+      />
       {idDialog && (
         <IdentityDialog
           identity={idDialog.identity}
@@ -1274,6 +1316,8 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
   const [copied, setCopied] = useState<string | null>(null);
   const copyTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
+  const keyMenu = useMenu();
+  const hostMenu = useMenu();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1353,14 +1397,14 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
                 <th scope="col" style={th}>Key</th>
                 <th scope="col" style={th}>Type</th>
                 <th scope="col" style={th}>Fingerprint</th>
-                <th scope="col" style={{ width: 40, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
+                <th scope="col" style={{ width: 70, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {local.keys.map((k) => {
                 const inVault = vaultByFp.get(k.fingerprint);
                 return (
-                  <tr key={k.fingerprint}>
+                  <tr key={k.fingerprint} data-reveal onContextMenu={(e) => keyMenu.openAt(e, k.fingerprint)}>
                     <td style={{ ...cell, height: 40 }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{k.comment || <span style={{ fontWeight: 400, color: "var(--text-3)" }}>No comment</span>}</span>
@@ -1377,9 +1421,12 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
                       <code title={k.fingerprint} style={{ display: "block", ...code, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-2)" }}>{k.fingerprint}</code>
                     </td>
                     <td style={{ ...cell, padding: "0 8px" }}>
-                      <button type="button" aria-label="Copy public key" title={copied === k.fingerprint ? "Copied" : "Copy public key"} onClick={() => void copyPub(k)} style={{ ...iconBtn, color: copied === k.fingerprint ? "var(--ok)" : "var(--text-2)" }}>
-                        {copied === k.fingerprint ? <CheckIcon size={14} /> : <CopyIcon />}
-                      </button>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 2 }}>
+                        <button type="button" aria-label="Copy public key" title={copied === k.fingerprint ? "Copied" : "Copy public key"} onClick={() => void copyPub(k)} style={{ ...iconBtn, color: copied === k.fingerprint ? "var(--ok)" : "var(--text-2)" }}>
+                          {copied === k.fingerprint ? <CheckIcon size={14} /> : <CopyIcon />}
+                        </button>
+                        {inVault ? <MoreButton menu={keyMenu} itemKey={k.fingerprint} label={`More actions for ${k.comment || k.fingerprint}`} small hidden /> : <span aria-hidden="true" style={{ width: 26, flex: "none" }} />}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -1407,11 +1454,12 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
               <tr>
                 <th scope="col" style={th}>Host</th>
                 <th scope="col" style={th}>Forwarded keys</th>
+                <th scope="col" style={{ width: 42, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {forwarding.map((h) => (
-                <tr key={h.id}>
+                <tr key={h.id} data-reveal onContextMenu={(e) => hostMenu.openAt(e, h.id)}>
                   <td style={{ ...cell, height: 46, width: "35%" }}>
                     <HostName host={h} onEditHost={p.onEditHost} />
                     <div style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)", overflowWrap: "anywhere" }}>{h.username ? `${h.username}@` : ""}{h.hostname}</div>
@@ -1454,12 +1502,37 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
                       </div>
                     )}
                   </td>
+                  <td style={{ ...cell, padding: "0 8px" }}>
+                    <MoreButton menu={hostMenu} itemKey={h.id} label={`More actions for ${h.name}`} small hidden />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </section>
+
+      <ItemMenu
+        menu={keyMenu}
+        label="Agent key actions"
+        items={(key, fromButton) => {
+          const k = local?.keys.find((x) => x.fingerprint === key);
+          if (!k) return [];
+          const inVault = vaultByFp.get(k.fingerprint);
+          return [
+            !fromButton && { label: "Copy public key", onSelect: () => copyPub(k) },
+            !!inVault && { label: "Show in vault", onSelect: () => p.onShowKey(inVault) },
+          ];
+        }}
+      />
+      <ItemMenu
+        menu={hostMenu}
+        label="Host actions"
+        items={(key) => {
+          const h = forwarding.find((x) => x.id === key);
+          return [h && { label: "Edit host…", disabled: !p.onEditHost, onSelect: () => p.onEditHost?.(h) }];
+        }}
+      />
     </div>
   );
 }

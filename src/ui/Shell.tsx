@@ -1,6 +1,6 @@
 import React, { CSSProperties, ReactNode, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { IS_MAC, KEYS, SANS, SectionId, Status, statusColor } from "./mock";
-import { ContextMenu, type ContextItem } from "./ContextMenu";
+import { Menu, type MenuAnchor, type MenuEntry } from "./Menu";
 import { dnd } from "./panes";
 import { windowAction } from "./win";
 import {
@@ -239,10 +239,10 @@ function TitleBar({
   onCloseTab: (id: string) => void;
   onDragTab: (e: React.MouseEvent, id: string, name: string) => void;
   onReorderTab: (id: string, beforeId: string) => void;
-  tabMenu: (id: string) => ContextItem[];
+  tabMenu: (id: string) => MenuEntry[];
   onNewTab: () => void;
 }) {
-  const [tabCtx, setTabCtx] = useState<{ x: number; y: number; id: string; restore: HTMLElement | null } | null>(null);
+  const [tabCtx, setTabCtx] = useState<{ anchor: MenuAnchor; id: string } | null>(null);
   const stripRef = useRef<HTMLElement | null>(null);
   const [hoverTab, setHoverTab] = useState<string | null>(null);
   const [tabSlide, setTabSlide] = useState<{ id: string; dx: number; from: number; to: number; w: number; settling: boolean; done?: boolean } | null>(null);
@@ -374,7 +374,7 @@ function TitleBar({
           const sliding = tabSlide?.id === t.id;
           const shift = !tabSlide || sliding ? 0 : tabSlide.from < tabSlide.to && i > tabSlide.from && i <= tabSlide.to ? -tabSlide.w : tabSlide.from > tabSlide.to && i >= tabSlide.to && i < tabSlide.from ? tabSlide.w : 0;
           const panes = t.panes ?? 0;
-          const openMenu = (x: number, y: number, el: HTMLElement) => setTabCtx({ x, y, id: t.id, restore: el });
+          const openMenu = (anchor: MenuAnchor) => setTabCtx({ anchor, id: t.id });
           return (
             <div
               key={t.id}
@@ -398,8 +398,7 @@ function TitleBar({
                   onCloseTab(t.id);
                 } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
                   e.preventDefault();
-                  const r = e.currentTarget.getBoundingClientRect();
-                  openMenu(r.left + 12, r.bottom, e.currentTarget);
+                  openMenu({ el: e.currentTarget });
                 }
               }}
               onAuxClick={(e) => {
@@ -407,7 +406,7 @@ function TitleBar({
               }}
               onContextMenu={(e) => {
                 e.preventDefault();
-                openMenu(e.clientX, e.clientY, e.currentTarget);
+                openMenu({ x: e.clientX, y: e.clientY });
               }}
               onMouseDown={(e) => {
                 if ((e.target as HTMLElement).closest("button")) return;
@@ -493,18 +492,7 @@ function TitleBar({
         <LockIcon />
       </button>
       {!IS_MAC && <WindowControls />}
-      {tabCtx && (
-        <ContextMenu
-          pos={tabCtx}
-          label="Tab actions"
-          items={tabMenu(tabCtx.id)}
-          onClose={(restore) => {
-            const el = tabCtx.restore;
-            setTabCtx(null);
-            if (restore) el?.focus();
-          }}
-        />
-      )}
+      {tabCtx && <Menu anchor={tabCtx.anchor} label="Tab actions" items={tabMenu(tabCtx.id)} onClose={() => setTabCtx(null)} />}
     </header>
   );
 }
@@ -615,7 +603,7 @@ export function Shell({
   onSelectSection: (s: SectionId) => void;
   onDragTab: (e: React.MouseEvent, id: string, name: string) => void;
   onReorderTab: (id: string, beforeId: string) => void;
-  tabMenu: (id: string) => ContextItem[];
+  tabMenu: (id: string) => MenuEntry[];
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: () => void;

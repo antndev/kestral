@@ -19,7 +19,8 @@ import * as api from "../../api";
 import type { Host, Snippet } from "../../api";
 import { usePrefs } from "../../lib/prefs";
 import { IS_MAC, KEYS, MONO, errText, termFontStack } from "../mock";
-import { ChevronIcon, DotsIcon, PlayIcon, PlusIcon, SnippetIcon, TrashIcon } from "../icons";
+import { ChevronIcon, PlayIcon, PlusIcon, SnippetIcon, TrashIcon } from "../icons";
+import { ItemMenu, MoreButton, useMenu, type MenuEntry, type MenuState } from "../Menu";
 import { CommandPreview, ConfirmDialog, Overlay, VisibleLine, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import {
@@ -458,6 +459,8 @@ export function SnippetsScreen({
   const [freshId, setFreshId] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const runs = useSyncExternalStore(subscribeRuns, getRuns);
+  const snippetMenu = useMenu<string>();
+  const folderMenu = useMenu<string>();
 
   const rootRef = useRef<HTMLElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -939,6 +942,20 @@ export function SnippetsScreen({
     return s ? s.label.trim() || "Untitled" : "";
   };
 
+  const menuSnippet = snippets.find((s) => s.id === snippetMenu.open?.key);
+  const snippetMenuFor = (s: Snippet, fromButton: boolean): MenuEntry[] => {
+    const b = blockFor(s);
+    return [
+      !fromButton && { label: b.runLabel, disabled: busyIds.has(s.id) || !!b.runBlocked, title: b.runBlocked || undefined, onSelect: () => begin("run", s) },
+      !fromButton && { label: "Paste to terminal", disabled: !!b.pasteBlocked, title: b.pasteBlocked || undefined, onSelect: () => begin("paste", s) },
+      !fromButton && { label: "Edit…", onSelect: startEdit },
+      null,
+      { label: "Duplicate", disabled: !!s.ai_edited, title: s.ai_edited ? "Review the AI change first: run it once or edit it" : undefined, onSelect: () => void duplicateSnippet(s) },
+      null,
+      { label: "Delete snippet", danger: true, onSelect: () => setConfirmDelete(s) },
+    ];
+  };
+
   const failed = loaded && snippets.length === 0 && loadErr !== "";
   const emptyVault = loaded && snippets.length === 0 && allFolders.length === 0;
   const fullState = failed || emptyVault;
@@ -990,11 +1007,7 @@ export function SnippetsScreen({
               {groups.map((g) => (
                 <div key={g.name || "\u0000"} style={{ display: "flex", flexDirection: "column" }}>
                   {g.name && (
-                    <FolderHeader
-                      name={g.name}
-                      onRename={() => setFolderDialog({ mode: "rename", from: g.name })}
-                      onRemove={() => setFolderToDelete(g.name)}
-                    />
+                    <FolderHeader name={g.name} menu={folderMenu} />
                   )}
                   {g.items.length === 0 ? (
                     <p style={{ margin: "2px 8px", fontSize: 12, color: "var(--text-3)" }}>Empty folder</p>
@@ -1022,6 +1035,14 @@ export function SnippetsScreen({
                             sub={<span style={{ fontFamily: MONO, fontSize: 11.5 }}>{s.script.split("\n").find((l) => l.trim()) ?? " "}</span>}
                             selected={s.id === selId}
                             onSelect={() => select(s.id)}
+                            onMenu={
+                              editing
+                                ? undefined
+                                : (e) => {
+                                    select(s.id);
+                                    snippetMenu.openAt(e, s.id);
+                                  }
+                            }
                             onKeyDown={(e) => arrowNav(visibleItems, visibleOrder.indexOf(s.id), e, select, focusRow)}
                             buttonRef={(el) => {
                               if (el) rowRefs.current.set(s.id, el);
@@ -1066,7 +1087,7 @@ export function SnippetsScreen({
                       <button ref={editBtnRef} type="button" onClick={startEdit} style={{ ...pageBtn, flex: "none" }}>
                         Edit
                       </button>
-                      <SnippetMenu name={selected.label.trim() || "Untitled"} canDuplicate={!selected.ai_edited} onDuplicate={() => void duplicateSnippet(selected)} onDelete={() => setConfirmDelete(selected)} />
+                      <MoreButton menu={snippetMenu} itemKey={selected.id} label={`More actions for ${selected.label.trim() || "Untitled"}`} />
                       <div style={{ flex: "1 1 0", minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
                         <SaveIndicator status={saveStatus} selId={selId} otherLabel={labelOf(saveStatus.id)} onRetry={() => void flush()} />
                       </div>
@@ -1292,6 +1313,16 @@ export function SnippetsScreen({
           />
         );
       })()}
+      {menuSnippet && <ItemMenu menu={snippetMenu} label={`Actions for ${menuSnippet.label.trim() || "Untitled"}`} items={(_, fromButton) => snippetMenuFor(menuSnippet, fromButton)} />}
+      <ItemMenu
+        menu={folderMenu}
+        label={`Folder actions for ${folderMenu.open?.key ?? ""}`}
+        items={(name) => [
+          { label: "Rename…", onSelect: () => setFolderDialog({ mode: "rename", from: name }) },
+          null,
+          { label: "Delete folder", danger: true, onSelect: () => setFolderToDelete(name) },
+        ]}
+      />
     </main>
   );
 }
@@ -1355,89 +1386,13 @@ function RunButton({ stop, label, disabled, title, onClick }: { stop: boolean; l
   );
 }
 
-function FolderHeader({ name, onRename, onRemove }: { name: string; onRename(): void; onRemove(): void }) {
-  const [hover, setHover] = useState(false);
-  const [open, setOpen] = useState(false);
-  const [hot, setHot] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && (ref.current?.getClientRects().length ?? 0) > 0) {
-        e.stopPropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
-
-  const shown = hover || open;
-  const item = (key: string, disabled: boolean): CSSProperties =>
-    off({ display: "flex", alignItems: "center", width: "100%", height: 28, padding: "0 8px", border: 0, borderRadius: 4, background: hot === key && !disabled ? "var(--sel)" : "transparent", color: "var(--text)", textAlign: "left", cursor: "pointer", fontSize: 13 }, disabled);
-
+function FolderHeader({ name, menu }: { name: string; menu: MenuState<string> }) {
   return (
-    <div
-      ref={ref}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      onFocus={() => setHover(true)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHover(false);
-      }}
-      style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, padding: "6px 4px 4px 8px" }}
-    >
+    <div data-reveal="" onContextMenu={(e) => menu.openAt(e, name)} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 4px 2px 8px" }}>
       <h2 style={{ ...sectionLabel, ...oneLine, flex: 1, margin: 0 }} title={name}>
         {name}
       </h2>
-      <button
-        type="button"
-        aria-label={`Folder actions for ${name}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        style={{ display: "flex", flex: "none", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: 0, borderRadius: 4, background: open ? "var(--sel)" : "transparent", color: "var(--text-2)", cursor: "pointer", opacity: shown ? 1 : 0, pointerEvents: shown ? "auto" : "none" }}
-      >
-        <DotsIcon size={14} />
-      </button>
-      {open && (
-        <div role="menu" style={{ position: "absolute", top: "100%", right: 4, zIndex: 20, minWidth: 180, padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", boxSizing: "border-box" }}>
-          <button
-            type="button"
-            role="menuitem"
-            onMouseEnter={() => setHot("rename")}
-            onMouseLeave={() => setHot(null)}
-            onClick={() => {
-              setOpen(false);
-              onRename();
-            }}
-            style={item("rename", false)}
-          >
-            Rename…
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            onMouseEnter={() => setHot("remove")}
-            onMouseLeave={() => setHot(null)}
-            onClick={() => {
-              setOpen(false);
-              onRemove();
-            }}
-            style={{ ...item("remove", false), color: "var(--err)" }}
-          >
-            Delete folder
-          </button>
-        </div>
-      )}
+      <MoreButton menu={menu} itemKey={name} label={`Folder actions for ${name}`} small hidden />
     </div>
   );
 }
@@ -1476,93 +1431,6 @@ function varFact(name: string, setting: VarSetting | undefined): Fact {
       </span>,
     ];
   return [name, <span title={setting.value} style={mono}>{setting.value}</span>];
-}
-
-function SnippetMenu({ name, canDuplicate, onDuplicate, onDelete }: { name: string; canDuplicate: boolean; onDuplicate(): void; onDelete(): void }) {
-  const [open, setOpen] = useState(false);
-  const [hot, setHot] = useState<string | null>(null);
-  const ref = useRef<HTMLDivElement | null>(null);
-  const btnRef = useRef<HTMLButtonElement | null>(null);
-  const itemRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    itemRef.current?.focus();
-    const onDown = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && (ref.current?.getClientRects().length ?? 0) > 0) {
-        e.stopPropagation();
-        setOpen(false);
-        btnRef.current?.focus();
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey, true);
-    };
-  }, [open]);
-
-  return (
-    <div ref={ref} style={{ position: "relative", display: "flex", flex: "none" }}>
-      <button
-        ref={btnRef}
-        type="button"
-        aria-label={`More actions for ${name}`}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        style={{ ...pageBtn, width: 32, padding: 0, justifyContent: "center", background: open ? "var(--bg-raised)" : "var(--bg)", color: "var(--text-2)" }}
-      >
-        <DotsIcon />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          aria-label={`Actions for ${name}`}
-          onKeyDown={(e) => {
-            if (e.key === "Tab") {
-              e.preventDefault();
-              setOpen(false);
-              btnRef.current?.focus();
-            }
-          }}
-          style={{ position: "absolute", top: 36, left: 0, zIndex: 20, minWidth: 160, padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", boxSizing: "border-box" }}
-        >
-          {(
-            [
-              { id: "dup", label: "Duplicate", color: "var(--text)", disabled: !canDuplicate, title: canDuplicate ? undefined : "Review the AI change first: run it once or edit it", run: onDuplicate },
-              { id: "del", label: "Delete snippet", color: "var(--err)", disabled: false, title: undefined, run: onDelete },
-            ] as const
-          ).map((it, i) => (
-            <button
-              key={it.id}
-              ref={i === (canDuplicate ? 0 : 1) ? itemRef : undefined}
-              type="button"
-              role="menuitem"
-              disabled={it.disabled}
-              title={it.title}
-              onMouseEnter={() => setHot(it.id)}
-              onMouseLeave={() => setHot(null)}
-              onFocus={(e) => e.currentTarget.matches(":focus-visible") && setHot(it.id)}
-              onBlur={() => setHot(null)}
-              onClick={() => {
-                setOpen(false);
-                btnRef.current?.focus();
-                it.run();
-              }}
-              style={{ display: "flex", alignItems: "center", width: "100%", height: 28, padding: "0 10px", border: 0, borderRadius: 4, background: hot === it.id && !it.disabled ? "var(--sel)" : "transparent", color: it.color, opacity: it.disabled ? 0.45 : 1, textAlign: "left", cursor: it.disabled ? "default" : "pointer", fontSize: 13, outline: "none" }}
-            >
-              {it.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function CommandEditor({ value, onChange, labelledBy }: { value: string; onChange(v: string): void; labelledBy: string }) {

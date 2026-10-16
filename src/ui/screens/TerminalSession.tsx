@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import type { Host } from "../../api";
 import { termBus } from "../termBus";
 import type { PaneStage, SessionStatus } from "../termBus";
@@ -7,6 +7,8 @@ import { MONO } from "../mock";
 import { CloseIcon, CollapseIcon, DotsIcon, RefreshIcon } from "../icons";
 import { MAX_PANES, aggregate, dnd, equalShare, leaves, paneHost, paneStore, shape } from "../panes";
 import type { Layout, PaneSpec, Side, Zone } from "../panes";
+import { ItemMenu, useMenu } from "../Menu";
+import type { MenuEntry } from "../Menu";
 
 export { termBus };
 export type { SessionStatus };
@@ -14,118 +16,6 @@ export type { SessionStatus };
 export function encodingLabel(enc: string | undefined): string {
   const e = (enc || "utf-8").toLowerCase();
   return e === "iso-8859-1" ? "ISO-8859-1" : e === "windows-1252" ? "Windows-1252" : "UTF-8";
-}
-
-
-export interface MenuEntry {
-  label: string;
-  hint?: string;
-  disabled?: boolean;
-  /** Tooltip, e.g. why the entry is disabled. */
-  title?: string;
-  danger?: boolean;
-  onSelect(): void;
-}
-
-/** Small design-style popup menu. `null` entries render a separator. */
-export function PopupMenu({
-  label,
-  items,
-  style,
-  ignoreRef,
-  onClose,
-}: {
-  label: string;
-  items: (MenuEntry | null)[];
-  style: CSSProperties;
-  ignoreRef?: RefObject<HTMLElement | null>;
-  onClose(): void;
-}) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [active, setActive] = useState(-1);
-  const prevFocus = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  const enabled = items.flatMap((it, i) => (it && !it.disabled ? [i] : []));
-
-  useEffect(() => {
-    ref.current?.querySelector<HTMLButtonElement>("button:not([aria-disabled='true'])")?.focus();
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (ref.current?.contains(t) || ignoreRef?.current?.contains(t)) return;
-      onCloseRef.current();
-    };
-    const close = () => onCloseRef.current();
-    window.addEventListener("mousedown", onDown, true);
-    window.addEventListener("resize", close);
-    window.addEventListener("blur", close);
-    return () => {
-      window.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("blur", close);
-    };
-  }, [ignoreRef]);
-
-  const focusItem = (i: number) => {
-    setActive(i);
-    ref.current?.querySelector<HTMLButtonElement>(`[data-idx="${i}"]`)?.focus();
-  };
-
-  const onKeyDown = (e: ReactKeyboardEvent) => {
-    if (e.key === "Escape" || e.key === "Tab") {
-      e.preventDefault();
-      e.stopPropagation();
-      onClose();
-      prevFocus.current?.focus();
-      return;
-    }
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault();
-      if (enabled.length === 0) return;
-      const pos = enabled.indexOf(active);
-      const next = e.key === "ArrowDown" ? (pos + 1) % enabled.length : (pos <= 0 ? enabled.length : pos) - 1;
-      focusItem(enabled[next]);
-    }
-  };
-
-  return (
-    <div
-      ref={ref}
-      role="menu"
-      aria-label={label}
-      onKeyDown={onKeyDown}
-      onContextMenu={(e) => e.preventDefault()}
-      style={{ zIndex: 110, minWidth: 190, display: "flex", flexDirection: "column", padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", color: "var(--text)", fontSize: 13, boxSizing: "border-box", ...style }}
-    >
-      {items.map((it, i) =>
-        it ? (
-          <button
-            key={it.label}
-            type="button"
-            role="menuitem"
-            data-idx={i}
-            aria-disabled={it.disabled || undefined}
-            title={it.title}
-            onMouseEnter={() => !it.disabled && focusItem(i)}
-            onFocus={() => setActive(i)}
-            onClick={() => {
-              if (it.disabled) return;
-              onClose();
-              if (prevFocus.current?.isConnected) prevFocus.current.focus({ preventScroll: true });
-              it.onSelect();
-            }}
-            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 28, padding: "0 10px", border: 0, borderRadius: 4, outline: "none", background: active === i && !it.disabled ? "var(--sel)" : "transparent", color: it.disabled ? "var(--text-3)" : it.danger ? "var(--err)" : "var(--text)", fontSize: 13, textAlign: "left", whiteSpace: "nowrap", cursor: it.disabled ? "default" : "pointer" }}
-          >
-            <span>{it.label}</span>
-            {it.hint && <span style={{ fontSize: 12, color: "var(--text-3)" }}>{it.hint}</span>}
-          </button>
-        ) : (
-          <div key={`sep-${i}`} role="separator" style={{ height: 1, margin: "4px 6px", background: "var(--line)" }} />
-        ),
-      )}
-    </div>
-  );
 }
 
 const PANE_STATE: Record<PaneStage, string> = { connecting: "Connecting", connected: "Connected", reconnecting: "Reconnecting", failed: "Failed", ended: "Ended" };
@@ -304,6 +194,8 @@ function PaneHeader({
   onMouseDown,
   onToggleZoom,
   onMenu,
+  onMenuButton,
+  menuOpen,
   onClose,
 }: {
   index: number;
@@ -317,7 +209,9 @@ function PaneHeader({
   bell: number;
   onMouseDown(e: ReactMouseEvent): void;
   onToggleZoom(): void;
-  onMenu(x: number, y: number): void;
+  onMenu(e: ReactMouseEvent): void;
+  onMenuButton(el: HTMLElement): void;
+  menuOpen: boolean;
   onClose(): void;
 }) {
   const [flash, setFlash] = useState(false);
@@ -335,10 +229,7 @@ function PaneHeader({
       onDoubleClick={(e) => {
         if (!(e.target as HTMLElement).closest("button") && multi) onToggleZoom();
       }}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        onMenu(e.clientX, e.clientY);
-      }}
+      onContextMenu={onMenu}
       title={multi ? "Drag to move this pane. Double click to zoom." : "Drag into another tab to join it."}
       style={{ display: "flex", alignItems: "center", gap: 8, height: 26, flexShrink: 0, minWidth: 0, padding: "0 4px 0 12px", background: flash ? "var(--accent-tint)" : focused ? "var(--term-head)" : "var(--term-head-dim)", color: lit ? "var(--term-text)" : "var(--term-dim)", fontSize: 12, transition: "background 120ms ease-out" }}
     >
@@ -360,11 +251,9 @@ function PaneHeader({
         type="button"
         aria-label={`Actions for pane ${index + 1}`}
         aria-haspopup="menu"
+        aria-expanded={menuOpen}
         title="Pane actions"
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          onMenu(r.right - 190, r.bottom + 4);
-        }}
+        onClick={(e) => onMenuButton(e.currentTarget)}
         style={btn}
       >
         <DotsIcon size={13} />
@@ -415,7 +304,7 @@ export function TerminalSession({
 }) {
   const infos = useSyncExternalStore(paneStore.subscribe, paneStore.infos);
   const { hint } = useSyncExternalStore(dnd.subscribe, dnd.get);
-  const [paneMenu, setPaneMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const menu = useMenu<string>();
   const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -465,7 +354,7 @@ export function TerminalSession({
   const reconnect = (list: string[]) => list.forEach((id) => termBus.byId(id)?.reconnect());
   const splitEntry = (target: string, side: Side, label: string): MenuEntry => ({ label, disabled: full, title: full ? `Up to ${MAX_PANES} panes per tab` : undefined, onSelect: () => onSplit(target, side) });
 
-  const paneItems = (id: string): (MenuEntry | null)[] => [
+  const paneItems = (id: string): MenuEntry[] => [
     splitEntry(id, "right", "Split right"),
     splitEntry(id, "bottom", "Split down"),
     ...(multi
@@ -513,10 +402,15 @@ export function TerminalSession({
             onDragPane(e, id, ph.name);
           }}
           onToggleZoom={() => onZoom(zoomed === id ? null : id)}
-          onMenu={(x, y) => {
+          onMenu={(e) => {
             onFocus(id);
-            setPaneMenu({ id, x, y });
+            menu.openAt(e, id);
           }}
+          onMenuButton={(el) => {
+            onFocus(id);
+            menu.toggle(el, id);
+          }}
+          menuOpen={!!menu.open && menu.open.fromButton && menu.open.key === id}
           onClose={() => onClosePane(id)}
         />}
         <PaneSlot id={id} onFocus={() => onFocus(id)} />
@@ -562,14 +456,7 @@ export function TerminalSession({
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0, background: "var(--term-line)" }}>{zoomed ? renderPane(zoomed) : renderNode(layout, "")}</div>
 
-      {paneMenu && ids.includes(paneMenu.id) && (
-        <PopupMenu
-          label="Pane actions"
-          items={paneItems(paneMenu.id)}
-          onClose={() => setPaneMenu(null)}
-          style={{ position: "fixed", left: Math.max(4, Math.min(paneMenu.x, window.innerWidth - 204)), top: Math.max(4, Math.min(paneMenu.y, window.innerHeight - 280)) }}
-        />
-      )}
+      {menu.open && ids.includes(menu.open.key) && <ItemMenu menu={menu} label="Pane actions" items={paneItems} />}
 
       <footer style={{ display: "flex", alignItems: "center", gap: 16, height: 26, flex: "none", padding: "0 6px 0 12px", borderTop: "1px solid var(--line)", background: "var(--bg-side)", color: "var(--text-2)", fontSize: 12, boxSizing: "border-box", whiteSpace: "nowrap", overflow: "hidden" }}>
         <span title={`${focusHost.username}@${focusHost.hostname}${focusHost.port !== 22 ? `:${focusHost.port}` : ""}`} style={{ flex: "none", maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", fontFamily: MONO, fontSize: 11.5 }}>

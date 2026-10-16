@@ -5,6 +5,7 @@ import * as api from "../../api";
 import type { AuditEntry } from "../../api";
 import { MONO, errText } from "../mock";
 import { CheckIcon, ChevronIcon, CopyIcon } from "../icons";
+import { ItemMenu, MoreButton, useMenu } from "../Menu";
 import { Stable } from "../Stable";
 import { EmptyState, ListFilter, ScreenHeader, oneLine, pageBtn, smallBtn, th as baseTh, td } from "../kit";
 import { VisibleLine, visibleText } from "../overlays/Dialogs";
@@ -65,7 +66,7 @@ const PAGE = 100;
 const REFRESH_MS = 5000;
 const MAX_KEEP = 5000;
 const FIRST_BATCH = 150;
-const COLS = 6;
+const COLS = 7;
 
 // The header line is an inset shadow so it stays attached to the sticky header while scrolling.
 const th: CSSProperties = { ...baseTh, position: "sticky", top: 0, zIndex: 1, background: "var(--bg)", borderBottom: 0, boxShadow: "inset 0 -1px 0 var(--line)" };
@@ -215,6 +216,7 @@ export function LogsScreen() {
   const [decision, setDecision] = useState<DecisionFilter>("all");
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [limit, setLimit] = useState(PAGE);
+  const menu = useMenu<string>();
 
   useEffect(() => {
     alive.current = true;
@@ -374,6 +376,7 @@ export function LogsScreen() {
               <col />
               <col style={{ width: 108 }} />
               <col style={{ width: 88 }} />
+              <col style={{ width: 34 }} />
             </colgroup>
             <thead>
               <tr>
@@ -383,6 +386,7 @@ export function LogsScreen() {
                 <th style={th}>Command</th>
                 <th style={th}>Decision</th>
                 <th style={th}>Result</th>
+                <th style={{ ...th, padding: 0 }} aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
@@ -408,9 +412,14 @@ export function LogsScreen() {
                       </tr>
                     )}
                     <tr
+                      data-reveal=""
                       onClick={() => {
                         if (window.getSelection()?.toString()) return;
                         toggle(e.id);
+                      }}
+                      onContextMenu={(ev) => {
+                        if ((ev.target as HTMLElement).closest("[data-selectable]")) return;
+                        menu.openAt(ev, e.id);
                       }}
                       style={{ cursor: "pointer", background: expanded ? "var(--sel)" : undefined }}
                     >
@@ -445,6 +454,9 @@ export function LogsScreen() {
                       </td>
                       <td style={{ ...cell, ...joined }}><Decision decision={e.decision} sel={expanded} /></td>
                       <td style={{ ...cell, ...joined }}><Result e={e} /></td>
+                      <td onClick={(ev) => ev.stopPropagation()} style={{ ...cell, ...joined, padding: "7px 4px 0" }}>
+                        <MoreButton menu={menu} itemKey={e.id} small hidden={!expanded} label="More actions" />
+                      </td>
                     </tr>
                     {expanded && (
                       <tr style={{ background: "var(--sel)" }}>
@@ -462,6 +474,20 @@ export function LogsScreen() {
               })}
             </tbody>
           </table>
+          <ItemMenu
+            menu={menu}
+            label="Log entry actions"
+            items={(id) => {
+              const e = shown.find((x) => x.id === id);
+              if (!e) return [];
+              return [
+                { label: open.has(id) ? "Hide details" : "Show details", onSelect: () => toggle(id) },
+                null,
+                { label: "Copy command", onSelect: () => clipWrite(e.command).catch(() => {}) },
+                e.host_name ? { label: "Copy host name", onSelect: () => clipWrite(e.host_name).catch(() => {}) } : false,
+              ];
+            }}
+          />
           {filtered.length > shown.length && (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, paddingTop: 14 }}>
               <span style={{ color: "var(--text-2)" }}>Showing {shown.length} of {filtered.length}</span>

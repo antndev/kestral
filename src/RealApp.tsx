@@ -12,7 +12,7 @@ import { termBus, TerminalSession, type SessionStatus } from "./ui/screens/Termi
 import type { PaneStage } from "./ui/termBus";
 import { PanePool, type PoolPane } from "./ui/PanePool";
 import { beginDrag } from "./ui/drag";
-import type { ContextItem } from "./ui/ContextMenu";
+import type { MenuEntry } from "./ui/Menu";
 import {
   MAX_PANES,
   aggregate,
@@ -1145,33 +1145,38 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
 
   const tabStatus = (s: Session): Status => (s.kind === "terminal" && s.layout ? SESSION_TO_STATUS[aggregate(leaves(s.layout).map((id) => stages[id] ?? "connecting"))] : s.status);
 
-  function tabMenu(id: string): ContextItem[] {
+  function tabMenu(id: string): MenuEntry[] {
     const s = sessions.find((x) => x.tabId === id);
     if (!s) return [];
-    const items: ContextItem[] = [];
+    const items: MenuEntry[] = [];
     const cur = activeSession;
     const panes = s.layout ? leaves(s.layout) : [];
     if (s.kind === "terminal" && s.layout) {
-      items.push({ label: "Split right", onClick: () => splitPane(id, { side: "right" }) });
-      items.push({ label: "Split down", onClick: () => splitPane(id, { side: "bottom" }) });
+      items.push({ label: "Split right", onSelect: () => void splitPane(id, { side: "right" }) });
+      items.push({ label: "Split down", onSelect: () => void splitPane(id, { side: "bottom" }) });
       if (panes.length > 1) {
-        items.push({ label: s.broadcast ? "Stop broadcasting" : "Broadcast input to all panes", onClick: () => patchTab(id, () => ({ broadcast: !s.broadcast })) });
-        items.push({ label: "Even out pane sizes", onClick: () => patchTab(id, (x) => (x.layout ? { layout: equalize(x.layout) } : null)) });
+        items.push({ label: s.broadcast ? "Stop broadcasting" : "Broadcast input to all panes", onSelect: () => patchTab(id, () => ({ broadcast: !s.broadcast })) });
+        items.push({ label: "Even out pane sizes", onSelect: () => patchTab(id, (x) => (x.layout ? { layout: equalize(x.layout) } : null)) });
       }
-      items.push({ label: "Open SFTP", onClick: () => openSftp(tabHost(s)) });
-      items.push({ label: panes.length > 1 ? "Reconnect all panes" : "Reconnect", onClick: () => panes.forEach((p) => termBus.byId(p)?.reconnect()) });
-      items.push({ label: "Clear scrollback", onClick: () => s.focus && termBus.byId(s.focus)?.clear?.() });
+      items.push({ label: "Open SFTP", onSelect: () => openSftp(tabHost(s)) });
+      items.push({ label: panes.length > 1 ? "Reconnect all panes" : "Reconnect", onSelect: () => panes.forEach((p) => termBus.byId(p)?.reconnect()) });
+      items.push({
+        label: "Clear scrollback",
+        onSelect: () => {
+          if (s.focus) termBus.byId(s.focus)?.clear?.();
+        },
+      });
     }
-    items.push({ label: s.kind === "sftp" ? `Terminal to ${tabHost(s).name}` : `New tab to ${tabHost(s).name}`, onClick: () => openTerminal(tabHost(s), undefined, s.focus ? termBus.byId(s.focus)?.password?.() : null) });
+    items.push({ label: s.kind === "sftp" ? `Terminal to ${tabHost(s).name}` : `New tab to ${tabHost(s).name}`, onSelect: () => openTerminal(tabHost(s), undefined, s.focus ? termBus.byId(s.focus)?.password?.() : null) });
     if (cur && cur.tabId !== id && cur.layout && s.layout && leaves(cur.layout).length + leaves(s.layout).length <= MAX_PANES) {
-      items.push({ label: "Move into current tab", onClick: () => mergeTab(id, cur.tabId, null, null) });
+      items.push({ label: "Move into current tab", onSelect: () => mergeTab(id, cur.tabId, null, null) });
     }
-    items.push({ label: "Close tab", danger: true, onClick: () => closeTab(id) });
+    items.push({ label: "Close tab", danger: true, onSelect: () => closeTab(id) });
     if (sessions.length > 1) {
       items.push({
         label: "Close other tabs",
         danger: true,
-        onClick: () => {
+        onSelect: () => {
           const others = sessionsRef.current.filter((x) => x.tabId !== id);
           const reasons = [...new Set(others.map((x) => sftpUnsaved.current.get(x.tabId)).filter((r): r is string => !!r))];
           const closeAll = () => others.forEach((x) => dropTab(x.tabId));

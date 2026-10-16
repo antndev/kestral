@@ -84,7 +84,7 @@ input[type="checkbox"]::before {
   background: var(--text);
   clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
   transform: scale(0);
-  transition: transform 80ms ease-out;
+  transition: transform calc(80ms * var(--anim-scale, 1)) ease-out;
 }
 input[type="checkbox"]:checked {
   background: var(--btn);
@@ -239,7 +239,7 @@ input[type="checkbox"]:disabled {
   animation-delay: calc(336ms * var(--anim-scale, 1));
 }
 button {
-  transition: transform 160ms var(--ease-out);
+  transition: transform calc(160ms * var(--anim-scale, 1)) var(--ease-out);
 }
 button:active:not(:disabled):not([data-no-press]) {
   transform: scale(0.985);
@@ -254,7 +254,7 @@ button:active:not(:disabled):not([data-no-press]) {
 }
 [data-icon-btn] {
   background: transparent;
-  transition: background 120ms, color 120ms, transform 160ms var(--ease-out);
+  transition: background calc(120ms * var(--anim-scale, 1)), color calc(120ms * var(--anim-scale, 1)), transform calc(160ms * var(--anim-scale, 1)) var(--ease-out);
 }
 [data-icon-btn]:hover:not(:disabled) {
   background: var(--hover);
@@ -262,7 +262,7 @@ button:active:not(:disabled):not([data-no-press]) {
 }
 [data-nav] {
   background: transparent;
-  transition: background 120ms, transform 160ms var(--ease-out);
+  transition: background calc(120ms * var(--anim-scale, 1)), transform calc(160ms * var(--anim-scale, 1)) var(--ease-out);
 }
 button[data-nav]:active:not(:disabled):not([data-no-press]) {
   transform: scale(0.995);
@@ -283,9 +283,7 @@ button[data-nav]:active:not(:disabled):not([data-no-press]) {
 
 /* Animation speed from Settings: scales CSS transitions only, and only when it
    differs from normal. Elements marked data-no-anim-scale opt out. */
-html[data-anim-scaled] *:not([data-no-anim-scale]),
-html[data-anim-scaled] *:not([data-no-anim-scale])::before,
-html[data-anim-scaled] *:not([data-no-anim-scale])::after {
+html[data-anim-scaled] [style*="transition"]:not([data-no-anim-scale]) {
   transition-duration: calc(160ms * var(--anim-scale, 1)) !important;
 }
 
@@ -294,4 +292,14 @@ html[data-anim-scaled] *:not([data-no-anim-scale])::after {
 input[type="password"]::-ms-reveal,
 input[type="password"]::-ms-clear {
   display: none;
+}
+
+/* Row "…" buttons show on hover or keyboard focus of their row, and while their menu is open. */
+[data-hover-only] {
+  opacity: 0;
+}
+[data-reveal]:hover [data-hover-only],
+[data-reveal]:focus-within [data-hover-only],
+[data-hover-only][aria-expanded="true"] {
+  opacity: 1;
 }

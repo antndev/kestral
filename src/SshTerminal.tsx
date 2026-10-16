@@ -9,8 +9,8 @@ import { resolveTerminalTheme as buildTheme, toneOf, type Tone } from "./lib/ter
 import { termBus } from "./ui/termBus";
 import { installDisposeGuard, oscLinkHandler } from "./lib/xtermGuard";
 import type { PaneInput, PaneStage } from "./ui/termBus";
-import { PopupMenu } from "./ui/screens/TerminalSession";
-import type { MenuEntry } from "./ui/screens/TerminalSession";
+import { Menu } from "./ui/Menu";
+import type { MenuEntry } from "./ui/Menu";
 import { CheckIcon, WarningIcon } from "./ui/icons";
 import { IS_MAC, KEYS, errText, termFontStack } from "./ui/mock";
 import { Terminal } from "@xterm/xterm";
@@ -1015,14 +1015,7 @@ export function SshTerminal(props: SshTerminalProps) {
         </div>
       )}
 
-      {menu && (
-        <PopupMenu
-          label="Terminal"
-          items={menuItems}
-          onClose={() => setMenu(null)}
-          style={{ position: "fixed", left: Math.max(4, Math.min(menu.x, window.innerWidth - 204)), top: Math.max(4, Math.min(menu.y, window.innerHeight - 150)) }}
-        />
-      )}
+      {menu && <Menu anchor={menu} label="Terminal" items={menuItems} onClose={() => setMenu(null)} />}
     </div>
   );
 }

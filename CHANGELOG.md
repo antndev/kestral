@@ -3,6 +3,18 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.16 - 2026-10-16
+
+### Changed
+- Menus work the same everywhere: right click a host, snippet, port forward, key, password, known host or log entry for its actions, or use its "…" button. Both show the same actions, in the same order, with Delete last in red.
+- Port forwarding moved Delete into the "…" menu. The identity, password and known host tables use a "…" per row instead of separate edit and delete buttons.
+- Terminal tabs, terminal panes and SFTP use the same menu, so they look and behave like the rest of the app.
+
+### Fixed
+- Menus no longer fly in from the top left, which happened with a changed animation speed or while the details pane slid in.
+- A changed animation speed no longer animates layout changes that should be instant.
+- A second click on a terminal pane's "…" closes its menu instead of opening it again.
+
 ## 0.2.15 - 2026-10-12
 
 ### Fixed

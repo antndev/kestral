@@ -6,11 +6,11 @@ import type { Host, HostKeyChanged, KnownHostEntry } from "../../api";
 import { IS_MAC, MONO, errText } from "../mock";
 import { CheckIcon, TrashIcon, WarningIcon } from "../icons";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
+import { ItemMenu, MoreButton, useMenu } from "../Menu";
 import { Stable } from "../Stable";
 import { EmptyState, ListFilter, ScreenHeader, errLine, pageBtn, smallBtn, srOnly, td, th } from "../kit";
 
 const dangerOutlineBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--err)", background: "transparent", color: "var(--err)" };
-const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer" };
 const checkbox: CSSProperties = { width: 14, height: 14, margin: 0, accentColor: "var(--accent)", cursor: "pointer" };
 
 function disabledLook(disabled: boolean): CSSProperties {
@@ -202,6 +202,7 @@ export function KnownHostsScreen(p: {
   const [transfer, setTransfer] = useState<"" | "import" | "export">("");
   const [confirm, setConfirm] = useState<KnownHostEntry[] | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  const menu = useMenu<string>();
   const copyTimer = useRef<number | undefined>(undefined);
   const selectAllRef = useRef<HTMLInputElement>(null);
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
@@ -517,7 +518,7 @@ export function KnownHostsScreen(p: {
                 const secondaryParts = matched ? addresses : e.hashed ? [`${e.hosts.slice(0, 14)}…`] : addresses.slice(1);
                 const secondary = [...new Set(secondaryParts)].filter((a) => a !== primary).join(" · ");
                 return (
-                  <tr key={rk} style={{ background: checked ? "var(--sel)" : "transparent" }}>
+                  <tr key={rk} data-reveal="" onContextMenu={(ev) => menu.openAt(ev, rk)} style={{ background: checked ? "var(--sel)" : "transparent" }}>
                     <td style={{ ...td, padding: "0 0 0 12px" }}>
                       <input type="checkbox" aria-label={`Select ${shownName(e)}`} checked={checked} onChange={() => toggle(e)} style={checkbox} />
                     </td>
@@ -547,7 +548,7 @@ export function KnownHostsScreen(p: {
                       </button>
                     </td>
                     <td style={{ ...td, padding: "0 8px" }}>
-                      <button type="button" aria-label={`Remove ${shownName(e)}`} title="Remove" onClick={() => setConfirm([e])} style={iconBtn}><TrashIcon /></button>
+                      <MoreButton menu={menu} itemKey={rk} small hidden={!checked} label={`More actions for ${shownName(e)}`} />
                     </td>
                   </tr>
                 );
@@ -555,6 +556,14 @@ export function KnownHostsScreen(p: {
             </tbody>
           </table>
           {visible.length === 0 && <p style={{ margin: "16px 12px", color: "var(--text-2)" }}>No entries match “{filter.trim()}”.</p>}
+          <ItemMenu
+            menu={menu}
+            label="Known host actions"
+            items={(k) => {
+              const e = visible.find((x) => rowKey(x) === k);
+              return e ? [{ label: "Copy fingerprint", onSelect: () => copyFingerprint(e) }, null, { label: "Remove…", danger: true, onSelect: () => setConfirm([e]) }] : [];
+            }}
+          />
         </div>
       )}
 

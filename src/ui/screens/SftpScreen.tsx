@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -27,6 +27,8 @@ import {
   WarningIcon,
 } from "../icons";
 import { Stable } from "../Stable";
+import { Menu } from "../Menu";
+import type { MenuAnchor, MenuEntry } from "../Menu";
 
 // ---------------------------------------------------------------- icons
 
@@ -1011,120 +1013,6 @@ function Btn({
   );
 }
 
-type MenuEntry = { label: string; onSelect(): void; disabled?: boolean; title?: string; danger?: boolean; hint?: string } | null;
-
-function MenuButton({ item, onClose }: { item: Exclude<MenuEntry, null>; onClose(): void }) {
-  const [hover, setHover] = useState(false);
-  const off = !!item.disabled;
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      aria-disabled={off || undefined}
-      title={item.title ?? item.label}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      onFocus={() => setHover(true)}
-      onBlur={() => setHover(false)}
-      onClick={() => {
-        if (off) return;
-        onClose();
-        item.onSelect();
-      }}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-        height: 28,
-        padding: "0 10px",
-        border: 0,
-        borderRadius: 4,
-        background: hover && !off ? "var(--sel)" : "transparent",
-        color: off ? "var(--text-3)" : item.danger ? "var(--err)" : "var(--text)",
-        fontSize: 12.5,
-        textAlign: "left",
-        cursor: off ? "default" : "pointer",
-        outline: "none",
-        whiteSpace: "nowrap",
-        width: "100%",
-        boxSizing: "border-box",
-      }}
-    >
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{item.label}</span>
-      {item.hint && <span style={{ flex: "none", fontSize: 11.5, color: "var(--text-3)" }}>{item.hint}</span>}
-    </button>
-  );
-}
-
-function Menu({ x, y, items, onClose }: { x: number; y: number; items: MenuEntry[]; onClose(): void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: x, top: y });
-  useEffect(() => {
-    const prev = document.activeElement as HTMLElement | null;
-    return () => {
-      requestAnimationFrame(() => {
-        const a = document.activeElement;
-        if ((!a || a === document.body || !a.isConnected) && prev?.isConnected) prev.focus({ preventScroll: true });
-      });
-    };
-  }, []);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4));
-    const top = y + r.height > window.innerHeight - 4 ? Math.max(4, y - r.height) : y;
-    setPos({ left, top });
-    el.querySelector<HTMLButtonElement>("button:not([aria-disabled])")?.focus();
-  }, [x, y]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
-  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-    e.preventDefault();
-    const btns = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:not([aria-disabled])") ?? [])];
-    if (btns.length === 0) return;
-    const i = btns.indexOf(document.activeElement as HTMLButtonElement);
-    const n = e.key === "ArrowDown" ? (i + 1) % btns.length : (i - 1 + btns.length) % btns.length;
-    btns[n].focus();
-  };
-  return (
-    <>
-      <div
-        onMouseDown={onClose}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          onClose();
-        }}
-        style={{ position: "fixed", inset: 0, zIndex: 100 }}
-      />
-      <div
-        ref={ref}
-        role="menu"
-        onKeyDown={onKeyDown}
-        style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 101, minWidth: 200, maxWidth: 360, display: "flex", flexDirection: "column", padding: 4, borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)" }}
-      >
-        {items.map((it, i) =>
-          it === null ? (
-            <div key={`sep-${i}`} role="separator" style={{ height: 1, margin: "4px 2px", background: "var(--line-soft)" }} />
-          ) : (
-            <MenuButton key={`${it.label}-${i}`} item={it} onClose={onClose} />
-          ),
-        )}
-      </div>
-    </>
-  );
-}
-
 interface ChoiceSpec {
   title: string;
   message: ReactNode;
@@ -1346,8 +1234,8 @@ interface PaneHandlers {
   onFocus(): void;
   onRowMouseDown(entry: FileEntry, ev: ReactMouseEvent): void;
   onRowClick(entry: FileEntry, ev: ReactMouseEvent): void;
-  onRowMenu(entry: FileEntry, x: number, y: number): void;
-  onBackgroundMenu(x: number, y: number): void;
+  onRowMenu(entry: FileEntry, anchor: MenuAnchor): void;
+  onBackgroundMenu(anchor: MenuAnchor): void;
   onOpen(entry: FileEntry): void;
   onDelete(entries: FileEntry[]): void;
   onCloseEditor(): void;
@@ -1503,10 +1391,10 @@ function PaneView({
       ev.preventDefault();
       const first = sel[0];
       const r = first ? rowRefs.current.get(first.path)?.getBoundingClientRect() : null;
-      if (first && r) h.onRowMenu(first, r.left + 40, r.bottom);
+      if (first && r) h.onRowMenu(first, { x: r.left + 40, y: r.bottom });
       else {
         const box = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-        h.onBackgroundMenu(box.left + 40, box.top + 40);
+        h.onBackgroundMenu({ x: box.left + 40, y: box.top + 40 });
       }
     }
   };
@@ -1633,7 +1521,7 @@ function PaneView({
         onContextMenu={(ev) => {
           if ((ev.target as HTMLElement).closest("tr[data-row], input")) return;
           ev.preventDefault();
-          h.onBackgroundMenu(ev.clientX, ev.clientY);
+          h.onBackgroundMenu({ x: ev.clientX, y: ev.clientY });
         }}
         style={{ position: "relative", flex: 1, minHeight: 0, overflow: "auto", outline: "none", boxShadow: (dragTarget && !dragTarget.dir) || listFocus ? "inset 0 0 0 2px var(--focus)" : undefined }}
       >
@@ -1713,7 +1601,7 @@ function PaneView({
                   onContextMenu={(ev) => {
                     if ((ev.target as HTMLElement).closest("input")) return;
                     ev.preventDefault();
-                    h.onRowMenu(e, ev.clientX, ev.clientY);
+                    h.onRowMenu(e, { x: ev.clientX, y: ev.clientY });
                   }}
                   style={{ background: isDropDir ? "var(--accent-tint)" : isSel ? "var(--sel)" : hoverPath === e.path ? "var(--bg-sunken)" : undefined, boxShadow: isDropDir ? "inset 0 0 0 1px var(--focus)" : undefined, cursor: "default" }}
                 >
@@ -1766,8 +1654,7 @@ function PaneView({
                       title="Actions"
                       onClick={(ev) => {
                         ev.stopPropagation();
-                        const r = ev.currentTarget.getBoundingClientRect();
-                        h.onRowMenu(e, r.left, r.bottom + 2);
+                        h.onRowMenu(e, { el: ev.currentTarget });
                       }}
                       style={{ ...smallIconBtn, visibility: isSel || hoverPath === e.path ? "visible" : "hidden" }}
                     >
@@ -1986,7 +1873,7 @@ export function SftpScreen({
 }) {
   const { sftpShowHidden, setSftpShowHidden, sftpAutoRefresh } = usePrefs();
   const [focus, setFocus] = useState<Side>("right");
-  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuEntry[] } | null>(null);
+  const [menu, setMenu] = useState<{ anchor: MenuAnchor; label: string; items: MenuEntry[] } | null>(null);
   const [dialog, setDialog] = useState<DialogSpec | null>(null);
   const [drag, setDrag] = useState<DragGhost | null>(null);
   const [osDrop, setOsDrop] = useState<OsDrop | null>(null);
@@ -2704,7 +2591,9 @@ export function SftpScreen({
     return { label, disabled: !!why, title: why ?? `Into ${dst.cwd}`, onSelect: () => void transferAcross(side, items) };
   };
 
-  const openRowMenu = (side: Side, entry: FileEntry, x: number, y: number) => {
+  const showMenu = (anchor: MenuAnchor, label: string, items: MenuEntry[]) => setMenu((m) => (m && "el" in m.anchor && "el" in anchor && m.anchor.el === anchor.el ? null : { anchor, label, items }));
+
+  const openRowMenu = (side: Side, entry: FileEntry, anchor: MenuAnchor) => {
     const p = panesRef.current[side];
     setFocus(side);
     const multi = p.selected.has(entry.path) && p.selected.size > 1;
@@ -2736,10 +2625,10 @@ export function SftpScreen({
       entries.push({ label: "Copy path", onSelect: () => copy(side, entry.path, "Path copied") });
       entries.push(null, { label: "Delete", danger: true, hint: "Del", onSelect: () => void askDelete(side, items) });
     }
-    setMenu({ x, y, items: entries });
+    showMenu(anchor, "File actions", entries);
   };
 
-  const openBackgroundMenu = (side: Side, x: number, y: number) => {
+  const openBackgroundMenu = (side: Side, anchor: MenuAnchor) => {
     const p = panesRef.current[side];
     setFocus(side);
     p.clearSelection();
@@ -2755,7 +2644,7 @@ export function SftpScreen({
       { label: "Select all", hint: `${MOD}+A`, disabled: p.visible.length === 0, title: p.visible.length === 0 ? "This folder is empty" : undefined, onSelect: () => p.selectAll() },
       { label: "Copy folder path", onSelect: () => copy(side, p.cwd, "Folder path copied") },
     );
-    setMenu({ x, y, items: entries });
+    showMenu(anchor, "Folder actions", entries);
   };
 
   const closeEditor = (side: Side) => {
@@ -2783,8 +2672,8 @@ export function SftpScreen({
       if ((ev.target as HTMLElement).closest("input, button")) return;
       panesRef.current[side].clickRow(entry, ev.ctrlKey || ev.metaKey, ev.shiftKey);
     },
-    onRowMenu: (entry, x, y) => openRowMenu(side, entry, x, y),
-    onBackgroundMenu: (x, y) => openBackgroundMenu(side, x, y),
+    onRowMenu: (entry, anchor) => openRowMenu(side, entry, anchor),
+    onBackgroundMenu: (anchor) => openBackgroundMenu(side, anchor),
     onOpen: (entry) => void openEntry(side, entry),
     onDelete: (items) => void askDelete(side, items),
     onCloseEditor: () => closeEditor(side),
@@ -2808,7 +2697,7 @@ export function SftpScreen({
 
   const openUploadMenu = (ev: ReactMouseEvent<HTMLButtonElement>) => {
     if (!remoteSide) return;
-    const r = ev.currentTarget.getBoundingClientRect();
+    const el = ev.currentTarget;
     const target = remoteSide;
     const items: MenuEntry[] = [];
     if (localSide) {
@@ -2821,7 +2710,7 @@ export function SftpScreen({
       items.push(null);
     }
     items.push({ label: "Files…", onSelect: () => void uploadPicked(target, "files") }, { label: "Folders…", onSelect: () => void uploadPicked(target, "folders") });
-    setMenu({ x: r.left, y: r.bottom + 4, items });
+    showMenu({ el }, "Upload", items);
   };
 
   const download = () => {
@@ -2977,7 +2866,7 @@ export function SftpScreen({
           {osDrop.note}
         </div>
       )}
-      {menu && <Menu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {menu && <Menu anchor={menu.anchor} label={menu.label} items={menu.items} onClose={() => setMenu(null)} />}
       {dialog?.kind === "choice" && <ChoiceDialog spec={dialog} onClose={() => setDialog(null)} />}
       {dialog?.kind === "delete" && (
         <ConfirmDialog title={dialog.title} message={dialog.message} confirmLabel={dialog.confirmLabel} danger onConfirm={dialog.onConfirm} onClose={() => setDialog(null)} />

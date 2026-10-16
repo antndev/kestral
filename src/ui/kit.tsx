@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef } from "react";
-import type { CSSProperties, KeyboardEvent, ReactNode, Ref } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, Ref } from "react";
 import { SearchIcon } from "./icons";
 import { MONO } from "./mock";
 
@@ -85,6 +85,7 @@ export function ListItem({
   onSelect,
   onOpen,
   onKeyDown,
+  onMenu,
   buttonRef,
 }: {
   icon: ReactNode;
@@ -96,6 +97,7 @@ export function ListItem({
   onSelect(): void;
   onOpen?(): void;
   onKeyDown?(e: KeyboardEvent<HTMLButtonElement>): void;
+  onMenu?(e: ReactMouseEvent<HTMLButtonElement>): void;
   buttonRef?: Ref<HTMLButtonElement>;
 }) {
   return (
@@ -106,6 +108,7 @@ export function ListItem({
         aria-current={selected}
         onClick={onSelect}
         onDoubleClick={onOpen}
+        onContextMenu={onMenu}
         onKeyDown={(e) => {
           if (e.key === "Enter" && onOpen) {
             e.preventDefault();
