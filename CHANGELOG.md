@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.22 - 2026-10-16
+
+### Fixed
+- On the lock screen the app name lines up with the bird.
+
 ## 0.2.21 - 2026-10-16
 
 ### Changed

@@ -57,7 +57,7 @@ function Brand() {
   return (
     <span data-tauri-drag-region style={{ display: "flex", alignItems: "center", gap: 8, flexDirection: IS_MAC ? "row-reverse" : "row" }}>
       <span data-tauri-drag-region aria-hidden="true" style={{ width: 17, height: 18, flex: "none", background: "var(--text-2)", WebkitMask: `url(${bird}) center / contain no-repeat`, mask: `url(${bird}) center / contain no-repeat` }} />
-      <span data-tauri-drag-region style={{ fontSize: 13, fontWeight: 600, color: "var(--text-2)" }}>Kestral</span>
+      <span data-tauri-drag-region style={{ position: "relative", top: -2, fontSize: 13, fontWeight: 600, color: "var(--text-2)" }}>Kestral</span>
     </span>
   );
 }
