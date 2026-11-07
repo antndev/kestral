@@ -515,7 +515,7 @@ export function HostKeyDialog({
           </dd>
         </dl>
         {aiChanged && (
-          <p role="alert" style={{ margin: 0, fontSize: 12.5, color: "var(--warn)" }}>The AI created or changed this host. Make sure this is the server you expect before you trust it.</p>
+          <p role="alert" style={{ margin: 0, fontSize: 12, color: "var(--warn)" }}>The AI created or changed this host. Make sure this is the server you expect before you trust it.</p>
         )}
         <div>
           <p style={{ margin: "0 0 6px", fontSize: 12, color: "var(--text-2)" }}>Check it on the server with this command</p>
@@ -627,7 +627,7 @@ export function HostKeyChangedDialog({
             <code style={{ fontFamily: MONO, fontSize: 12, color: "var(--err)", wordBreak: "break-all" }}>{keyLabel(info.key_type)} {info.fingerprint}</code>
           </dd>
         </dl>
-        <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-2)" }}>If you did not expect this, cancel and ask whoever runs the server.</p>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--text-2)" }}>If you did not expect this, cancel and ask whoever runs the server.</p>
         <p role="alert" style={{ ...errLine, minHeight: 17 }}>{err}</p>
         <Actions>
           {[
@@ -667,7 +667,7 @@ export function VisibleLine({ text }: { text: string }) {
       if (plain) parts.push(plain);
       plain = "";
       parts.push(
-        <span key={parts.length} style={{ padding: "0 3px", margin: "0 1px", borderRadius: 3, background: "color-mix(in srgb, var(--warn) 22%, transparent)", color: "var(--warn)", fontSize: 10.5 }}>
+        <span key={parts.length} style={{ padding: "0 3px", margin: "0 1px", borderRadius: 3, background: "color-mix(in srgb, var(--warn) 22%, transparent)", color: "var(--warn)", fontSize: 11 }}>
           {hiddenLabel(c)}
         </span>,
       );
@@ -733,7 +733,7 @@ export function CommandPreview({ text, onReviewed }: { text: string; onReviewed?
           ))}
         </pre>
         {overflow && !seen && (
-          <span aria-hidden="true" style={{ position: "absolute", left: 1, right: 1, bottom: 1, display: "flex", justifyContent: "center", padding: "14px 0 6px", borderRadius: "0 0 6px 6px", background: "linear-gradient(transparent, var(--term-bg) 70%)", color: "var(--warn)", fontSize: 11.5, pointerEvents: "none" }}>
+          <span aria-hidden="true" style={{ position: "absolute", left: 1, right: 1, bottom: 1, display: "flex", justifyContent: "center", padding: "14px 0 6px", borderRadius: "0 0 6px 6px", background: "linear-gradient(transparent, var(--term-bg) 70%)", color: "var(--warn)", fontSize: 11, pointerEvents: "none" }}>
             Scroll to the end to review all of it
           </span>
         )}

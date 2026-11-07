@@ -167,7 +167,7 @@ function DropZone({ zone, ok }: { zone: Zone; ok: boolean }) {
           background: ok ? "color-mix(in srgb, var(--accent) 22%, transparent)" : "color-mix(in srgb, var(--err) 16%, transparent)",
           color: "var(--term-text)",
           fontSize: 12,
-          fontWeight: 600,
+          fontWeight: 500,
           textAlign: "center",
           boxSizing: "border-box",
           opacity: shown ? 1 : 0,
@@ -231,7 +231,7 @@ function PaneHeader({
       }}
       onContextMenu={onMenu}
       title={multi ? "Drag to move this pane. Double click to zoom." : "Drag into another tab to join it."}
-      style={{ display: "flex", alignItems: "center", gap: 8, height: 26, flexShrink: 0, minWidth: 0, padding: "0 4px 0 12px", background: flash ? "var(--accent-tint)" : focused ? "var(--term-head)" : "var(--term-head-dim)", color: lit ? "var(--term-text)" : "var(--term-dim)", fontSize: 12, transition: "background 120ms ease-out" }}
+      style={{ display: "flex", alignItems: "center", gap: 8, height: 28, flexShrink: 0, minWidth: 0, padding: "0 4px 0 12px", background: flash ? "var(--accent-tint)" : focused ? "var(--term-head)" : "var(--term-head-dim)", color: lit ? "var(--term-text)" : "var(--term-dim)", fontSize: 12, transition: "background 120ms ease-out" }}
     >
       {stage !== "connected" && <span aria-hidden="true" style={{ width: 7, height: 7, flex: "none", borderRadius: "50%", boxSizing: "border-box", ...paneDot(stage) }} />}
       <span title={name} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: stage !== "connected" ? "var(--term-text)" : undefined }}>
@@ -244,7 +244,7 @@ function PaneHeader({
       {zoomed && (
         <button type="button" aria-label="Show all panes" title="Show all panes" onClick={onToggleZoom} style={{ ...btn, width: "auto", gap: 4, padding: "0 6px", color: "var(--term-text)" }}>
           <CollapseIcon />
-          <span style={{ fontSize: 11.5 }}>Zoomed</span>
+          <span style={{ fontSize: 11 }}>Zoomed</span>
         </button>
       )}
       <button
@@ -458,8 +458,8 @@ export function TerminalSession({
 
       {menu.open && ids.includes(menu.open.key) && <ItemMenu menu={menu} label="Pane actions" items={paneItems} />}
 
-      <footer style={{ display: "flex", alignItems: "center", gap: 16, height: 26, flex: "none", padding: "0 6px 0 12px", borderTop: "1px solid var(--line)", background: "var(--bg-side)", color: "var(--text-2)", fontSize: 12, boxSizing: "border-box", whiteSpace: "nowrap", overflow: "hidden" }}>
-        <span title={`${focusHost.username}@${focusHost.hostname}${focusHost.port !== 22 ? `:${focusHost.port}` : ""}`} style={{ flex: "none", maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", fontFamily: MONO, fontSize: 11.5 }}>
+      <footer style={{ display: "flex", alignItems: "center", gap: 16, height: 28, flex: "none", padding: "0 6px 0 12px", borderTop: "1px solid var(--line)", background: "var(--bg-side)", color: "var(--text-2)", fontSize: 12, boxSizing: "border-box", whiteSpace: "nowrap", overflow: "hidden" }}>
+        <span title={`${focusHost.username}@${focusHost.hostname}${focusHost.port !== 22 ? `:${focusHost.port}` : ""}`} style={{ flex: "none", maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", fontFamily: MONO, fontSize: 11 }}>
           {focusHost.username}@{focusHost.hostname}
           {focusHost.port !== 22 ? `:${focusHost.port}` : ""}
         </span>

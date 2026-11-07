@@ -101,9 +101,9 @@ function parse(src: string): Block[] {
 }
 
 const codeStyle: CSSProperties = { padding: "1px 4px", borderRadius: 4, background: "var(--bg-raised)", color: "var(--text)", fontFamily: MONO, fontSize: "0.92em" };
-const strongStyle: CSSProperties = { fontWeight: 600, color: "var(--text)" };
-const majorHead: CSSProperties = { fontSize: "1.05em", fontWeight: 600, color: "var(--text)" };
-const minorHead: CSSProperties = { fontSize: "0.92em", fontWeight: 600, color: "var(--text-3)" };
+const strongStyle: CSSProperties = { fontWeight: 500, color: "var(--text)" };
+const majorHead: CSSProperties = { fontSize: "1.05em", fontWeight: 500, color: "var(--text)" };
+const minorHead: CSSProperties = { fontSize: "0.92em", fontWeight: 500, color: "var(--text-3)" };
 
 function Link({ href, children }: { href: string; children: ReactNode }) {
   if (!/^(https?:|mailto:)/i.test(href)) return <>{children}</>;

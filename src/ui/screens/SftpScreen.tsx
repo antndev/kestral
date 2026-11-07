@@ -64,17 +64,17 @@ const toolBtn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, 
 const iconBtn: CSSProperties = { ...toolBtn, width: 28, padding: 0, justifyContent: "center" };
 const primaryBtn: CSSProperties = { ...toolBtn, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
 const ghostBtn: CSSProperties = { height: 24, padding: "0 8px", border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", fontSize: 12, cursor: "pointer" };
-const smallIconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer" };
+const smallIconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer" };
 // Sticky header cells lose collapsed borders while scrolling, so the bottom rule is an inset shadow.
 const th: CSSProperties = { position: "sticky", top: 0, zIndex: 1, height: 28, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", boxShadow: "inset 0 -1px 0 var(--line)", background: "var(--bg)", whiteSpace: "nowrap", overflow: "hidden" };
 const td: CSSProperties = { padding: "0 12px", color: "var(--text-2)", borderBottom: "1px solid var(--line-soft)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-const nameCell: CSSProperties = { height: 30, padding: "0 12px", borderBottom: "1px solid var(--line-soft)" };
+const nameCell: CSSProperties = { height: 32, padding: "0 12px", borderBottom: "1px solid var(--line-soft)" };
 const miniInput: CSSProperties = { flex: 1, minWidth: 0, height: 28, padding: "0 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontFamily: MONO, fontSize: 12, boxSizing: "border-box" };
 const selectStyle: CSSProperties = { height: 28, maxWidth: 180, padding: "0 6px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", fontSize: 12, fontWeight: 500 };
-const transferRow: CSSProperties = { display: "grid", gridTemplateColumns: "16px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 24px", alignItems: "center", gap: 12, height: 34, padding: "0 12px", borderTop: "1px solid var(--line-soft)", fontSize: 12.5 };
+const transferRow: CSSProperties = { display: "grid", gridTemplateColumns: "16px minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1.5fr) 110px 24px", alignItems: "center", gap: 12, height: 36, padding: "0 12px", borderTop: "1px solid var(--line-soft)", fontSize: 12 };
 const ellipsis: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
-const inlineInput: CSSProperties = { flex: 1, minWidth: 0, height: 22, padding: "0 6px", border: "1px solid var(--focus)", borderRadius: 4, background: "var(--bg)", color: "var(--text)", fontSize: 12.5, outline: "none", boxSizing: "border-box" };
+const inlineInput: CSSProperties = { flex: 1, minWidth: 0, height: 24, padding: "0 6px", border: "1px solid var(--focus)", borderRadius: 4, background: "var(--bg)", color: "var(--text)", fontSize: 12, outline: "none", boxSizing: "border-box" };
 
 function disabledStyle(base: CSSProperties, disabled: boolean): CSSProperties {
   return disabled ? { ...base, opacity: 0.5, cursor: "default" } : base;
@@ -943,7 +943,7 @@ function Indeterminate({ height = 4 }: { height?: number }) {
 
 function StatusLine({ error, action, onDismiss, children }: { error: string; action?: ReactNode; onDismiss?(): void; children?: ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, height: 26, flex: "none", padding: "0 4px 0 10px", borderTop: "1px solid var(--line-soft)", background: error ? "var(--err-tint)" : undefined, fontSize: 12, color: "var(--text-2)", boxSizing: "border-box" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, height: 28, flex: "none", padding: "0 4px 0 10px", borderTop: "1px solid var(--line-soft)", background: error ? "var(--err-tint)" : undefined, fontSize: 12, color: "var(--text-2)", boxSizing: "border-box" }}>
       {error ? (
         <>
           <span style={{ display: "flex", flex: "none", color: "var(--err)" }}>
@@ -1496,7 +1496,7 @@ function PaneView({
         <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 10, background: "var(--err-tint)", color: "var(--err)" }}>
           <WarningIcon size={20} />
         </span>
-        <span style={{ fontWeight: 600 }}>{pane.loc.kind === "local" ? "Could not open this computer" : `Could not connect to ${label}`}</span>
+        <span style={{ fontWeight: 500 }}>{pane.loc.kind === "local" ? "Could not open this computer" : `Could not connect to ${label}`}</span>
         <span style={{ maxWidth: 380, fontSize: 12, color: "var(--err)", overflowWrap: "anywhere" }}>{pane.connectError}</span>
         <button type="button" onClick={() => pane.reconnect()} style={toolBtn}>
           <RefreshIcon />
@@ -1525,7 +1525,7 @@ function PaneView({
         }}
         style={{ position: "relative", flex: 1, minHeight: 0, overflow: "auto", outline: "none", boxShadow: (dragTarget && !dragTarget.dir) || listFocus ? "inset 0 0 0 2px var(--focus)" : undefined }}
       >
-        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: 12.5 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: 12 }}>
           <colgroup>
             <col />
             <col style={{ width: 84 }} />
@@ -1765,11 +1765,11 @@ function EditorView({ pane, editor, label, onClose }: { pane: Pane; editor: Edit
           <FileIcon />
         </span>
         <span style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
-          <span style={{ ...ellipsis, fontWeight: 600 }}>
+          <span style={{ ...ellipsis, fontWeight: 500 }}>
             {editor.name}
             {dirty ? " •" : ""}
           </span>
-          <span title={editor.path} style={{ ...ellipsis, fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)" }}>
+          <span title={editor.path} style={{ ...ellipsis, fontFamily: MONO, fontSize: 11, color: "var(--text-2)" }}>
             {label}: {editor.path}
           </span>
         </span>
@@ -1801,7 +1801,7 @@ function EditorView({ pane, editor, label, onClose }: { pane: Pane; editor: Edit
             pane.editText(el.value);
           }
         }}
-        style={{ flex: 1, minHeight: 0, width: "100%", margin: 0, padding: "10px 12px", border: 0, outline: "none", resize: "none", background: "var(--bg-sunken)", color: "var(--text)", fontFamily: MONO, fontSize: 12.5, lineHeight: 1.6, tabSize: 4, boxSizing: "border-box" }}
+        style={{ flex: 1, minHeight: 0, width: "100%", margin: 0, padding: "10px 12px", border: 0, outline: "none", resize: "none", background: "var(--bg-sunken)", color: "var(--text)", fontFamily: MONO, fontSize: 12, lineHeight: 1.6, tabSize: 4, boxSizing: "border-box" }}
       />
       <StatusLine
         error={error}
@@ -2807,8 +2807,8 @@ export function SftpScreen({
             tabIndex={-1}
             style={{ position: "absolute", top: 50, left: Math.max(8, popLeft - 8), zIndex: 90, width: 560, maxWidth: "calc(100% - 16px)", display: "flex", flexDirection: "column", borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", outline: "none", whiteSpace: "normal", overflow: "hidden" }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 10, height: 34, flex: "none", padding: "0 8px 0 12px" }}>
-              <h2 style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>Transfers</h2>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, height: 36, flex: "none", padding: "0 8px 0 12px" }}>
+              <h2 style={{ margin: 0, fontSize: 12, fontWeight: 500 }}>Transfers</h2>
               <span style={{ ...ellipsis, fontSize: 12, color: "var(--text-2)" }}>{transferSummary}</span>
               <div style={{ flex: 1 }} />
               <Btn

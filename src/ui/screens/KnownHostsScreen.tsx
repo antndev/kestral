@@ -493,7 +493,7 @@ export function KnownHostsScreen(p: {
       ) : (
         <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "0 28px 80px", borderTop: "1px solid var(--line)" }}>
           {loadErr && <p style={{ ...errLine, margin: "0 0 10px" }}>Could not refresh: {loadErr}</p>}
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr>
                 <th scope="col" style={{ ...th, width: 36, padding: "0 0 0 12px" }}>
@@ -522,14 +522,14 @@ export function KnownHostsScreen(p: {
                     <td style={{ ...td, padding: "0 0 0 12px" }}>
                       <input type="checkbox" aria-label={`Select ${shownName(e)}`} checked={checked} onChange={() => toggle(e)} style={checkbox} />
                     </td>
-                    <td style={{ ...td, height: 46 }}>
+                    <td style={{ ...td, height: 48 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontWeight: 600, color: e.hashed && !matched ? "var(--text-2)" : "var(--text)", overflowWrap: "anywhere" }} title={e.hashed && !matched ? "OpenSSH stored this name hashed, so it cannot be shown." : e.hosts}>
+                        <span style={{ fontWeight: 500, color: e.hashed && !matched ? "var(--text-2)" : "var(--text)", overflowWrap: "anywhere" }} title={e.hashed && !matched ? "OpenSSH stored this name hashed, so it cannot be shown." : e.hosts}>
                           {primary}
                         </span>
-                        {changed && <span style={{ display: "inline-flex", alignItems: "center", height: 18, padding: "0 6px", borderRadius: 9, background: "var(--warn-tint)", color: "var(--warn)", fontSize: 11, fontWeight: 600 }}>Changed</span>}
+                        {changed && <span style={{ display: "inline-flex", alignItems: "center", height: 18, padding: "0 6px", borderRadius: 9, background: "var(--warn-tint)", color: "var(--warn)", fontSize: 11, fontWeight: 500 }}>Changed</span>}
                       </div>
-                      {secondary && <div title={e.hosts} style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)", overflowWrap: "anywhere" }}>{secondary}</div>}
+                      {secondary && <div title={e.hosts} style={{ fontFamily: MONO, fontSize: 11, color: "var(--text-2)", overflowWrap: "anywhere" }}>{secondary}</div>}
                     </td>
                     <td style={td}>
                       {!e.hashed ? e.port : matched ? [...new Set(matched.map((h) => h.port))].join(", ") : <span style={{ color: "var(--text-3)" }} title="The port is part of the hashed name, so it cannot be shown.">unknown</span>}
@@ -582,7 +582,7 @@ export function KnownHostsScreen(p: {
             <button type="button" onClick={() => setSelected(new Set())} style={{ height: 28, padding: "0 10px", border: 0, borderRadius: 6, background: "transparent", color: "var(--text-2)", fontSize: 12, cursor: "pointer" }}>Clear</button>
           </>
         ) : shown?.kind === "notice" ? (
-          <span role="status" title={shown.notice.text} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12.5, color: shown.notice.tone === "err" ? "var(--err)" : "var(--text)" }}>{shown.notice.text}</span>
+          <span role="status" title={shown.notice.text} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, color: shown.notice.tone === "err" ? "var(--err)" : "var(--text)" }}>{shown.notice.text}</span>
         ) : null}
       </div>
 

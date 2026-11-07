@@ -13,8 +13,8 @@ const LOCK_CSS = `@keyframes kst-shake-a ${SHAKE_FRAMES} @keyframes kst-shake-b 
 const shakeAnim = (n: number) => (n ? `${n % 2 ? "kst-shake-a" : "kst-shake-b"} 300ms ease-in-out` : undefined);
 
 const title: CSSProperties = { margin: "0 0 10px", textAlign: "center", fontSize: 20, fontWeight: 600, letterSpacing: "-0.015em" };
-const fieldBox: CSSProperties = { display: "flex", alignItems: "center", height: 42, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", boxSizing: "border-box", transition: "border-color 160ms" };
-const wide: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 38, width: "100%", borderRadius: 8, fontSize: 13.5, boxSizing: "border-box" };
+const fieldBox: CSSProperties = { display: "flex", alignItems: "center", height: 44, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", boxSizing: "border-box", transition: "border-color 160ms" };
+const wide: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 40, width: "100%", borderRadius: 8, fontSize: 14, boxSizing: "border-box" };
 const primary: CSSProperties = { ...wide, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
 const secondary: CSSProperties = { ...wide, border: "1px solid var(--line)", background: "transparent", color: "var(--text)" };
 const card: CSSProperties = { display: "flex", flexDirection: "column", gap: 16, padding: 24, border: "1px solid var(--line)", borderRadius: 12, background: "var(--bg)", boxShadow: "0 16px 48px rgba(0,0,0,.28)" };
@@ -57,7 +57,7 @@ function Brand() {
   return (
     <span data-tauri-drag-region style={{ display: "flex", alignItems: "center", gap: 8, flexDirection: IS_MAC ? "row-reverse" : "row" }}>
       <span data-tauri-drag-region aria-hidden="true" style={{ width: 17, height: 18, flex: "none", background: "var(--text-2)", WebkitMask: `url(${bird}) center / contain no-repeat`, mask: `url(${bird}) center / contain no-repeat` }} />
-      <span data-tauri-drag-region style={{ position: "relative", top: -2, fontSize: 13, fontWeight: 600, color: "var(--text-2)" }}>Kestral</span>
+      <span data-tauri-drag-region style={{ position: "relative", top: -2, fontSize: 13, fontWeight: 500, color: "var(--text-2)" }}>Kestral</span>
     </span>
   );
 }
@@ -201,12 +201,12 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
           style={{ flex: 1, minWidth: 0, height: "100%", padding: eye ? "0 0 0 13px" : "0 13px", border: 0, background: "transparent", color: "var(--text)", fontSize: 14, letterSpacing: value && !reveal ? "0.16em" : undefined, outline: "none" }}
         />
         {caps && focus === id && (
-          <span role="img" aria-label="Caps Lock is on" title="Caps Lock is on" style={{ display: "grid", placeItems: "center", width: 26, height: 34, marginRight: eye ? 0 : 6, flex: "none", color: "var(--warn)" }}>
+          <span role="img" aria-label="Caps Lock is on" title="Caps Lock is on" style={{ display: "grid", placeItems: "center", width: 28, height: 36, marginRight: eye ? 0 : 8, flex: "none", color: "var(--warn)" }}>
             <CapsIcon />
           </span>
         )}
         {eye && (
-          <button type="button" aria-label={reveal ? "Hide password" : "Show password"} title={reveal ? "Hide password" : "Show password"} onClick={() => setReveal((r) => !r)} style={{ display: "grid", placeItems: "center", width: 34, height: 34, marginRight: 4, flex: "none", border: 0, borderRadius: 6, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}>
+          <button type="button" aria-label={reveal ? "Hide password" : "Show password"} title={reveal ? "Hide password" : "Show password"} onClick={() => setReveal((r) => !r)} style={{ display: "grid", placeItems: "center", width: 36, height: 36, marginRight: 4, flex: "none", border: 0, borderRadius: 6, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}>
             <EyeIcon off={reveal} />
           </button>
         )}
@@ -215,7 +215,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   };
 
   const note = (
-    <div role={shown ? "alert" : undefined} title={shown || undefined} style={{ position: "absolute", left: 0, right: 0, top: exists && !hello?.enabled ? "calc(100% - 38px)" : "100%", marginTop: exists && !hello?.enabled ? 4 : 14, fontSize: 12.5, lineHeight: "18px", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: shown ? "var(--err)" : "var(--text-3)" }}>
+    <div role={shown ? "alert" : undefined} title={shown || undefined} style={{ position: "absolute", left: 0, right: 0, top: exists && !hello?.enabled ? "calc(100% - 40px)" : "100%", marginTop: exists && !hello?.enabled ? 4 : 14, fontSize: 12, lineHeight: "18px", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: shown ? "var(--err)" : "var(--text-3)" }}>
       {shown || (exists ? "" : "There is no way to recover it if you forget it.")}
     </div>
   );
@@ -236,7 +236,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
           {busy ? <Spinner /> : exists ? "Unlock" : "Create vault"}
         </button>
         {exists && (
-          <div style={{ height: 38 }}>
+          <div style={{ height: 40 }}>
             {hello?.enabled && (
               <button type="button" disabled={helloBusy || busy} onClick={() => void unlockWithHello()} style={{ ...secondary, cursor: helloBusy || busy ? "default" : "pointer" }}>
                 {helloBusy ? <Spinner /> : <PasskeyIcon />}
@@ -259,7 +259,7 @@ export function LockingScreen({ className }: { className: string }) {
         <h1 style={title}>Welcome back!</h1>
         <div style={{ ...fieldBox, padding: "0 13px", fontSize: 14, color: "var(--text-3)" }}>Password</div>
         <div style={{ ...primary, opacity: 0.5 }}>Unlock</div>
-        <div style={{ height: 38 }} />
+        <div style={{ height: 40 }} />
       </div>
     </LockFrame>
   );
@@ -271,7 +271,7 @@ export function BootScreen({ className, error, onRetry }: { className: string; e
       {error && (
         <div style={card}>
           <h1 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Could not reach the Kestral backend</h1>
-          <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-2)", wordBreak: "break-word" }}>{error}</p>
+          <p style={{ margin: 0, fontSize: 12, color: "var(--text-2)", wordBreak: "break-word" }}>{error}</p>
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button type="button" onClick={onRetry} style={{ ...smallBtn, cursor: "pointer" }}>
               Retry

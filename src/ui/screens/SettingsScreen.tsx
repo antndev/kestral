@@ -136,11 +136,11 @@ const PAGE_KEY = "kestral-settings-page";
 const row: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: "1px solid var(--line-soft)" };
 const blockRow: CSSProperties = { display: "grid", gap: 10, padding: "12px 0", borderBottom: "1px solid var(--line-soft)" };
 const rowHead: CSSProperties = { flex: "1 1 220px", minWidth: 0 };
-const field: CSSProperties = { width: 240, height: 30, padding: "0 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
+const field: CSSProperties = { width: 240, height: 32, padding: "0 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
 const ctlBox: CSSProperties = { width: 240, display: "flex", alignItems: "center", gap: 10 };
 const sub: CSSProperties = { margin: "2px 0 0", fontSize: 12, color: "var(--text-2)" };
 const oneLine: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-const rowBtn: CSSProperties = { height: 30, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
+const rowBtn: CSSProperties = { height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
 const groupHead: CSSProperties = { margin: "18px 0 8px", fontSize: 12, fontWeight: 500, color: "var(--text-2)" };
 const kbd: CSSProperties = { display: "inline-block", minWidth: 10, padding: "0 5px", border: "1px solid var(--line)", borderRadius: 4, fontFamily: "inherit", fontSize: 11, lineHeight: "18px", color: "var(--text-2)", textAlign: "center" };
 const linkBtn: CSSProperties = { padding: 0, border: 0, background: "transparent", color: "var(--link)", textDecoration: "underline", textUnderlineOffset: 2, fontSize: 12, cursor: "pointer" };
@@ -329,7 +329,7 @@ function SchemeCard({ id, colors, selected, onSelect }: { id: string; colors: bo
   const t = resolveTerminalTheme(id, colors, themedRoot());
   return (
     <button type="button" aria-pressed={selected} onClick={onSelect} style={{ display: "flex", flexDirection: "column", padding: 0, border: `1px solid ${selected ? "var(--focus)" : "var(--line)"}`, boxShadow: selected ? "0 0 0 1px var(--focus)" : "none", borderRadius: 8, background: "var(--bg)", color: "var(--text)", textAlign: "left", cursor: "pointer", overflow: "hidden" }}>
-      <span style={{ display: "block", padding: "10px 12px", background: t.background, color: t.foreground, fontFamily: termFontStack(termFontFamily), fontSize: 11.5, lineHeight: 1.5, whiteSpace: "pre", overflow: "hidden" }}>
+      <span style={{ display: "block", padding: "10px 12px", background: t.background, color: t.foreground, fontFamily: termFontStack(termFontFamily), fontSize: 11, lineHeight: 1.5, whiteSpace: "pre", overflow: "hidden" }}>
         <span style={{ display: "block" }}>
           <span style={{ color: t.green }}>user@kestral</span>:<span style={{ color: t.blue }}>~/app</span>$ ls
         </span>
@@ -655,7 +655,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
       </div>
     </div>
   );
-  const textCtl = (text: ReactNode) => <div style={{ ...ctlBox, fontSize: 12.5, color: "var(--text-2)" }}>{text}</div>;
+  const textCtl = (text: ReactNode) => <div style={{ ...ctlBox, fontSize: 12, color: "var(--text-2)" }}>{text}</div>;
   const pathText = (text: string) => <code data-selectable style={{ fontFamily: MONO, fontSize: 12, color: "var(--text)", wordBreak: "break-all" }}>{text}</code>;
 
   // Mirrors the bindings in RealApp (app shortcuts) and SshTerminal (copy and paste).
@@ -954,7 +954,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
       ? [{
           id: "warnings", page: "Vault and security" as Page, label: "Data warnings", keywords: "error problem",
           node: (
-            <div style={{ margin: "12px 0 0", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--warn-tint)", color: "var(--text)", fontSize: 12.5 }}>
+            <div style={{ margin: "12px 0 0", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--warn-tint)", color: "var(--text)", fontSize: 12 }}>
               {warnings.map((w) => <p key={w} style={{ margin: 0 }}>{w}</p>)}
             </div>
           ),
@@ -992,7 +992,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
             </div>
             <div style={ctlBox}>
               {upd.kind === "available" ? (
-                <button type="button" onClick={() => void runUpdate()} style={{ ...btnPrimary, height: 30 }}>Update now</button>
+                <button type="button" onClick={() => void runUpdate()} style={{ ...btnPrimary, height: 32 }}>Update now</button>
               ) : (
                 <button type="button" disabled={busy} onClick={() => (upd.kind === "error" && updRef.current ? void runUpdate() : void checkUpdate())} style={withDisabled(rowBtn, busy)}>
                   <Stable text={upd.kind === "checking" ? "Checking…" : upd.kind === "downloading" ? "Updating…" : upd.kind === "ready" ? "Restarting…" : upd.kind === "error" ? "Try again" : "Check for updates"} alts={["Check for updates", "Checking…", "Updating…", "Restarting…", "Try again"]} />
@@ -1009,7 +1009,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
       node: (
         <div>
           <h2 id="st-changelog" style={groupHead}>Changelog</h2>
-          <div data-selectable role="region" aria-labelledby="st-changelog" tabIndex={0} style={{ maxHeight: 360, overflow: "auto", padding: "14px 16px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", fontSize: 12.5, color: "var(--text-2)", boxSizing: "border-box" }}>
+          <div data-selectable role="region" aria-labelledby="st-changelog" tabIndex={0} style={{ maxHeight: 360, overflow: "auto", padding: "14px 16px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", fontSize: 12, color: "var(--text-2)", boxSizing: "border-box" }}>
             {pendingNotes && (
               <div style={{ paddingBottom: 14, marginBottom: 14, borderBottom: "1px solid var(--line)" }}>
                 <Markdown text={pendingNotes} />
@@ -1094,14 +1094,14 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
               ) : (
                 PAGES.filter((pg) => pagesWithHits.has(pg)).map((pg, i) => (
                   <section key={pg} style={{ marginTop: i ? 24 : 0 }}>
-                    <h2 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 600 }}>{pg}</h2>
+                    <h2 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 600 }}>{pg}</h2>
                     {renderRows(hits.filter((r) => r.page === pg))}
                   </section>
                 ))
               )
             ) : (
               <>
-                <h2 style={{ margin: "0 0 8px", fontSize: 18, fontWeight: 600 }}>{page}</h2>
+                <h2 style={{ margin: "0 0 8px", fontSize: 16, fontWeight: 600 }}>{page}</h2>
                 {renderRows(rows.filter((r) => r.page === page))}
               </>
             )}

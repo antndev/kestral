@@ -56,12 +56,6 @@ function forwardLabel(f: PortForward): string {
   return `L ${local} → ${withPort(f.remote_host, f.remote_port)}`;
 }
 
-const AI_MARK = "Changed by AI, you are asked to check it before the next connection";
-
-function AiMark() {
-  return <span title={AI_MARK} style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: "var(--warn)" }}>AI</span>;
-}
-
 function Live({ host, status, note }: { host: Host; status: Status; note: Note | null }) {
   const text = note?.text ?? STATUS_LABEL[status];
   return <span role="status" style={srOnly}>{text ? `${host.name}: ${text}` : ""}</span>;
@@ -100,12 +94,7 @@ function HostDetail({ host, user, via, identity, identities, status, note, menu,
   return (
     <>
       <DetailHead
-        title={
-          <>
-            {host.name}
-            {host.ai_changed && <AiMark />}
-          </>
-        }
+        title={host.name}
         sub={
           <>
             <span title={via ? `${addr} via ${via}` : addr} style={{ ...oneLine, ...mono }}>{addr}</span>
@@ -368,7 +357,7 @@ export function HostsScreen(p: {
               {filtered.length === 0 ? (
                 <EmptyState>
                   <span style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <span style={{ fontSize: 15, fontWeight: 600 }}>No matching hosts</span>
+                    <span style={{ fontSize: 16, fontWeight: 600 }}>No matching hosts</span>
                     <span style={{ fontSize: 13, color: "var(--text-3)", overflowWrap: "anywhere" }}>
                       {target.ok ? `Press Enter to connect to ${hostAddress(target.value)}.` : `Nothing matches "${query.trim()}".`}
                     </span>
@@ -403,12 +392,7 @@ export function HostsScreen(p: {
                           }}
                           icon={<HostsIcon />}
                           iconColor={status === "idle" ? undefined : statusColor(status)}
-                          title={
-                            <>
-                              {h.name}
-                              {h.ai_changed && <AiMark />}
-                            </>
-                          }
+                          title={h.name}
                           sub={`${hostAddress({ ...h, username: userOf(h) })}${via ? ` via ${via}` : ""}`}
                           selected={h.id === current?.id}
                           onSelect={() => setSel(h.id)}

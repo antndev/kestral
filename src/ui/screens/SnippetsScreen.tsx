@@ -1028,11 +1028,10 @@ export function SnippetsScreen({
                             title={
                               <>
                                 {name || <span style={{ color: "var(--text-3)" }}>Untitled</span>}
-                                {s.ai_edited && <span title="Changed by AI, review it before it runs" style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: "var(--warn)" }}>AI</span>}
                                 {busy && <span style={srOnly}>, running</span>}
                               </>
                             }
-                            sub={<span style={{ fontFamily: MONO, fontSize: 11.5 }}>{s.script.split("\n").find((l) => l.trim()) ?? " "}</span>}
+                            sub={<span style={{ fontFamily: MONO, fontSize: 11 }}>{s.script.split("\n").find((l) => l.trim()) ?? " "}</span>}
                             selected={s.id === selId}
                             onSelect={() => select(s.id)}
                             onMenu={
@@ -1328,16 +1327,15 @@ export function SnippetsScreen({
 }
 
 function ReviewTarget({ review, pasteName }: { review: Review; pasteName: string }) {
-  if (review.mode === "paste") return <p style={{ ...muted, margin: 0, fontSize: 12.5 }}>Pastes into {pasteName || "the active terminal"}</p>;
+  if (review.mode === "paste") return <p style={{ ...muted, margin: 0, fontSize: 12 }}>Pastes into {pasteName || "the active terminal"}</p>;
   const { targets, tabs, parallel } = review.plan;
   const mode: RunMode = tabs ? "tabs" : parallel ? "parallel" : "serial";
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 12 }}>
       <span style={{ color: "var(--text-2)", marginRight: 2 }}>Runs on</span>
       {targets.map((h) => (
         <span key={h.id} style={hostChip}>
           <VisibleLine text={h.name} />
-          {h.ai_changed && <span title="Changed by AI" style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: "var(--warn)" }}>AI</span>}
         </span>
       ))}
       {targets.length > 1 && <span style={{ color: "var(--text-2)", marginLeft: 4 }}>{RUN_MODES.find((m) => m.id === mode)?.label}</span>}
@@ -1399,9 +1397,9 @@ function FolderHeader({ name, menu }: { name: string; menu: MenuState<string> })
 
 // ---------------------------------------------------------------------------
 
-const codeFrame: CSSProperties = { display: "flex", border: "1px solid var(--line)", borderRadius: 8, background: "var(--term-bg)", fontFamily: MONO, fontSize: 12.5, lineHeight: 1.7, overflow: "hidden" };
+const codeFrame: CSSProperties = { display: "flex", border: "1px solid var(--line)", borderRadius: 8, background: "var(--term-bg)", fontFamily: MONO, fontSize: 12, lineHeight: 1.7, overflow: "hidden" };
 const codeGutter: CSSProperties = { padding: "10px 8px", minWidth: 28, textAlign: "right", color: "var(--term-dim)", borderRight: "1px solid var(--term-line)", userSelect: "none", boxSizing: "border-box" };
-const codeText: CSSProperties = { margin: 0, padding: "10px 12px", fontFamily: MONO, fontSize: 12.5, lineHeight: 1.7, whiteSpace: "pre", tabSize: 4, letterSpacing: "normal", boxSizing: "border-box" };
+const codeText: CSSProperties = { margin: 0, padding: "10px 12px", fontFamily: MONO, fontSize: 12, lineHeight: 1.7, whiteSpace: "pre", tabSize: 4, letterSpacing: "normal", boxSizing: "border-box" };
 
 function CommandView({ value }: { value: string }) {
   const lines = value.split("\n").length;
@@ -1499,7 +1497,7 @@ function VarRow({ name, setting, onChange }: { name: string; setting: VarSetting
   const id = `sn-var-${name}`;
   return (
     <>
-      <code style={{ fontFamily: MONO, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>{name}</code>
+      <code style={{ fontFamily: MONO, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={name}>{name}</code>
       <div>
         <label htmlFor={id} style={srOnly}>Default value for {name}</label>
         <input
@@ -1509,7 +1507,7 @@ function VarRow({ name, setting, onChange }: { name: string; setting: VarSetting
           placeholder={setting.ask ? "Suggested value" : "Default value"}
           onChange={(e) => onChange({ value: e.target.value })}
           spellCheck={false}
-          style={{ ...field, height: 30 }}
+          style={{ ...field, height: 32 }}
         />
       </div>
       <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-2)", whiteSpace: "nowrap" }}>
@@ -1593,7 +1591,7 @@ function TargetPicker({ hosts, targets, onAdd }: { hosts: Host[]; targets: strin
           {free.map((h) => (
             <button key={h.id} type="button" role="menuitem" onMouseEnter={() => setHot(h.id)} onMouseLeave={() => setHot(null)} onClick={() => pick([h.id])} style={item(h.id)}>
               <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
-              <span style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 150 }}>
+              <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 150 }}>
                 {h.username ? `${h.username}@` : ""}{h.hostname}
               </span>
             </button>
@@ -1630,7 +1628,7 @@ function RunModePicker({ value, onChange }: { value: RunMode; onChange(m: RunMod
             tabIndex={on ? 0 : -1}
             onClick={() => !on && onChange(m.id)}
             onKeyDown={(e) => onKey(e, i)}
-            style={{ height: 26, padding: "0 10px", border: 0, borderRadius: 4, background: on ? "var(--bg)" : "transparent", boxShadow: on ? "0 0 0 1px var(--line)" : "none", color: on ? "var(--text)" : "var(--text-2)", whiteSpace: "nowrap", cursor: "pointer" }}
+            style={{ height: 28, padding: "0 10px", border: 0, borderRadius: 4, background: on ? "var(--bg)" : "transparent", boxShadow: on ? "0 0 0 1px var(--line)" : "none", color: on ? "var(--text)" : "var(--text-2)", whiteSpace: "nowrap", cursor: "pointer" }}
           >
             {m.label}
           </button>
@@ -1758,7 +1756,7 @@ function HostResult({ result, defaultOpen }: { result: HostRun; defaultOpen: boo
         <span style={{ display: "flex", color: "var(--text-2)", transform: open ? undefined : "rotate(-90deg)", transition: "transform .12s" }}>
           <ChevronIcon size={14} />
         </span>
-        <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{result.hostName}</span>
+        <span style={{ flex: 1, minWidth: 0, fontWeight: 500, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{result.hostName}</span>
         <span style={{ display: "inline-flex", alignItems: "center", height: 20, padding: "0 8px", borderRadius: 10, background: chip.bg, color: chip.color, fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}>{chip.text}</span>
       </button>
       {open && (

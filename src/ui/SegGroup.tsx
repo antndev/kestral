@@ -2,7 +2,7 @@ import { CSSProperties, ReactNode, useEffect, useLayoutEffect, useRef, useState 
 
 export const segItem = (on: boolean, extra?: CSSProperties): CSSProperties => ({
   position: "relative",
-  height: 26,
+  height: 28,
   padding: "0 10px",
   border: 0,
   borderRadius: 4,

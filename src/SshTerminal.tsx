@@ -891,9 +891,9 @@ export function SshTerminal(props: SshTerminalProps) {
       {conn.kind === "connecting" && !conn.quiet && (
         <div role="status" aria-live="polite" style={{ ...card, gap: 14 }}>
           <span aria-hidden="true" style={ring(28, 2.5)} />
-          <div style={{ fontWeight: 600 }}>Connecting to {name}</div>
+          <div style={{ fontWeight: 500 }}>Connecting to {name}</div>
           {conn.steps.length > 0 && (
-            <ol aria-label="Connection progress" style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6, fontSize: 12.5, color: dim, textAlign: "left" }}>
+            <ol aria-label="Connection progress" style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: dim, textAlign: "left" }}>
               {conn.steps.map((s) => (
                 <li key={s.id} aria-current={s.done ? undefined : "step"} style={{ display: "flex", alignItems: "center", gap: 8, color: s.done ? dim : fg }}>
                   {s.done ? (
@@ -926,9 +926,9 @@ export function SshTerminal(props: SshTerminalProps) {
           <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: "50%", background: "var(--err-tint)", color: "var(--err)" }}>
             <WarningIcon size={18} />
           </span>
-          <div style={{ fontWeight: 600 }}>Authentication failed</div>
+          <div style={{ fontWeight: 500 }}>Authentication failed</div>
           <code style={{ fontFamily: "ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace", fontSize: 12, color: dim }}>{conn.message}</code>
-          <p style={{ margin: 0, maxWidth: 340, fontSize: 12.5, color: dim }}>{credentialText(conn)}</p>
+          <p style={{ margin: 0, maxWidth: 340, fontSize: 12, color: dim }}>{credentialText(conn)}</p>
           {pwOpen ? (
             <form
               onSubmit={(e) => {
@@ -995,7 +995,7 @@ export function SshTerminal(props: SshTerminalProps) {
           <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: "50%", background: "var(--err-tint)", color: "var(--err)" }}>
             <WarningIcon size={18} />
           </span>
-          <div style={{ fontWeight: 600 }}>{errorKey ? "Host key not trusted" : "Connection failed"}</div>
+          <div style={{ fontWeight: 500 }}>{errorKey ? "Host key not trusted" : "Connection failed"}</div>
           <code style={{ maxWidth: 420, fontFamily: "ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace", fontSize: 12, color: dim, overflowWrap: "anywhere" }}>{errorKey ?? conn.message.replace(/^SSH: /, "")}</code>
           <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 8 }}>
             <button type="button" onClick={() => reconnect()} style={primary}>

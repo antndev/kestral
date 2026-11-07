@@ -15,8 +15,8 @@ const KEY_FILE_LIMIT = 64 * 1024;
 const NOT_KEY_FILES = /^(config|known_hosts(\..*)?|authorized_keys2?|environment|rc)$/i;
 
 const card: CSSProperties = { display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 8, padding: 16, border: "1px solid var(--line)", borderRadius: 10 };
-const cardTitle: CSSProperties = { margin: 0, fontSize: 15, fontWeight: 600 };
-const cardText: CSSProperties = { margin: 0, height: 36, fontSize: 12.5, lineHeight: "18px", color: "var(--text-2)", overflow: "hidden", overflowWrap: "anywhere", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 };
+const cardTitle: CSSProperties = { margin: 0, fontSize: 16, fontWeight: 600 };
+const cardText: CSSProperties = { margin: 0, height: 36, fontSize: 12, lineHeight: "18px", color: "var(--text-2)", overflow: "hidden", overflowWrap: "anywhere", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 };
 const cardFoot: CSSProperties = { display: "flex", height: 28, marginTop: "auto" };
 const cardBtn: CSSProperties = { height: 28, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer", display: "flex", alignItems: "center", boxSizing: "border-box" };
 const code: CSSProperties = { fontFamily: MONO, fontSize: 12 };
@@ -289,7 +289,7 @@ function ConfigImportDialog({ entries, existingNames, secrets, onProgress, onClo
               <Check label={`Import ${h.alias}`} checked={!already && !res?.ok && sel.has(h.alias)} disabled={disabled} onChange={(v) => toggle(h.alias, v)} />
               <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                 <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.alias}</span>
+                  <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.alias}</span>
                   {already && <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-3)", whiteSpace: "nowrap" }}>Already added</span>}
                 </span>
                 <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -298,7 +298,7 @@ function ConfigImportDialog({ entries, existingNames, secrets, onProgress, onClo
                 {!h.user && <span style={{ fontSize: 12, color: "var(--warn)" }}>No user set. Add one in the host editor after importing.</span>}
                 <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, fontSize: 12, color: "var(--text-2)" }}>
                   <span style={{ display: "flex", flex: "none", color: "var(--text-3)" }}><KeyIcon size={12} /></span>
-                  {h.identity_file ? <span style={{ fontFamily: MONO, fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.identity_file}</span> : <span>SSH agent</span>}
+                  {h.identity_file ? <span style={{ fontFamily: MONO, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.identity_file}</span> : <span>SSH agent</span>}
                 </span>
                 {res && <span style={{ fontSize: 12, color: res.ok ? (res.message === "Added" ? "var(--ok)" : "var(--warn)") : "var(--err)" }}>{res.ok && res.message !== "Added" ? `Added. ${res.message}` : res.message}</span>}
               </span>
@@ -387,11 +387,11 @@ function KeyImportDialog({ keys, secrets, onProgress, onClose }: { keys: FoundKe
               <Check label={`Import ${k.name}`} checked={!off && sel.has(k.name)} disabled={off || busy} onChange={(v) => setSel((s) => { const n = new Set(s); if (v) n.add(k.name); else n.delete(k.name); return n; })} />
               <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                 <span style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-                  <span style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
+                  <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.name}</span>
                   {k.keyType && <span style={{ fontSize: 12, color: "var(--text-2)" }}>{k.keyType}</span>}
                   {clash && <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-3)", whiteSpace: "nowrap" }}>{clash === "private_key" ? "Already in vault" : "Name used by a password"}</span>}
                 </span>
-                {k.fingerprint && <span style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.fingerprint}</span>}
+                {k.fingerprint && <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{k.fingerprint}</span>}
                 {k.problem && <span style={{ fontSize: 12, color: "var(--warn)" }}>{k.problem}</span>}
                 {k.locked && !off && (
                   <span style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -680,7 +680,7 @@ export function WelcomeScreen({ onQuickConnect, onNewHost, onImported }: { onQui
 
         <form noValidate onSubmit={submit} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: 16, border: "1px solid var(--line)", borderRadius: 10, background: "var(--bg-sunken)" }}>
           <div style={{ flex: "1 1 100%", minWidth: 0, display: "flex", alignItems: "baseline", gap: 12 }}>
-            <label htmlFor="wl-connect" style={{ flex: "none", fontWeight: 600 }}>Connect to a server</label>
+            <label htmlFor="wl-connect" style={{ flex: "none", fontWeight: 500 }}>Connect to a server</label>
             <p id="wl-connect-err" role="alert" title={formErr || undefined} style={errLine}>{formErr}</p>
           </div>
           <input
@@ -694,10 +694,10 @@ export function WelcomeScreen({ onQuickConnect, onNewHost, onImported }: { onQui
             aria-invalid={!!formErr}
             aria-describedby={formErr ? "wl-connect-err" : undefined}
             onChange={(e) => { setTarget(e.target.value); setFormErr(""); }}
-            style={{ flex: "1 1 260px", minWidth: 0, height: 34, padding: "0 10px", border: `1px solid ${formErr ? "var(--err)" : "var(--line)"}`, borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontFamily: MONO, fontSize: 12.5, boxSizing: "border-box" }}
+            style={{ flex: "1 1 260px", minWidth: 0, height: 36, padding: "0 10px", border: `1px solid ${formErr ? "var(--err)" : "var(--line)"}`, borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontFamily: MONO, fontSize: 12, boxSizing: "border-box" }}
           />
           <label htmlFor="wl-auth" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>Sign in with</label>
-          <select id="wl-auth" value={identity} onChange={(e) => { setIdentity(e.target.value); setFormErr(""); }} style={{ flex: "none", width: 220, height: 34, padding: "0 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}>
+          <select id="wl-auth" value={identity} onChange={(e) => { setIdentity(e.target.value); setFormErr(""); }} style={{ flex: "none", width: 220, height: 36, padding: "0 8px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)" }}>
             <option value="password">Password</option>
             {sshDirKey && <option value={SSH_DIR_KEY}>Key from {SSH_DIR_LABEL} ({sshDirKey.name})</option>}
             <option value="agent">SSH agent</option>
@@ -712,7 +712,7 @@ export function WelcomeScreen({ onQuickConnect, onNewHost, onImported }: { onQui
               </optgroup>
             )}
           </select>
-          <button type="submit" disabled={checking} style={{ height: 34, padding: "0 16px", border: "1px solid var(--btn-line)", borderRadius: 6, background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500, cursor: checking ? "default" : "pointer", opacity: checking ? 0.6 : 1 }}>Connect</button>
+          <button type="submit" disabled={checking} style={{ height: 36, padding: "0 16px", border: "1px solid var(--btn-line)", borderRadius: 6, background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500, cursor: checking ? "default" : "pointer", opacity: checking ? 0.6 : 1 }}>Connect</button>
         </form>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
@@ -741,7 +741,7 @@ export function WelcomeScreen({ onQuickConnect, onNewHost, onImported }: { onQui
             <span aria-hidden="true" style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 8, background: "var(--bg-raised)", color: "var(--text)" }}><LockIcon size={18} /></span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <h2 style={cardTitle}>Protect your vault</h2>
-              <p role={helloErr ? "alert" : "status"} title={helloText} style={{ ...oneLine, margin: "4px 0 0", fontSize: 12.5, color: helloErr ? "var(--err)" : hello.enabled ? "var(--ok)" : "var(--text-2)" }}>{helloText}</p>
+              <p role={helloErr ? "alert" : "status"} title={helloText} style={{ ...oneLine, margin: "4px 0 0", fontSize: 12, color: helloErr ? "var(--err)" : hello.enabled ? "var(--ok)" : "var(--text-2)" }}>{helloText}</p>
             </div>
             <button type="button" disabled={helloBusy} onClick={() => void toggleHello()} style={{ flex: "none", height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: helloBusy ? "default" : "pointer", opacity: helloBusy ? 0.6 : 1 }}>
               <Stable text={helloBusy ? "Waiting…" : hello.enabled ? "Turn off" : "Set up"} alts={["Set up", "Turn off", "Waiting…"]} />

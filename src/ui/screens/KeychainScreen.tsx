@@ -21,13 +21,13 @@ const outlineBtn: CSSProperties = { display: "flex", alignItems: "center", gap: 
 const pageBtn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
 const primaryBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
 const dangerOutlineBtn: CSSProperties = { ...pageBtn, border: "1px solid color-mix(in srgb, var(--err) 40%, transparent)", background: "color-mix(in srgb, var(--err) 10%, transparent)", color: "var(--err)" };
-const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer", flex: "none" };
+const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer", flex: "none" };
 const th: CSSProperties = { height: 32, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 const cell: CSSProperties = { padding: "0 12px", borderBottom: "1px solid var(--line-soft)" };
 const chip: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, height: 24, padding: "0 10px", border: 0, borderRadius: 12, background: "var(--bg-raised)", color: "var(--text)", fontSize: 12, boxSizing: "border-box" };
 const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
 const errLine: CSSProperties = { margin: 0, fontSize: 12, color: "var(--err)", overflowWrap: "anywhere" };
-const sectionTitle: CSSProperties = { margin: 0, fontSize: 13, fontWeight: 600 };
+const sectionTitle: CSSProperties = { margin: 0, fontSize: 13, fontWeight: 500 };
 const warnText: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, color: "var(--warn)" };
 const oneLine: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const errSlot: CSSProperties = { flex: "1 1 0", minWidth: 0, margin: 0, fontSize: 12, lineHeight: "16px", color: "var(--err)", overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" };
@@ -642,9 +642,9 @@ function KeyList(p: { keys: SecretMeta[]; info: Record<string, KeyInfo>; sel: st
               }}
               style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: 8, border: 0, borderRadius: 6, background: active ? "var(--sel)" : "transparent", color: "var(--text)", textAlign: "left", cursor: "pointer" }}
             >
-              <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "none", width: 30, height: 30, borderRadius: 6, background: "var(--bg-raised)", color: inf && (!inf.ok || inf.encrypted) ? "var(--warn)" : "var(--text-2)" }}><KeyIcon /></span>
+              <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "none", width: 32, height: 32, borderRadius: 6, background: "var(--bg-raised)", color: inf && (!inf.ok || inf.encrypted) ? "var(--warn)" : "var(--text-2)" }}><KeyIcon /></span>
               <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <span style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.id}</span>
+                <span style={{ fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{k.id}</span>
                 <span title={sub} style={{ ...oneLine, fontSize: 12, color: "var(--text-2)" }}>{sub}</span>
               </span>
             </button>
@@ -665,9 +665,9 @@ function HostChip({ host, onEditHost }: { host: Host; onEditHost?(h: Host): void
 }
 
 function HostName({ host, onEditHost }: { host: Host; onEditHost?(h: Host): void }) {
-  if (!onEditHost) return <div style={{ fontWeight: 600 }}>{host.name}</div>;
+  if (!onEditHost) return <div style={{ fontWeight: 500 }}>{host.name}</div>;
   return (
-    <button type="button" onClick={() => onEditHost(host)} title={`Edit ${host.name}`} style={{ padding: 0, border: 0, background: "transparent", color: "var(--text)", fontWeight: 600, cursor: "pointer", textAlign: "left" }}>
+    <button type="button" onClick={() => onEditHost(host)} title={`Edit ${host.name}`} style={{ padding: 0, border: 0, background: "transparent", color: "var(--text)", fontWeight: 500, cursor: "pointer", textAlign: "left" }}>
       {host.name}
     </button>
   );
@@ -786,7 +786,7 @@ function KeyDetail(p: {
     <>
       <div style={{ display: "flex", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
         <div style={{ flex: 1, minWidth: 200 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, overflowWrap: "anywhere" }}>{p.secret.id}</h2>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, overflowWrap: "anywhere" }}>{p.secret.id}</h2>
           <p style={{ margin: "4px 0 0", color: "var(--text-2)" }}>{[ok ? ok.algo.replace(/ \d+$/, "") : p.info ? "Private key" : "Reading…", ok && keyBits(ok.pub) ? `${keyBits(ok.pub)} bit` : "", createdLabel(p.secret.created_at)].filter(Boolean).join(", ")}</p>
         </div>
         <MoreButton menu={p.menu} itemKey={p.secret.id} label={`More actions for ${p.secret.id}`} />
@@ -1097,7 +1097,7 @@ function IdentitiesTab(p: {
         {identities.length === 0 ? (
           <p style={{ margin: "8px 0", color: "var(--text-2)", lineHeight: 1.5 }}>No identities yet. An identity is a user and credential that several hosts share.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr>
                 <th scope="col" style={th}>Name</th>
@@ -1113,7 +1113,7 @@ function IdentitiesTab(p: {
                 return (
                   <tr key={i.id} data-reveal onContextMenu={(e) => idMenu.openAt(e, i.id)}>
                     <td style={{ ...cell, height: 40 }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 500 }}>
                         <span style={{ display: "flex", color: "var(--text-2)" }}><ShieldIcon size={14} /></span>
                         <span style={{ overflowWrap: "anywhere" }}>{i.name}</span>
                       </span>
@@ -1153,7 +1153,7 @@ function IdentitiesTab(p: {
         {p.passwords.length === 0 ? (
           <p style={{ margin: "8px 0", color: "var(--text-2)" }}>No passwords yet. Hosts that sign in with a password reference one stored here.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr>
                 <th scope="col" style={th}>Name</th>
@@ -1168,7 +1168,7 @@ function IdentitiesTab(p: {
                 return (
                   <tr key={s.id} data-reveal onContextMenu={(e) => pwMenu.openAt(e, s.id)}>
                     <td style={{ ...cell, height: 40 }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 500 }}>
                         <span style={{ display: "flex", color: "var(--text-2)" }}><LockIcon size={14} /></span>
                         <span style={{ overflowWrap: "anywhere" }}>{s.id}</span>
                       </span>
@@ -1391,7 +1391,7 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
         ) : local.keys.length === 0 ? (
           <p style={{ margin: 0, color: "var(--text-2)", lineHeight: 1.5 }}>The agent is running but holds no keys. Add one with <code style={code}>ssh-add</code>, then refresh.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr>
                 <th scope="col" style={th}>Key</th>
@@ -1407,7 +1407,7 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
                   <tr key={k.fingerprint} data-reveal onContextMenu={(e) => keyMenu.openAt(e, k.fingerprint)}>
                     <td style={{ ...cell, height: 40 }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{k.comment || <span style={{ fontWeight: 400, color: "var(--text-3)" }}>No comment</span>}</span>
+                        <span style={{ fontWeight: 500, overflowWrap: "anywhere" }}>{k.comment || <span style={{ fontWeight: 400, color: "var(--text-3)" }}>No comment</span>}</span>
                         {inVault && (
                           <button type="button" onClick={() => p.onShowKey(inVault)} title="Also in your vault" style={{ ...chip, height: 20, cursor: "pointer" }}>
                             <KeyIcon size={12} />
@@ -1425,7 +1425,7 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
                         <button type="button" aria-label="Copy public key" title={copied === k.fingerprint ? "Copied" : "Copy public key"} onClick={() => void copyPub(k)} style={{ ...iconBtn, color: copied === k.fingerprint ? "var(--ok)" : "var(--text-2)" }}>
                           {copied === k.fingerprint ? <CheckIcon size={14} /> : <CopyIcon />}
                         </button>
-                        {inVault ? <MoreButton menu={keyMenu} itemKey={k.fingerprint} label={`More actions for ${k.comment || k.fingerprint}`} small hidden /> : <span aria-hidden="true" style={{ width: 26, flex: "none" }} />}
+                        {inVault ? <MoreButton menu={keyMenu} itemKey={k.fingerprint} label={`More actions for ${k.comment || k.fingerprint}`} small hidden /> : <span aria-hidden="true" style={{ width: 28, flex: "none" }} />}
                       </div>
                     </td>
                   </tr>
@@ -1449,7 +1449,7 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
         {forwarding.length === 0 ? (
           <p style={{ margin: 0, color: "var(--text-2)" }}>No host forwards vault keys. Turn it on per host in the host editor.</p>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr>
                 <th scope="col" style={th}>Host</th>
@@ -1460,9 +1460,9 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
             <tbody>
               {forwarding.map((h) => (
                 <tr key={h.id} data-reveal onContextMenu={(e) => hostMenu.openAt(e, h.id)}>
-                  <td style={{ ...cell, height: 46, width: "35%" }}>
+                  <td style={{ ...cell, height: 48, width: "35%" }}>
                     <HostName host={h} onEditHost={p.onEditHost} />
-                    <div style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)", overflowWrap: "anywhere" }}>{h.username ? `${h.username}@` : ""}{h.hostname}</div>
+                    <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--text-2)", overflowWrap: "anywhere" }}>{h.username ? `${h.username}@` : ""}{h.hostname}</div>
                   </td>
                   <td style={cell}>
                     {h.agent_keys.length === 0 ? (
@@ -1635,7 +1635,7 @@ function Segmented<T extends string>(p: { label: string; value: T; options: { id
             aria-checked={on}
             disabled={p.disabled}
             onClick={() => p.onChange(o.id)}
-            style={{ height: 26, padding: "0 12px", border: 0, borderRadius: 4, background: on ? "var(--bg)" : "transparent", boxShadow: on ? "0 0 0 1px var(--line)" : "none", color: on ? "var(--text)" : "var(--text-2)", cursor: p.disabled ? "default" : "pointer" }}
+            style={{ height: 28, padding: "0 12px", border: 0, borderRadius: 4, background: on ? "var(--bg)" : "transparent", boxShadow: on ? "0 0 0 1px var(--line)" : "none", color: on ? "var(--text)" : "var(--text-2)", cursor: p.disabled ? "default" : "pointer" }}
           >
             {o.label}
           </button>
@@ -2156,7 +2156,7 @@ function IdentityDialog(p: { identity: Identity | null; identities: Identity[]; 
         </div>
         <div>
           <label style={fieldLabel} htmlFor="id-user">User</label>
-          <input id="id-user" value={user} spellCheck={false} autoCapitalize="off" disabled={busy} onChange={(e) => { setUser(e.target.value); setErr(""); }} placeholder="Use the host's user" style={{ ...field, fontFamily: MONO, fontSize: 12.5 }} />
+          <input id="id-user" value={user} spellCheck={false} autoCapitalize="off" disabled={busy} onChange={(e) => { setUser(e.target.value); setErr(""); }} placeholder="Use the host's user" style={{ ...field, fontFamily: MONO, fontSize: 12 }} />
           <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-3)" }}>Leave empty to keep the user set on each host.</p>
         </div>
         <div>
@@ -2317,7 +2317,7 @@ function ShowPrivateKeyDialog(p: { id: string; onClose(): void }) {
   return (
     <Modal label="Private key" onClose={p.onClose} width={560} initialFocus={closeRef}>
       <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{p.id}</h2>
-      <pre data-selectable style={{ margin: 0, height: 260, overflow: "auto", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", fontFamily: MONO, fontSize: 11.5, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: err ? "var(--err)" : "var(--text)" }}>
+      <pre data-selectable style={{ margin: 0, height: 260, overflow: "auto", padding: "10px 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", fontFamily: MONO, fontSize: 11, lineHeight: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: err ? "var(--err)" : "var(--text)" }}>
         {err || pem || ""}
       </pre>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

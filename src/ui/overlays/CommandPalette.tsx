@@ -51,7 +51,7 @@ type Item = {
 };
 
 const kbd: CSSProperties = { padding: "0 5px", border: "1px solid var(--line)", borderRadius: 4, fontFamily: "inherit", fontSize: 11, color: "var(--text-2)" };
-const groupTitle = (first: boolean): CSSProperties => ({ flex: "none", margin: first ? "6px 10px 4px" : "10px 10px 4px", fontSize: 12, fontWeight: 600, color: "var(--text-2)" });
+const groupTitle = (first: boolean): CSSProperties => ({ flex: "none", margin: first ? "6px 10px 4px" : "10px 10px 4px", fontSize: 12, fontWeight: 500, color: "var(--text-2)" });
 const ellipsis: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const ROW_HEIGHT = 48;
 const LIST_HEIGHT = 440;
@@ -346,7 +346,7 @@ export function CommandPalette({
               setFilter("all");
               setSel(0);
             }}
-            style={{ flex: "none", display: "inline-flex", alignItems: "center", height: 22, padding: "0 8px", border: 0, borderRadius: 11, background: "var(--bg-raised)", color: "var(--text)", fontSize: 12, cursor: "pointer", visibility: filter === "all" ? "hidden" : "visible" }}
+            style={{ flex: "none", display: "inline-flex", alignItems: "center", height: 24, padding: "0 8px", border: 0, borderRadius: 12, background: "var(--bg-raised)", color: "var(--text)", fontSize: 12, cursor: "pointer", visibility: filter === "all" ? "hidden" : "visible" }}
           >
             <Stable text={filter === "all" ? "" : FILTER_LABEL[filter]} alts={FILTERS.filter((f) => f !== "all").map((f) => FILTER_LABEL[f])} />
           </button>
@@ -389,14 +389,14 @@ export function CommandPalette({
                   >
                     <span
                       aria-hidden="true"
-                      style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 6, background: isHost ? "var(--bg-raised)" : "transparent", color: "var(--text-2)" }}
+                      style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 6, background: isHost ? "var(--bg-raised)" : "transparent", color: "var(--text-2)" }}
                     >
                       {item.icon}
                     </span>
                     {item.sub ? (
                       <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
                         <span style={{ ...ellipsis, lineHeight: "18px", fontWeight: isHost ? 600 : undefined }}>{item.title}</span>
-                        <span style={{ ...ellipsis, lineHeight: "16px", color: "var(--text-2)", ...(item.monoSub ? { fontFamily: MONO, fontSize: 11.5 } : { fontSize: 12 }) }}>{item.sub}</span>
+                        <span style={{ ...ellipsis, lineHeight: "16px", color: "var(--text-2)", ...(item.monoSub ? { fontFamily: MONO, fontSize: 11 } : { fontSize: 12 }) }}>{item.sub}</span>
                       </span>
                     ) : (
                       <span style={{ ...ellipsis, flex: 1, minWidth: 0, lineHeight: "18px" }}>{item.title}</span>

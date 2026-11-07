@@ -36,7 +36,7 @@ const CAPS: { key: keyof AiCaps; label: string; hint?: string; group: "read" | "
 const SKILL_LABELS = ["Install", "Installing…", "Remove", "Removing…", "Retry", "Checking…"];
 
 const card: CSSProperties = { padding: 14, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg)" };
-const cardTitle: CSSProperties = { margin: 0, fontSize: 14, fontWeight: 600 };
+const cardTitle: CSSProperties = { margin: 0, fontSize: 14, fontWeight: 500 };
 const cardDesc: CSSProperties = { margin: "4px 0 0", fontSize: 12, color: "var(--text-2)", lineHeight: 1.5 };
 const row: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: "1px solid var(--line-soft)" };
 const rowLast: CSSProperties = { ...row, borderBottom: 0, paddingBottom: 0 };
@@ -44,7 +44,7 @@ const rowHead: CSSProperties = { flex: "1 1 240px", minWidth: 0 };
 const sub: CSSProperties = { margin: "2px 0 0", fontSize: 12, color: "var(--text-2)" };
 const groupLabel: CSSProperties = { ...sectionLabel, margin: "14px 0 0" };
 const field: CSSProperties = { width: "100%", height: 32, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
-const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer", flex: "none" };
+const iconBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer", flex: "none" };
 
 function dim(off: boolean): CSSProperties {
   return off ? { opacity: 0.6, cursor: "default" } : {};
@@ -773,7 +773,7 @@ function PolicyCard({ hosts, onHostsChanged }: { hosts: Host[]; onHostsChanged()
             )}
           </div>
           <div style={{ overflowX: "auto", marginTop: 8 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
               <thead>
                 <tr>
                   <th style={{ ...th, paddingLeft: 0 }}>Host</th>
@@ -788,9 +788,9 @@ function PolicyCard({ hosts, onHostsChanged }: { hosts: Host[]; onHostsChanged()
                   const busyTitle = bulk !== null ? "Saving…" : undefined;
                   return (
                     <tr key={h.id}>
-                      <td style={{ ...c, height: 46, paddingLeft: 0, maxWidth: 0, width: "100%" }}>
-                        <div style={{ fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</div>
-                        <div style={{ fontFamily: MONO, fontSize: 11.5, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td style={{ ...c, height: 48, paddingLeft: 0, maxWidth: 0, width: "100%" }}>
+                        <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</div>
+                        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {h.username}@{h.hostname}
                           {h.port !== 22 ? `:${h.port}` : ""}
                         </div>

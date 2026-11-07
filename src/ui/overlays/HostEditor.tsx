@@ -42,13 +42,13 @@ const inAdvanced = (k: string) => k === "keepalive" || k === "timeout" || k.star
 const labelStyle: CSSProperties = { display: "block", marginBottom: 6, fontSize: 12, fontWeight: 500, color: "var(--text-2)" };
 const labelRow: CSSProperties = { display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6, minWidth: 0 };
 const rowMsg: CSSProperties = { flex: "1 1 0", minWidth: 0, fontSize: 12, color: "var(--err)", textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-const h3Style: CSSProperties = { margin: 0, fontSize: 13, fontWeight: 600 };
+const h3Style: CSSProperties = { margin: 0, fontSize: 13, fontWeight: 500 };
 const sectionStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 12 };
 const grid2: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 };
 const hint: CSSProperties = { margin: 0, fontSize: 12, color: "var(--text-2)", lineHeight: 1.45 };
 const errStyle: CSSProperties = { display: "block", marginTop: 4, fontSize: 12, color: "var(--err)", overflowWrap: "anywhere" };
 const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
-const chip: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%", minWidth: 0, height: 22, padding: "0 4px 0 8px", borderRadius: 11, background: "var(--bg-raised)", fontSize: 12, color: "var(--text)", boxSizing: "border-box" };
+const chip: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%", minWidth: 0, height: 24, padding: "0 4px 0 8px", borderRadius: 12, background: "var(--bg-raised)", fontSize: 12, color: "var(--text)", boxSizing: "border-box" };
 const panel: CSSProperties = { display: "flex", flexDirection: "column", gap: 10, padding: 12, border: "1px solid var(--line)", borderRadius: 8 };
 
 function inputStyle(opts: { error?: boolean; mono?: boolean; disabled?: boolean } = {}): CSSProperties {
@@ -61,7 +61,7 @@ function inputStyle(opts: { error?: boolean; mono?: boolean; disabled?: boolean 
     background: "var(--bg-sunken)",
     color: "var(--text)",
     boxSizing: "border-box",
-    ...(opts.mono ? { fontFamily: MONO, fontSize: 12.5 } : null),
+    ...(opts.mono ? { fontFamily: MONO, fontSize: 12 } : null),
     ...(opts.disabled ? { opacity: 0.55, cursor: "not-allowed" } : null),
   };
 }
@@ -219,7 +219,7 @@ function Segmented<T extends string>({ name, legend, value, options, onChange }:
             <label
               key={o.value}
               title={o.title}
-              style={{ position: "relative", display: "flex", alignItems: "center", height: 26, padding: "0 12px", borderRadius: 4, background: on ? "var(--bg)" : "transparent", boxShadow: focused === o.value ? "0 0 0 2px var(--focus)" : on ? "0 0 0 1px var(--line)" : "none", color: on ? "var(--text)" : "var(--text-2)", cursor: o.disabled ? "not-allowed" : "pointer", opacity: o.disabled ? 0.5 : 1, whiteSpace: "nowrap" }}
+              style={{ position: "relative", display: "flex", alignItems: "center", height: 28, padding: "0 12px", borderRadius: 4, background: on ? "var(--bg)" : "transparent", boxShadow: focused === o.value ? "0 0 0 2px var(--focus)" : on ? "0 0 0 1px var(--line)" : "none", color: on ? "var(--text)" : "var(--text-2)", cursor: o.disabled ? "not-allowed" : "pointer", opacity: o.disabled ? 0.5 : 1, whiteSpace: "nowrap" }}
             >
               <input
                 type="radio"
@@ -1095,7 +1095,7 @@ export function HostEditor(p: {
           style={p.inline ? { display: "flex", flexDirection: "column", color: "var(--text)" } : { width: 680, maxWidth: "100%", maxHeight: "100%", display: "flex", flexDirection: "column", borderRadius: 12, background: "var(--bg)", color: "var(--text)", boxShadow: "var(--shadow)", overflow: "hidden" }}
         >
           <div style={p.inline ? { display: "flex", alignItems: "center", gap: 12, paddingBottom: 18 } : { display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--line)" }}>
-            <h2 id={fid("title")} style={{ flex: 1, minWidth: 0, margin: 0, fontSize: p.inline ? 18 : 16, fontWeight: 600 }}>{editing ? (p.inline && current ? `Edit ${current.name}` : "Edit host") : "New host"}</h2>
+            <h2 id={fid("title")} style={{ flex: 1, minWidth: 0, margin: 0, fontSize: p.inline ? 18 : 16, fontWeight: 500 }}>{editing ? (p.inline && current ? `Edit ${current.name}` : "Edit host") : "New host"}</h2>
             {!p.inline && (
               <button type="button" aria-label="Close" disabled={!!busy} onClick={close} style={{ ...iconBtn, cursor: busy ? "default" : "pointer", opacity: busy ? 0.55 : 1 }}>
                 <CloseIcon size={14} />
@@ -1363,7 +1363,7 @@ export function HostEditor(p: {
                             <CheckIcon />
                           </span>
                           <span style={{ flex: 1, minWidth: 0, color: "var(--text-2)" }}>Password saved</span>
-                          <button type="button" data-focus="pw-change" onClick={() => setPwChanging(true)} style={{ ...btn("secondary", { small: true }), height: 26 }}>
+                          <button type="button" data-focus="pw-change" onClick={() => setPwChanging(true)} style={{ ...btn("secondary", { small: true }), height: 28 }}>
                             Change
                           </button>
                         </div>
@@ -1649,7 +1649,7 @@ export function HostEditor(p: {
                   aria-expanded={advancedOpen}
                   aria-controls={fid("adv-body")}
                   onClick={() => setAdvancedOpen((o) => !o)}
-                  style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, border: 0, background: "transparent", color: "var(--text)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, border: 0, background: "transparent", color: "var(--text)", fontSize: 13, fontWeight: 500, cursor: "pointer" }}
                 >
                   <span style={{ display: "flex", transform: advancedOpen ? "none" : "rotate(-90deg)", transition: "transform 120ms ease" }}>
                     <ChevronIcon size={14} />
@@ -1937,7 +1937,7 @@ export function HostEditor(p: {
                           keyIds.map((id) => (
                             <label key={id} title={id} style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, minHeight: 24, cursor: "pointer" }}>
                               <input type="checkbox" checked={agentKeys.includes(id)} onChange={() => setAgentKeys((cur) => (cur.includes(id) ? cur.filter((k) => k !== id) : [...cur, id]))} style={{ flex: "none" }} />
-                              <span style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{id}</span>
+                              <span style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{id}</span>
                             </label>
                           ))
                         )}

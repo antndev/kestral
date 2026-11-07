@@ -207,7 +207,7 @@ function TabLabel({ text, bold }: { text: string; bold: boolean }) {
   const item: CSSProperties = { gridArea: "1 / 1", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
   return (
     <span style={{ display: "grid", flex: "0 1 auto", minWidth: 0, maxWidth: 150 }}>
-      <span aria-hidden="true" style={{ ...item, fontWeight: 600, visibility: "hidden" }}>
+      <span aria-hidden="true" style={{ ...item, fontWeight: 500, visibility: "hidden" }}>
         {text}
       </span>
       <span style={{ ...item, fontWeight: bold ? 600 : 400 }}>{text}</span>
@@ -457,7 +457,7 @@ function TitleBar({
               )}
               <TabLabel text={t.name} bold={active} />
               {panes > 1 && (
-                <span aria-label={`${panes} panes`} style={{ flex: "none", minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, background: "var(--bg-raised)", color: "var(--text-2)", fontSize: 10.5, fontWeight: 600, lineHeight: "16px", textAlign: "center", boxSizing: "border-box" }}>
+                <span aria-label={`${panes} panes`} style={{ flex: "none", minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, background: "var(--bg-raised)", color: "var(--text-2)", fontSize: 11, fontWeight: 500, lineHeight: "16px", textAlign: "center", boxSizing: "border-box" }}>
                   {panes}
                 </span>
               )}
@@ -553,7 +553,7 @@ function Sidebar({
               data-nav
               aria-current={active ? "page" : undefined}
               onClick={() => onSelect(n.id)}
-              style={{ position: "relative", display: "flex", alignItems: "center", gap: 10, height: 30, flex: "none", marginTop: n.id === "settings" ? "auto" : 0, padding: "0 8px", border: 0, borderRadius: 6, color: "var(--text)", fontWeight: active ? 600 : 400, textAlign: "left", cursor: "pointer" }}
+              style={{ position: "relative", display: "flex", alignItems: "center", gap: 10, height: 32, flex: "none", marginTop: n.id === "settings" ? "auto" : 0, padding: "0 8px", border: 0, borderRadius: 6, color: "var(--text)", fontWeight: active ? 600 : 400, textAlign: "left", cursor: "pointer" }}
             >
               <span style={{ display: "flex" }}>{n.icon}</span>
               <span style={{ flex: 1 }}>{n.label}</span>

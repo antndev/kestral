@@ -71,7 +71,7 @@ const COLS = 7;
 // The header line is an inset shadow so it stays attached to the sticky header while scrolling.
 const th: CSSProperties = { ...baseTh, position: "sticky", top: 0, zIndex: 1, background: "var(--bg)", borderBottom: 0, boxShadow: "inset 0 -1px 0 var(--line)" };
 const cell: CSSProperties = { ...td, padding: "10px 12px 9px", lineHeight: "20px", verticalAlign: "top", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-const dayCell: CSSProperties = { padding: "14px 12px 6px 40px", fontSize: 12, fontWeight: 600, color: "var(--text-2)", borderBottom: "1px solid var(--line-soft)" };
+const dayCell: CSSProperties = { padding: "14px 12px 6px 40px", fontSize: 12, fontWeight: 500, color: "var(--text-2)", borderBottom: "1px solid var(--line-soft)" };
 const control: CSSProperties = { height: 32, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
 const linkBtn: CSSProperties = { padding: 0, border: 0, background: "transparent", color: "var(--link)", textDecoration: "underline", textUnderlineOffset: 2, cursor: "pointer" };
 const inline: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, height: 20, verticalAlign: "top" };
@@ -137,7 +137,7 @@ function DecisionBadge({ decision, sel }: { decision: string; sel: boolean }) {
   const d = decisionOf(decision);
   const c = TONES[d.tone];
   return (
-    <span title={DECISION_HINT[decision]} style={{ display: "inline-flex", alignItems: "center", height: 18, padding: "0 6px", borderRadius: 9, background: sel ? c.selBg : c.bg, color: c.fg, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+    <span title={DECISION_HINT[decision]} style={{ display: "inline-flex", alignItems: "center", height: 18, padding: "0 6px", borderRadius: 9, background: sel ? c.selBg : c.bg, color: c.fg, fontSize: 11, fontWeight: 500, whiteSpace: "nowrap" }}>
       {d.label}
     </span>
   );
@@ -362,13 +362,13 @@ export function LogsScreen() {
       ) : total === 0 && !filtering ? (
         <EmptyState>
           <p style={{ margin: 0 }}>
-            <span style={{ display: "block", fontWeight: 600, color: "var(--text)" }}>No activity yet</span>
+            <span style={{ display: "block", fontWeight: 500, color: "var(--text)" }}>No activity yet</span>
             <span style={{ display: "block", marginTop: 4 }}>Commands you run and AI actions appear here.</span>
           </p>
         </EmptyState>
       ) : (
         <div style={{ flex: 1, minHeight: 0, overflow: "auto", scrollbarGutter: "stable", padding: "0 28px 24px" }}>
-          <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "separate", borderSpacing: 0, fontSize: 12.5 }}>
+          <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "separate", borderSpacing: 0, fontSize: 12 }}>
             <colgroup>
               <col style={{ width: 28 }} />
               <col style={{ width: 72 }} />
@@ -432,7 +432,7 @@ export function LogsScreen() {
                             ev.stopPropagation();
                             toggle(e.id);
                           }}
-                          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}
+                          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer" }}
                         >
                           <span style={{ display: "flex", transform: expanded ? "none" : "rotate(-90deg)", transition: "transform 120ms ease-out" }}>
                             <ChevronIcon size={12} />
@@ -440,7 +440,7 @@ export function LogsScreen() {
                         </button>
                       </td>
                       <td style={{ ...cell, ...joined, color: "var(--text-2)", fontVariantNumeric: "tabular-nums" }} title={fmtFull(e.timestamp)}>{fmtTime(e.timestamp)}</td>
-                      <td style={{ ...cell, ...joined, fontWeight: 600 }} title={visibleText(e.host_name)}><VisibleLine text={e.host_name} /></td>
+                      <td style={{ ...cell, ...joined, fontWeight: 500 }} title={visibleText(e.host_name)}><VisibleLine text={e.host_name} /></td>
                       <td style={{ ...cell, ...joined, fontFamily: MONO, fontSize: 12, whiteSpace: expanded ? "normal" : "nowrap" }} title={expanded ? undefined : visibleText(e.command)}>
                         {expanded ? (
                           <div data-selectable onClick={(ev) => ev.stopPropagation()} style={{ maxHeight: 240, overflowY: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", cursor: "text" }}>

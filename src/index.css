@@ -244,14 +244,6 @@ button {
 button:active:not(:disabled):not([data-no-press]) {
   transform: scale(0.985);
 }
-@keyframes kst-breathe {
-  50% {
-    opacity: 0.55;
-  }
-}
-[data-anim="breathe"] {
-  animation: kst-breathe 9s ease-in-out infinite;
-}
 [data-icon-btn] {
   background: transparent;
   transition: background calc(120ms * var(--anim-scale, 1)), color calc(120ms * var(--anim-scale, 1)), transform calc(160ms * var(--anim-scale, 1)) var(--ease-out);

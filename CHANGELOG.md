@@ -3,6 +3,13 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.23 - 2026-11-07
+
+### Changed
+- Calmer type: fewer font sizes and lighter weights, bold only for titles.
+- Buttons, fields, rows and bars share one size grid, so equal things are equal.
+- Hosts and snippets the AI changed no longer show an "AI" label. You still confirm them before they connect or run.
+
 ## 0.2.22 - 2026-10-16
 
 ### Fixed

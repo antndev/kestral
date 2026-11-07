@@ -59,7 +59,7 @@ export function useMenu<K = string>() {
 export type MenuState<K = string> = ReturnType<typeof useMenu<K>>;
 
 const moreBtn: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", width: 32, height: 32, padding: 0, border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text-2)", cursor: "pointer", boxSizing: "border-box" };
-const moreBtnSmall: CSSProperties = { ...moreBtn, width: 26, height: 26, border: 0, background: "transparent" };
+const moreBtnSmall: CSSProperties = { ...moreBtn, width: 28, height: 28, border: 0, background: "transparent" };
 
 /** The "…" trigger. `small` is the borderless variant for table rows and list headers. */
 export function MoreButton<K>({ menu, itemKey, label, small, hidden, icon, color, title }: { menu: MenuState<K>; itemKey: K; label: string; small?: boolean; hidden?: boolean; icon?: ReactNode; color?: string; title?: string }) {

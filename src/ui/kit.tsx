@@ -10,7 +10,7 @@ export const pageBtn: CSSProperties = { display: "flex", alignItems: "center", g
 export const primaryBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
 export const smallBtn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 28, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
 export const sectionLabel: CSSProperties = { margin: "0 0 8px", fontSize: 12, fontWeight: 500, color: "var(--text-2)" };
-export const mono: CSSProperties = { fontFamily: MONO, fontSize: 12.5 };
+export const mono: CSSProperties = { fontFamily: MONO, fontSize: 12 };
 export const muted: CSSProperties = { color: "var(--text-3)" };
 export const chip: CSSProperties = { display: "inline-flex", alignItems: "center", maxWidth: 200, height: 24, padding: "0 10px", borderRadius: 12, background: "var(--bg-raised)", color: "var(--text)", fontSize: 12, boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 export const th: CSSProperties = { height: 32, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
@@ -119,9 +119,9 @@ export function ListItem({
         }}
         style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: 8, paddingRight: trailing ? 52 : 8, border: 0, borderRadius: 6, background: selected ? "var(--sel)" : "transparent", color: "var(--text)", textAlign: "left", cursor: "pointer", transition: "background 120ms" }}
       >
-        <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "none", width: 30, height: 30, borderRadius: 6, background: "var(--bg-raised)", color: iconColor ?? "var(--text-2)" }}>{icon}</span>
+        <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "none", width: 32, height: 32, borderRadius: 6, background: "var(--bg-raised)", color: iconColor ?? "var(--text-2)" }}>{icon}</span>
         <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-          <span style={{ ...oneLine, fontWeight: 600 }}>{title}</span>
+          <span style={{ ...oneLine, fontWeight: 500 }}>{title}</span>
           {sub !== undefined && <span style={{ ...oneLine, fontSize: 12, color: "var(--text-2)" }}>{sub}</span>}
         </span>
       </button>
@@ -170,7 +170,7 @@ export function DetailHead({ title, sub, actions }: { title: ReactNode; sub?: Re
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ minWidth: 0 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, overflowWrap: "anywhere" }}>{title}</h2>
+        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, overflowWrap: "anywhere" }}>{title}</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 12, height: 20, margin: "4px 0 0", color: "var(--text-2)" }}>{sub}</div>
       </div>
       {actions && <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>{actions}</div>}

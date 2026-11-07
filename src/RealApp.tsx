@@ -162,7 +162,7 @@ function Toasts({ items, onDismiss }: { items: Toast[]; onDismiss: (id: number) 
   return (
     <div style={{ position: "fixed", right: 16, bottom: 16, zIndex: 100000, display: "flex", flexDirection: "column", gap: 8, maxWidth: 420 }}>
       {items.map((t) => (
-        <div key={t.id} role={t.kind === "error" ? "alert" : "status"} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 10px 10px 12px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", fontSize: 12.5 }}>
+        <div key={t.id} role={t.kind === "error" ? "alert" : "status"} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 10px 10px 12px", border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg)", boxShadow: "var(--shadow)", fontSize: 12 }}>
           <span aria-hidden="true" style={{ width: 8, height: 8, marginTop: 5, flex: "none", borderRadius: "50%", background: t.kind === "error" ? "var(--err)" : t.kind === "ok" ? "var(--ok)" : "var(--accent)" }} />
           <span style={{ flex: 1, minWidth: 0, wordBreak: "break-word" }}>{t.text}</span>
           <button type="button" aria-label="Dismiss" onClick={() => onDismiss(t.id)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, padding: 0, border: 0, borderRadius: 4, background: "transparent", color: "var(--text-2)", cursor: "pointer", flex: "none" }}>
@@ -195,7 +195,7 @@ function AiHostFacts({ hosts, all, identities }: { hosts: Host[]; all: Host[]; i
         const addr = `${user}@${h.hostname.includes(":") ? `[${h.hostname}]` : h.hostname}:${h.port}`;
         const jump = h.jump_host_id ? all.find((x) => x.id === h.jump_host_id)?.name ?? "missing host" : "";
         return (
-          <dl key={h.id} data-selectable style={{ display: "grid", gridTemplateColumns: "84px minmax(0, 1fr)", gap: "6px 12px", margin: 0, padding: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", fontSize: 12.5 }}>
+          <dl key={h.id} data-selectable style={{ display: "grid", gridTemplateColumns: "84px minmax(0, 1fr)", gap: "6px 12px", margin: 0, padding: 12, border: "1px solid var(--line)", borderRadius: 8, background: "var(--bg-sunken)", fontSize: 12 }}>
             <dt style={dt}>Name</dt>
             <dd style={dd}><VisibleLine text={h.name} /></dd>
             <dt style={dt}>Address</dt>
