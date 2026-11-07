@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.24 - 2026-11-07
+
+### Fixed
+- Checking for updates in Settings keeps the current status line until the check is done, only the button shows Checking.
+
 ## 0.2.23 - 2026-11-07
 
 ### Changed

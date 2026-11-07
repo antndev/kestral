@@ -538,6 +538,8 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
   const [checkState, setUpd] = useState<UpdateState>({ kind: "idle" });
   const install = useSyncExternalStore(updateLock.subscribe, updateLock.phase);
   const upd: UpdateState = install.kind === "idle" ? checkState : install;
+  const settledUpd = useRef<UpdateState>({ kind: "idle" });
+  if (upd.kind !== "checking") settledUpd.current = upd.kind === "error" ? { kind: "idle" } : upd;
   const [pending, setPending] = useState<{ version: string; notes: string } | null>(null);
   const updRef = useRef<PendingUpdate | null>(null);
   const [linkErr, setLinkErr] = useState("");
@@ -974,14 +976,14 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
     {
       id: "updates", page: "About", label: "Updates", keywords: "update upgrade release github check",
       node: (() => {
+        const view = upd.kind === "checking" ? settledUpd.current : upd;
         const status =
-          upd.kind === "checking" ? "Checking for updates…"
-          : upd.kind === "current" ? "You are on the latest version."
-          : upd.kind === "available" ? `Update available, version ${upd.version}.`
-          : upd.kind === "downloading" ? (upd.pct === null ? "Downloading…" : `Downloading… ${upd.pct}%`)
-          : upd.kind === "ready" ? "Installed. Restarting…"
-          : upd.kind === "error" ? upd.message
-          : "Updates come from signed GitHub releases.";
+          view.kind === "current" ? "You are on the latest version"
+          : view.kind === "available" ? `Update available, version ${view.version}`
+          : view.kind === "downloading" ? (view.pct === null ? "Downloading…" : `Downloading… ${view.pct}%`)
+          : view.kind === "ready" ? "Installed, restarting…"
+          : view.kind === "error" ? view.message
+          : "Updates come from signed GitHub releases";
         const shown = linkErr || status;
         const busy = upd.kind === "checking" || upd.kind === "downloading" || upd.kind === "ready";
         return (
