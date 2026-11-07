@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.27 - 2026-11-07
+
+### Changed
+- Title bar, sidebar, content and terminal share one background colour.
+
 ## 0.2.26 - 2026-11-07
 
 ### Added
