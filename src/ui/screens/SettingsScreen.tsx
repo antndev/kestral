@@ -13,8 +13,8 @@ import { Markdown } from "../Markdown";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import { HELLO_AUTO_KEY } from "../LockScreen";
-import { RELEASES_URL, friendlyUpdateError, installUpdate, rememberUpdate, updateLock } from "../../lib/updateLock";
-import type { PendingUpdate } from "../../lib/updateLock";
+import { RELEASES_URL, friendlyUpdateError, installUpdate, knownUpdate, rememberUpdate, updateLock } from "../../lib/updateLock";
+import type { PendingUpdate, UpdatePhase } from "../../lib/updateLock";
 import { SegGroup, segItem } from "../SegGroup";
 import { useAlive } from "../kit";
 
@@ -132,6 +132,7 @@ export function ChangeMasterDialog({ onClose, onChanged }: { onClose: () => void
 const PAGES = ["General", "Appearance", "Terminal", "Keyboard", "Vault and security", "About"] as const;
 type Page = (typeof PAGES)[number];
 const PAGE_KEY = "kestral-settings-page";
+export const showSettingsPage = (page: Page) => writeJson(PAGE_KEY, page);
 
 const row: CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, padding: "12px 0", borderBottom: "1px solid var(--line-soft)" };
 const blockRow: CSSProperties = { display: "grid", gap: 10, padding: "12px 0", borderBottom: "1px solid var(--line-soft)" };
@@ -361,6 +362,23 @@ type UpdateState =
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
+const updateBtn: CSSProperties = { ...btnPrimary, position: "relative", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" };
+const updateFill: CSSProperties = { position: "absolute", top: 0, bottom: 0, left: 0, background: "color-mix(in srgb, var(--btn-text) 14%, var(--btn))", transition: "width 200ms" };
+
+function UpdateButton({ phase, onClick }: { phase: UpdatePhase; onClick(): void }) {
+  const busy = phase.kind === "downloading" || phase.kind === "ready";
+  const pct = phase.kind === "ready" ? 100 : phase.kind === "downloading" ? phase.pct : 0;
+  const label = phase.kind === "ready" ? "Restarting…" : !busy ? "Update now" : pct === null ? "Updating…" : `Updating ${pct}%`;
+  return (
+    <button type="button" aria-disabled={busy || undefined} onClick={() => !busy && onClick()} style={{ ...updateBtn, cursor: busy ? "default" : "pointer" }}>
+      {busy && <span aria-hidden="true" style={{ ...updateFill, width: `${pct ?? 0}%` }} />}
+      <span style={{ position: "relative", fontVariantNumeric: "tabular-nums" }}>
+        <Stable text={label} alts={["Update now", "Updating 100%", "Updating…", "Restarting…"]} />
+      </span>
+    </button>
+  );
+}
+
 function plural(n: number, w: string, many = `${w}s`) {
   return `${n} ${n === 1 ? w : many}`;
 }
@@ -535,13 +553,14 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
   const [version, setVersion] = useState("");
   const [changelog, setChangelog] = useState<string | null>(null);
   const [changelogErr, setChangelogErr] = useState("");
-  const [checkState, setUpd] = useState<UpdateState>({ kind: "idle" });
+  const [known] = useState(knownUpdate);
+  const [checkState, setUpd] = useState<UpdateState>(known ? { kind: "available", version: known.version } : { kind: "idle" });
   const install = useSyncExternalStore(updateLock.subscribe, updateLock.phase);
   const upd: UpdateState = install.kind === "idle" ? checkState : install;
   const settledUpd = useRef<UpdateState>({ kind: "idle" });
   if (upd.kind !== "checking") settledUpd.current = upd.kind === "error" ? { kind: "idle" } : upd;
-  const [pending, setPending] = useState<{ version: string; notes: string } | null>(null);
-  const updRef = useRef<PendingUpdate | null>(null);
+  const [pending, setPending] = useState<{ version: string; notes: string } | null>(known ? { version: known.version, notes: known.body?.trim() ?? "" } : null);
+  const updRef = useRef<PendingUpdate | null>(known ?? null);
   const [linkErr, setLinkErr] = useState("");
 
   const queryRef = useRef(query);
@@ -979,13 +998,11 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
         const view = upd.kind === "checking" ? settledUpd.current : upd;
         const status =
           view.kind === "current" ? "You are on the latest version"
-          : view.kind === "available" ? `Update available, version ${view.version}`
-          : view.kind === "downloading" ? (view.pct === null ? "Downloading…" : `Downloading… ${view.pct}%`)
-          : view.kind === "ready" ? "Installed, restarting…"
+          : view.kind === "available" || view.kind === "downloading" || view.kind === "ready" ? (pending ? `Version ${pending.version} is available` : "An update is available")
           : view.kind === "error" ? view.message
           : "Updates come from signed GitHub releases";
         const shown = linkErr || status;
-        const busy = upd.kind === "checking" || upd.kind === "downloading" || upd.kind === "ready";
+        const checking = upd.kind === "checking";
         return (
           <div style={row}>
             <div style={rowHead}>
@@ -993,11 +1010,11 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
               <p aria-live="polite" title={shown} style={{ ...sub, ...oneLine, color: upd.kind === "error" || linkErr ? "var(--err)" : "var(--text-2)" }}>{shown}</p>
             </div>
             <div style={ctlBox}>
-              {upd.kind === "available" ? (
-                <button type="button" onClick={() => void runUpdate()} style={{ ...btnPrimary, height: 32 }}>Update now</button>
+              {upd.kind === "available" || upd.kind === "downloading" || upd.kind === "ready" ? (
+                <UpdateButton phase={install} onClick={() => void runUpdate()} />
               ) : (
-                <button type="button" disabled={busy} onClick={() => (upd.kind === "error" && updRef.current ? void runUpdate() : void checkUpdate())} style={withDisabled(rowBtn, busy)}>
-                  <Stable text={upd.kind === "checking" ? "Checking…" : upd.kind === "downloading" ? "Updating…" : upd.kind === "ready" ? "Restarting…" : upd.kind === "error" ? "Try again" : "Check for updates"} alts={["Check for updates", "Checking…", "Updating…", "Restarting…", "Try again"]} />
+                <button type="button" disabled={checking} onClick={() => (upd.kind === "error" && updRef.current ? void runUpdate() : void checkUpdate())} style={withDisabled(rowBtn, checking)}>
+                  <Stable text={checking ? "Checking…" : upd.kind === "error" ? "Try again" : "Check for updates"} alts={["Check for updates", "Checking…", "Try again"]} />
                 </button>
               )}
               {upd.kind === "error" && <button type="button" onClick={openReleases} style={linkBtn}>Get it on GitHub</button>}

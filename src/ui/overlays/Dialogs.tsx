@@ -1,12 +1,9 @@
 import { CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode, RefObject, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { writeText as clipWrite } from "@tauri-apps/plugin-clipboard-manager";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { addedLabel } from "../../api";
 import type { ApprovalRequest, HostKeyChanged, HostKeyRequest, KnownHostEntry } from "../../api";
 import { IS_MAC, MONO, errText } from "../mock";
-import { CheckIcon, CopyIcon, CpuIcon, DownloadIcon, ShieldIcon, WarningIcon } from "../icons";
-import { RELEASES_URL, friendlyUpdateError, installUpdate } from "../../lib/updateLock";
-import { Markdown } from "../Markdown";
+import { CheckIcon, CopyIcon, CpuIcon, ShieldIcon, WarningIcon } from "../icons";
 import { useAlive } from "../kit";
 
 /* ---------- modal layer: topmost-only Escape, focus trap, focus restore ---------- */
@@ -239,12 +236,6 @@ function Spinner({ size = 14 }: { size?: number }) {
     </svg>
   );
 }
-
-const ArrowUpRightIcon = ({ size = 14 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M5 11 11 5M6 5h5v5" />
-  </svg>
-);
 
 export function useArmed(delay = 750) {
   const [armed, setArmed] = useState(false);
@@ -845,138 +836,6 @@ export function AiStoppedDialog({ info, onClose }: { info: { host_name: string; 
           Access was turned off so it cannot try another way. Turn it back on yourself in AI access if you want to continue.
         </p>
         <Actions>{[<Button key="ok" kind="primary" btnRef={okRef} onClick={onClose}>Understood</Button>]}</Actions>
-      </section>
-    </Overlay>
-  );
-}
-
-/* ---------- UpdateDialog ---------- */
-
-export function UpdateDialog({ version, notes, onClose }: { version: string; notes: string; onClose(): void }) {
-  const ref = useRef<HTMLElement>(null);
-  const primaryRef = useRef<HTMLButtonElement>(null);
-  const alive = useAlive();
-  const [phase, setPhase] = useState<"prompt" | "downloading" | "done" | "error">("prompt");
-  const [pct, setPct] = useState<number | null>(0);
-  const [err, setErr] = useState("");
-  const [linkErr, setLinkErr] = useState("");
-  const busy = phase === "downloading" || phase === "done";
-  const titleId = useId();
-  const descId = useId();
-  const indeterminate = useCallback((el: HTMLDivElement | null) => {
-    el?.animate([{ transform: "translateX(-100%)" }, { transform: "translateX(340%)" }], { duration: 1200, iterations: Infinity });
-  }, []);
-
-  const close = () => {
-    if (!busy) onClose();
-  };
-  const z = useModalLayer(ref, { onEscape: close, initialFocus: primaryRef });
-
-  useEffect(() => {
-    if (phase === "error") primaryRef.current?.focus();
-  }, [phase]);
-
-  async function run() {
-    // The focused button unmounts while downloading; keep focus inside the dialog.
-    ref.current?.focus();
-    setPhase("downloading");
-    setPct(0);
-    setErr("");
-    try {
-      await installUpdate((p) => alive.current && setPct(p));
-      if (alive.current) setPhase("done");
-    } catch (e) {
-      if (!alive.current) return;
-      setErr(friendlyUpdateError(e));
-      setPhase("error");
-    }
-  }
-
-  function openReleases() {
-    setLinkErr("");
-    openUrl(RELEASES_URL).catch((e) => alive.current && setLinkErr(errText(e)));
-  }
-
-  return (
-    <Overlay z={z} onBackdrop={close}>
-      <section ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descId} aria-busy={busy} tabIndex={-1} style={dialogBox(480)}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-          <IconTile tone="accent"><DownloadIcon size={20} /></IconTile>
-          <div style={{ minWidth: 0 }}>
-            <h2 id={titleId} style={title}>Update available</h2>
-            <p id={descId} style={lead}>
-              Version <span style={{ fontWeight: 500, color: "var(--text)" }}>{version}</span> is available.
-            </p>
-          </div>
-        </div>
-
-        <div style={{ height: notes.trim() ? 168 : 64, overflow: "auto", display: "flex", flexDirection: "column" }}>
-        {phase !== "error" && notes.trim() && (
-          <div data-selectable style={{ paddingTop: 12, borderTop: "1px solid var(--line)", fontSize: 12, color: "var(--text-2)", overflowWrap: "anywhere" }}>
-            <Markdown text={notes.trim()} />
-          </div>
-        )}
-        {phase === "error" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <p role="alert" style={errLine}>{err}</p>
-            <p style={{ margin: 0, fontSize: 12, color: "var(--text-2)" }}>
-              You can also download the installer from GitHub and run it; your hosts and settings stay.
-            </p>
-            {linkErr && <p style={errLine}>{linkErr}</p>}
-          </div>
-        )}
-
-        </div>
-
-        {phase === "prompt" && (
-          <Actions>
-            {[
-              <Button key="later" onClick={onClose}>Later</Button>,
-              <Button key="go" kind="primary" btnRef={primaryRef} onClick={run}><DownloadIcon />Update now</Button>,
-            ]}
-          </Actions>
-        )}
-        {busy && (
-          <Actions
-            left={
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div
-                  role="progressbar"
-                  aria-label="Download progress"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={phase === "done" ? 100 : pct ?? undefined}
-                  style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--bg-raised)", overflow: "hidden" }}
-                >
-                  {pct === null && phase !== "done" ? (
-                    <div ref={indeterminate} style={{ height: "100%", width: "30%", background: "var(--accent)" }} />
-                  ) : (
-                    <div style={{ height: "100%", width: `${phase === "done" ? 100 : pct}%`, background: "var(--accent)", transition: "width 200ms" }} />
-                  )}
-                </div>
-                <span style={{ width: 34, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                  {phase === "done" ? "100%" : pct === null ? "" : `${pct}%`}
-                </span>
-              </div>
-            }
-          >
-            {[
-              <Button key="busy" kind="primary" disabled title={phase === "done" ? "Restarting Kestral" : "Installing the update"} onClick={() => {}}>
-                <Spinner />
-                Updating
-              </Button>,
-            ]}
-          </Actions>
-        )}
-        {phase === "error" && (
-          <Actions>
-            {[
-              <Button key="close" kind="ghost" onClick={onClose}>Close</Button>,
-              <Button key="gh" onClick={openReleases}><ArrowUpRightIcon />Get it from GitHub</Button>,
-              <Button key="retry" kind="primary" btnRef={primaryRef} onClick={run}>Try again</Button>,
-            ]}
-          </Actions>
-        )}
       </section>
     </Overlay>
   );

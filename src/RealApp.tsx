@@ -48,9 +48,9 @@ import { KnownHostsScreen } from "./ui/screens/KnownHostsScreen";
 import { AiScreen } from "./ui/screens/AiScreen";
 import { LogsScreen } from "./ui/screens/LogsScreen";
 import { WelcomeScreen } from "./ui/screens/WelcomeScreen";
-import { SettingsScreen } from "./ui/screens/SettingsScreen";
+import { SettingsScreen, showSettingsPage } from "./ui/screens/SettingsScreen";
 import { CommandPalette, type PaletteAction } from "./ui/overlays/CommandPalette";
-import { AiStoppedDialog, ApprovalDialog, ConfirmDialog, HostKeyChangedDialog, HostKeyDialog, TrayOnboardingDialog, UpdateDialog, VisibleLine } from "./ui/overlays/Dialogs";
+import { AiStoppedDialog, ApprovalDialog, ConfirmDialog, HostKeyChangedDialog, HostKeyDialog, TrayOnboardingDialog, VisibleLine } from "./ui/overlays/Dialogs";
 
 // ------------------------------------------------------------------ theme
 
@@ -287,8 +287,8 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   const [bellTabs, setBellTabs] = useState<Set<string>>(new Set());
   const [changedKeys, setChangedKeys] = useState<(HostKeyChanged & { at: number })[]>([]);
   const [changedOpen, setChangedOpen] = useState<{ info: HostKeyChanged; saved: KnownHostEntry[] } | null>(null);
-  const [update, setUpdate] = useState<{ version: string; notes: string } | null>(null);
-  const [updateOpen, setUpdateOpen] = useState(false);
+  const [updateReady, setUpdateReady] = useState(false);
+  const [settingsKey, setSettingsKey] = useState(0);
   const [aiActive, setAiActive] = useState(false);
   const [aiUntil, setAiUntil] = useState<number | null>(null);
   const [aiPoke, setAiPoke] = useState(0);
@@ -369,25 +369,24 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   }, [loaded, hostsError, hosts, toast]);
 
   // Startup checks: data warnings, tray onboarding, updates.
-  const checkUpdateRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     let alive = true;
     api
       .dataWarnings()
       .then((ws) => alive && ws.forEach((w) => toast("error", w, true)))
       .catch(() => {});
-    const checkUpdate = (checkUpdateRef.current = async () => {
+    const checkUpdate = async () => {
       try {
         const { check } = await import("@tauri-apps/plugin-updater");
         const u = await check();
         if (alive && u) {
           rememberUpdate(u);
-          setUpdate({ version: u.version, notes: u.body || "" });
+          setUpdateReady(true);
         }
       } catch {
         /* offline or updater unavailable */
       }
-    });
+    };
     void checkUpdate();
     const every = window.setInterval(() => void checkUpdate(), 6 * 60 * 60 * 1000);
     return () => {
@@ -1266,7 +1265,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         setAiActive(on);
         setAiPoke((n) => n + 1);
       }} />;
-  else if (section === "settings") sectionBody = <SettingsScreen onVaultImported={refreshAll} />;
+  else if (section === "settings") sectionBody = <SettingsScreen key={settingsKey} onVaultImported={refreshAll} />;
   else sectionBody = <LogsScreen />;
 
   const box = (visible: boolean): CSSProperties => ({ position: "absolute", inset: 0, display: visible ? "flex" : "none", flexDirection: "column", minHeight: 0, minWidth: 0 });
@@ -1281,10 +1280,11 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
       sidebarOpen={sidebarOpen}
       aiActive={aiActive}
       aiUntil={aiUntil}
-      updateReady={!!update}
+      updateReady={updateReady}
       onUpdate={() => {
-        void checkUpdateRef.current();
-        setUpdateOpen(true);
+        showSettingsPage("About");
+        setSettingsKey((k) => k + 1);
+        goSection("settings");
       }}
       onToggleSidebar={() => setSidebarOpen((o) => !o)}
       onSelectSection={goSection}
@@ -1416,7 +1416,6 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         />
       )}
       {aiStopped && <AiStoppedDialog info={aiStopped} onClose={() => setAiStopped(null)} />}
-      {updateOpen && update && <UpdateDialog version={update.version} notes={update.notes} onClose={() => setUpdateOpen(false)} />}
       {confirm && (
         <ConfirmDialog
           key={confirm.title + confirm.message}

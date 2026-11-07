@@ -47,20 +47,21 @@ async function pendingUpdate(): Promise<PendingUpdate> {
 }
 
 /** Downloads, installs and relaunches. `onPct` gets null while the size is unknown. */
-export async function installUpdate(report?: (pct: number | null) => void) {
+export async function installUpdate() {
   if (updateLock.busy) throw new Error("An update is already installing.");
-  const update = await pendingUpdate();
   updateLock.busy = true;
-  const onPct = (pct: number | null) => {
-    updateLock.setPhase({ kind: "downloading", pct });
-    report?.(pct);
-  };
-  onPct(0);
+  const onPct = (pct: number | null) => updateLock.setPhase({ kind: "downloading", pct });
+  onPct(null);
+  let lastErr: unknown;
+  const update = await pendingUpdate().catch((e) => {
+    lastErr = e;
+    return null;
+  });
 
-  const runDownload = async () => {
+  const runDownload = async (u: PendingUpdate) => {
     let total = 0;
     let got = 0;
-    await update.downloadAndInstall((e) => {
+    await u.downloadAndInstall((e) => {
       if (e.event === "Started") {
         total = e.data?.contentLength ?? 0;
         onPct(total ? 0 : null);
@@ -73,10 +74,9 @@ export async function installUpdate(report?: (pct: number | null) => void) {
 
   // GitHub's release CDN and some antivirus scanners drop the connection now and
   // then ("error sending request"). A retry usually succeeds, so try a few times.
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; update && attempt < 3; attempt++) {
     try {
-      await runDownload();
+      await runDownload(update);
       updateLock.setPhase({ kind: "ready" });
       const { relaunch } = await import("@tauri-apps/plugin-process");
       await relaunch();

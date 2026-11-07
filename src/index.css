@@ -53,7 +53,7 @@ code,
   outline-offset: 1px;
 }
 
-button[style*="var(--btn)"]:hover:not(:disabled) {
+button[style*="var(--btn)"]:hover:not(:disabled):not([aria-disabled="true"]) {
   --btn: var(--btn-hover);
 }
 

@@ -3,6 +3,12 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.25 - 2026-11-07
+
+### Changed
+- Updates live in Settings, About. The Update badge in the title bar opens it, the update popup is gone.
+- The Update now button shows the download progress itself, the status line stays calm.
+
 ## 0.2.24 - 2026-11-07
 
 ### Fixed

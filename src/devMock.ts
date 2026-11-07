@@ -515,7 +515,24 @@ export function installDevMock() {
       case "plugin:clipboard-manager|read_text": return clipboard.text;
       case "plugin:dialog|open": return p.options?.directory ? "C:\\Users\\anton\\Downloads" : "C:\\Users\\anton\\.ssh\\id_ed25519";
       case "plugin:dialog|save": return "C:\\Users\\anton\\Downloads\\" + (p.options?.defaultPath ?? "export.txt");
-      case "plugin:updater|check": return null;
+      case "plugin:app|version": return "0.2.24";
+      case "plugin:updater|check":
+        await new Promise((r) => setTimeout(r, 900));
+        return flags.has("update") ? { rid: 1, currentVersion: "0.2.24", version: "0.2.25", date: null, body: "- Calmer update progress\n- Smaller fixes", rawJson: {} } : null;
+      case "plugin:updater|download_and_install": {
+        const send = (index: number, message: Any) => (window as Any).__TAURI_INTERNALS__.runCallback(p.onEvent.id, { index, message });
+        const total = 8_400_000;
+        send(0, { event: "Started", data: { contentLength: total } });
+        for (let i = 1; i <= 40; i++) {
+          await new Promise((r) => setTimeout(r, 100));
+          send(i, { event: "Progress", data: { chunkLength: total / 40 } });
+        }
+        send(41, { event: "Finished" });
+        return null;
+      }
+      case "plugin:process|restart":
+        setTimeout(() => window.location.reload(), 1500);
+        return new Promise(() => {});
       case "plugin:window|is_maximized": return false;
       case "identity_list": return JSON.parse(JSON.stringify(identities));
       case "identity_add": {
