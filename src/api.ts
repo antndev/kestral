@@ -58,6 +58,7 @@ export interface PortForward {
   autostart: boolean;
   kind: ForwardKind;
   start_on_connect: boolean;
+  ai_edited?: boolean;
 }
 
 export interface Host {
@@ -119,6 +120,7 @@ export interface AiCaps {
   manage_hosts: boolean;
   list_snippets: boolean;
   manage_snippets: boolean;
+  manage_forwards: boolean;
   list_secrets: boolean;
   audit_log: boolean;
 }
@@ -263,6 +265,7 @@ export const forwardStart = (hostId: string, forwardId: string) =>
 export const forwardStop = (hostId: string, forwardId: string) =>
   invoke<void>("forward_stop", { hostId, forwardId });
 export const forwardActive = () => invoke<string[]>("forward_active");
+export const forwardMarkReviewed = (hostId: string, seen: PortForward) => invoke<boolean>("forward_mark_reviewed", { hostId, seen });
 export const forwardStats = () => invoke<Record<string, number>>("forward_stats");
 export interface ForwardFailed {
   host: string;

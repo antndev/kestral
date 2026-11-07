@@ -1,4 +1,4 @@
-import { CSSProperties, FormEvent, RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, ReactNode, RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../../api";
 import type { ForwardKind, Host, PortForward } from "../../api";
@@ -8,7 +8,7 @@ import { ConfirmDialog as SharedConfirm } from "../overlays/Dialogs";
 import { ItemMenu, MoreButton, useMenu, type MenuState } from "../Menu";
 import { Stable } from "../Stable";
 import { SegGroup, segItem } from "../SegGroup";
-import { Block, Blocks, DetailHead, EditFooter, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, mono, muted, oneLine, pageBtn, primaryBtn } from "../kit";
+import { Block, Blocks, DetailHead, EditFooter, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, mono, muted, oneLine, pageBtn, primaryBtn, type Fact } from "../kit";
 
 const fieldLabel: CSSProperties = { display: "block", marginBottom: 6, fontSize: 12, fontWeight: 500, color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const input: CSSProperties = { width: "100%", height: 32, padding: "0 10px", borderWidth: 1, borderStyle: "solid", borderColor: "var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
@@ -178,6 +178,24 @@ const At = ({ addr, where }: { addr: string; where: string }) => (
 
 type Item = { id: string; row: Row | null; name: string; d: Draft; hostName: string; unsaved: boolean };
 
+function routeFacts(d: Draft, hostName: string): Fact[] {
+  const k = d.kind;
+  const listenAddr = withPort(d.listenHost.trim() || (k === "remote" ? "localhost" : "127.0.0.1"), d.listenPort);
+  const destAddr = withPort(d.destHost.trim() || (k === "remote" ? "127.0.0.1" : "localhost"), d.destPort);
+  return [
+    ["Type", <span title={KIND_HINT[k]}>{KIND_LABEL[k]}</span>],
+    ["Listen on", <At addr={listenAddr} where={k === "remote" ? hostName : "this computer"} />],
+    ["Through host", hostName],
+    ["Destination", k === "dynamic" ? <span style={muted}>Any (SOCKS proxy)</span> : k === "remote" ? <At addr={destAddr} where="this computer" /> : <span title={destAddr} style={mono}>{destAddr}</span>],
+  ];
+}
+
+function reachOf(d: Draft, hostName: string): ReactNode {
+  const reach = exposureOf(d);
+  if (!reach) return `Only from ${d.kind === "remote" ? hostName : "this computer"}`;
+  return <span title={reach.title} style={{ color: "var(--warn)" }}>{d.kind === "remote" ? "From other machines" : "From your network"}</span>;
+}
+
 function routeOf(it: Item): string {
   const listen = listenOf(it.d, it.hostName);
   const dest = it.d.kind === "dynamic" ? "" : destOf(it.d);
@@ -195,6 +213,8 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
   const [selId, setSelId] = useState<string | null>(() => hostsProp.flatMap((h) => h.forwards).find((f) => f.id in keptDrafts)?.id ?? null);
   const [newDraft, setNewDraft] = useState<{ id: string; draft: Draft } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Row | null>(null);
+  const [review, setReview] = useState<{ r: Row; changed: boolean; seq: number } | null>(null);
+  const reviewSeq = useRef(0);
   const [drafts, setDraftsState] = useState<Record<string, Draft>>(keptDrafts);
   const [filter, setFilter] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -286,6 +306,10 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
     const id = r.f.id;
     if (pending[id]) return;
     const on = active.has(id);
+    if (!on && r.f.ai_edited) {
+      setReview({ r, changed: false, seq: ++reviewSeq.current });
+      return;
+    }
     if (!on && !checked && onConfirmHosts) {
       onConfirmHosts([r.host.id], () => void toggle(r, true));
       return;
@@ -305,6 +329,23 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
         delete next[id];
         return next;
       });
+  }
+
+  async function confirmReview(rv: { r: Row }): Promise<boolean> {
+    const ok = await api.forwardMarkReviewed(rv.r.host.id, rv.r.f);
+    const fresh = await api.hostList();
+    onHostsChanged();
+    if (!alive.current) return true;
+    setHosts(fresh);
+    const host = fresh.find((h) => h.id === rv.r.host.id);
+    const f = host?.forwards.find((x) => x.id === rv.r.f.id);
+    if (!host || !f) throw new Error("This rule no longer exists.");
+    if (!ok) {
+      setReview({ r: { host, f }, changed: true, seq: ++reviewSeq.current });
+      return false;
+    }
+    void toggle({ host, f });
+    return true;
   }
 
   function startNewRule() {
@@ -490,6 +531,20 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
         </SplitView>
       )}
 
+      {review && (
+        <SharedConfirm
+          key={review.seq}
+          guarded
+          title="Changed by AI"
+          message={review.changed ? "The rule changed while you were reviewing it. This is the new version, check it again." : "The AI created or changed this rule. Check where it listens and where it leads before you start it."}
+          confirmLabel="Start"
+          width={480}
+          onConfirm={() => confirmReview(review)}
+          onClose={() => setReview(null)}
+        >
+          <Facts rows={[...routeFacts(draftOf(review.r), review.r.host.name), ["Reachable", reachOf(draftOf(review.r), review.r.host.name)]]} />
+        </SharedConfirm>
+      )}
       {confirmDelete && (
         <ConfirmDeleteDialog
           name={ruleName(confirmDelete.f)}
@@ -792,11 +847,7 @@ function RuleDetail({
   );
 
   if (!editMode && row && saved) {
-    const k = saved.kind;
     const hostName = row.host.name;
-    const listenAddr = withPort(saved.listenHost.trim() || (k === "remote" ? "localhost" : "127.0.0.1"), saved.listenPort);
-    const destAddr = withPort(saved.destHost.trim() || (k === "remote" ? "127.0.0.1" : "localhost"), saved.destPort);
-    const reach = exposureOf(saved);
     const note = formErr ? { err: true, text: formErr } : formWarn ? { err: false, text: formWarn } : null;
     const busy = !!pending || saving;
     const toggleLabel = pending === "start" ? "Starting…" : pending === "stop" ? "Stopping…" : active ? "Stop" : "Start";
@@ -833,14 +884,7 @@ function RuleDetail({
 
         <Blocks>
           <Block title="Forwarding">
-            <Facts
-              rows={[
-                ["Type", <span title={KIND_HINT[k]}>{KIND_LABEL[k]}</span>],
-                ["Listen on", <At addr={listenAddr} where={k === "remote" ? hostName : "this computer"} />],
-                ["Through host", hostName],
-                ["Destination", k === "dynamic" ? <span style={muted}>Any (SOCKS proxy)</span> : k === "remote" ? <At addr={destAddr} where="this computer" /> : <span title={destAddr} style={mono}>{destAddr}</span>],
-              ]}
-            />
+            <Facts rows={routeFacts(saved, hostName)} />
           </Block>
           <Block title="Behaviour">
             <Facts
@@ -860,7 +904,7 @@ function RuleDetail({
                     {startModeOf(saved) === "both" && <option value="both">{START_LABEL.both}</option>}
                   </select>,
                 ],
-                ["Reachable", reach ? <span title={reach.title} style={{ color: "var(--warn)" }}>{k === "remote" ? "From other machines" : "From your network"}</span> : `Only from ${k === "remote" ? hostName : "this computer"}`],
+                ["Reachable", reachOf(saved, hostName)],
               ]}
             />
           </Block>

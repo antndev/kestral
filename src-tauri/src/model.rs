@@ -93,6 +93,21 @@ pub struct PortForward {
     pub kind: ForwardKind,
     #[serde(default)]
     pub start_on_connect: bool,
+    #[serde(default)]
+    pub ai_edited: bool,
+}
+
+impl PortForward {
+    pub fn same_tunnel(&self, o: &PortForward) -> bool {
+        (self.kind, &self.local_host, self.local_port, &self.remote_host, self.remote_port)
+            == (o.kind, &o.local_host, o.local_port, &o.remote_host, o.remote_port)
+    }
+}
+
+pub fn carry_ai_review(incoming: &mut [PortForward], stored: &[PortForward]) {
+    for f in incoming {
+        f.ai_edited = stored.iter().any(|s| s.id == f.id && s.ai_edited && s.same_tunnel(f));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,5 +298,43 @@ impl NewHost {
         };
         host.normalize();
         host
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fwd(id: Uuid, port: u16, ai_edited: bool) -> PortForward {
+        PortForward {
+            id,
+            name: String::new(),
+            local_host: "127.0.0.1".into(),
+            local_port: port,
+            remote_host: "localhost".into(),
+            remote_port: 80,
+            autostart: false,
+            kind: ForwardKind::Local,
+            start_on_connect: false,
+            ai_edited,
+        }
+    }
+
+    #[test]
+    fn ai_review_survives_ui_saves_until_the_tunnel_changes() {
+        let id = Uuid::new_v4();
+        let stored = vec![fwd(id, 8080, true)];
+
+        let mut renamed = vec![PortForward { name: "web".into(), autostart: true, ..fwd(id, 8080, false) }];
+        carry_ai_review(&mut renamed, &stored);
+        assert!(renamed[0].ai_edited);
+
+        let mut rewritten = vec![fwd(id, 9090, false)];
+        carry_ai_review(&mut rewritten, &stored);
+        assert!(!rewritten[0].ai_edited);
+
+        let mut added = vec![fwd(Uuid::new_v4(), 8080, true)];
+        carry_ai_review(&mut added, &stored);
+        assert!(!added[0].ai_edited);
     }
 }

@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.26 - 2026-11-07
+
+### Added
+- The AI can create and change port forwards when you allow it in AI access. They never start on their own: starting one opens a review of where it listens and where it leads.
+
 ## 0.2.25 - 2026-11-07
 
 ### Changed

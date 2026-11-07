@@ -12,6 +12,8 @@ pub struct AiCaps {
     pub manage_hosts: bool,
     pub list_snippets: bool,
     pub manage_snippets: bool,
+    #[serde(default)]
+    pub manage_forwards: bool,
     pub list_secrets: bool,
     pub audit_log: bool,
 }
@@ -23,6 +25,7 @@ impl Default for AiCaps {
             manage_hosts: false,
             list_snippets: true,
             manage_snippets: false,
+            manage_forwards: false,
             list_secrets: true,
             audit_log: true,
         }

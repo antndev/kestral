@@ -59,6 +59,11 @@ impl ForwardManager {
         vault: &Arc<Vault>,
         fwd: &PortForward,
     ) -> Result<()> {
+        if fwd.ai_edited {
+            return Err(AppError::Other(
+                "The AI created or changed this port forward. Start it once from Port forwarding to review it.".into(),
+            ));
+        }
         let key = (host.id, fwd.id);
         let attempt = self.attempts.fetch_add(1, Ordering::Relaxed);
 

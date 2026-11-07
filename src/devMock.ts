@@ -72,7 +72,7 @@ function folderOp(op: string, p: Any, used: () => string[], move: (from: string,
 }
 
 const hosts: Any[] = [
-  { id: "h1", name: "web-01", hostname: "10.0.1.21", port: 22, username: "deploy", auth: { kind: "key", secret_id: "deploy-ed25519" }, ai_policy: "confirm", ai_file_policy: "locked", forward_agent: false, agent_keys: [], group: "Production", tags: ["web", "nginx"], forwards: [{ id: "f1", name: "Grafana", local_host: "127.0.0.1", local_port: 3000, remote_host: "10.0.1.50", remote_port: 3000, autostart: false, kind: "local", start_on_connect: false }, { id: "f3", name: "Webhook dev", local_host: "127.0.0.1", local_port: 3000, remote_host: "localhost", remote_port: 8080, autostart: false, kind: "remote", start_on_connect: true }], jump_host_id: null, options: { keepalive_secs: null, connect_timeout_secs: null, terminal_theme: "", encoding: "", startup_command: "", env: [] } },
+  { id: "h1", name: "web-01", hostname: "10.0.1.21", port: 22, username: "deploy", auth: { kind: "key", secret_id: "deploy-ed25519" }, ai_policy: "confirm", ai_file_policy: "locked", forward_agent: false, agent_keys: [], group: "Production", tags: ["web", "nginx"], forwards: [{ id: "f1", name: "Grafana", local_host: "127.0.0.1", local_port: 3000, remote_host: "10.0.1.50", remote_port: 3000, autostart: false, kind: "local", start_on_connect: false }, { id: "f3", name: "Webhook dev", local_host: "127.0.0.1", local_port: 3000, remote_host: "localhost", remote_port: 8080, autostart: false, kind: "remote", start_on_connect: true, ai_edited: true }], jump_host_id: null, options: { keepalive_secs: null, connect_timeout_secs: null, terminal_theme: "", encoding: "", startup_command: "", env: [] } },
   { id: "h2", name: "web-02", hostname: "10.0.1.22", port: 22, username: "deploy", auth: { kind: "key", secret_id: "deploy-ed25519" }, ai_policy: "locked", ai_file_policy: "locked", forward_agent: false, agent_keys: [], group: "Production", tags: ["web", "nginx"], forwards: [] },
   { id: "h3", name: "db-primary", hostname: "10.0.1.30", port: 22, username: "ops", auth: { kind: "key", secret_id: "github-ci" }, ai_policy: "locked", ai_file_policy: "locked", forward_agent: true, agent_keys: ["deploy-ed25519"], group: "Production", tags: ["postgres", "via bastion"], forwards: [{ id: "f2", name: "Postgres", local_host: "127.0.0.1", local_port: 5433, remote_host: "localhost", remote_port: 5432, autostart: true, kind: "local", start_on_connect: false }, { id: "f4", name: "SOCKS proxy", local_host: "127.0.0.1", local_port: 1080, remote_host: "localhost", remote_port: 1, autostart: false, kind: "dynamic", start_on_connect: false }], jump_host_id: "h5", options: { keepalive_secs: 30, connect_timeout_secs: 10, terminal_theme: "production", encoding: "", startup_command: "", env: [] } },
   { id: "h4", name: "stage-app", hostname: "10.0.2.10", port: 22, username: "deploy", auth: { kind: "password", secret_id: "pw-stage-app" }, ai_policy: "free", ai_file_policy: "confirm", forward_agent: false, agent_keys: [], group: "Staging", tags: ["app"], forwards: [] },
@@ -105,7 +105,7 @@ let knownHosts: Any[] = [
 ];
 let aiActive = false;
 let aiExpires: string | null = null;
-let aiCaps = { list_hosts: true, manage_hosts: false, list_snippets: true, manage_snippets: false, list_secrets: false, audit_log: true };
+let aiCaps = { list_hosts: true, manage_hosts: false, list_snippets: true, manage_snippets: false, manage_forwards: false, list_secrets: false, audit_log: true };
 let protectedPaths = ["~/.ssh/authorized_keys", "~/.ssh/config"];
 let skill = false;
 const audit: Any[] = Array.from({ length: 14 }, (_, i) => ({
@@ -416,8 +416,14 @@ export function installDevMock() {
       case "host_ack_ai_change": { const h = hosts.find((x) => x.id === p.seen.id); if (h) h.ai_changed = false; return true; }
       // forwards
       case "forward_active": return [...activeForwards];
-      case "forward_start": { await sleep(200); const f = hosts.flatMap((h) => h.forwards).find((x: Any) => x.id === p.forwardId); if (f && f.local_port === 3000) throw "Address already in use (os error 10048)"; activeForwards.add(p.forwardId); return null; }
+      case "forward_start": { await sleep(200); const f = hosts.flatMap((h) => h.forwards).find((x: Any) => x.id === p.forwardId); if (f?.ai_edited) throw "The AI created or changed this port forward. Start it once from Port forwarding to review it."; if (f && f.local_port === 3000) throw "Address already in use (os error 10048)"; activeForwards.add(p.forwardId); return null; }
       case "forward_stop": activeForwards.delete(p.forwardId); return null;
+      case "forward_mark_reviewed": {
+        const f = hosts.find((h) => h.id === p.hostId)?.forwards.find((x: Any) => x.id === p.seen.id);
+        if (!f || ["kind", "local_host", "local_port", "remote_host", "remote_port"].some((k) => f[k] !== p.seen[k])) return false;
+        f.ai_edited = false;
+        return true;
+      }
       // sftp
       case "sftp_open": { await sleep(300); remoteRoot(p.hostId); sftpHost.set(p.id, p.hostId); return "/home/" + (hosts.find((h) => h.id === p.hostId)?.username ?? "user"); }
       case "sftp_list": { await sleep(120); const root = remoteRoot(sftpHost.get(p.id)!); const path = p.path.startsWith("/home/") && !find(root, split(p.path, false)) ? "/home/deploy" : p.path; return listNode(root, path, false); }

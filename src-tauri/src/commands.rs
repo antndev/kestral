@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::audit::AuditEntry;
 use crate::error::{AppError, Result};
 use crate::forward::ForwardManager;
-use crate::model::{AiPolicy, Host, NewHost, NewSnippet, Snippet};
+use crate::model::{AiPolicy, Host, NewHost, NewSnippet, PortForward, Snippet};
 use crate::policy::AiStatus;
 use crate::sftp::{FileEntry, SftpSessions};
 use crate::state::{AppState, McpInfo};
@@ -431,6 +431,8 @@ pub async fn host_update(state: State<'_, AppState>, mut host: Host) -> Result<(
     let agent = (host.forward_agent, host.agent_keys.clone());
     let before = state.services.hosts.get(id).ok();
     host.ai_changed = before.as_ref().is_some_and(|b| b.ai_changed);
+    let stored: Vec<PortForward> = state.services.hosts.list().into_iter().flat_map(|h| h.forwards).collect();
+    crate::model::carry_ai_review(&mut host.forwards, &stored);
     state.services.hosts.update(host)?;
     if before.is_some_and(|b| (b.forward_agent, b.agent_keys) != agent) {
         let ssh = &state.services.ssh;
@@ -833,6 +835,22 @@ pub async fn forward_start(
     forwards
         .start(&state.services.ssh, &host, &state.services.vault, &fwd)
         .await
+}
+
+#[tauri::command]
+pub async fn forward_mark_reviewed(state: State<'_, AppState>, host_id: String, seen: PortForward) -> Result<bool> {
+    let mut host = state.services.hosts.get(parse_id(&host_id)?)?;
+    let Some(f) = host.forwards.iter_mut().find(|f| f.id == seen.id) else {
+        return Ok(false);
+    };
+    if !f.same_tunnel(&seen) {
+        return Ok(false);
+    }
+    if f.ai_edited {
+        f.ai_edited = false;
+        state.services.hosts.update(host)?;
+    }
+    Ok(true)
 }
 
 #[tauri::command]

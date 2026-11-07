@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::model::{AiPolicy, AuthMethod, Host, NewHost, NewSnippet, Snippet};
+use crate::model::{AiPolicy, AuthMethod, ForwardKind, Host, NewHost, NewSnippet, PortForward, Snippet};
 use crate::state::Services;
 use crate::vault::{SecretKind, SecretStore, Vault};
 
@@ -36,6 +36,7 @@ struct HostView {
     ai_file_policy: AiPolicy,
     group: String,
     tags: Vec<String>,
+    forwards: Vec<PortForward>,
 }
 
 fn build_auth(kind: &str, secret_id: Option<String>, vault: &Vault) -> std::result::Result<AuthMethod, String> {
@@ -136,6 +137,86 @@ struct UpdateSnippetArgs {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct ForwardFields {
+    /// local (like ssh -L), remote (like ssh -R) or dynamic (like ssh -D, a SOCKS proxy).
+    kind: String,
+    /// Label shown in the port forwarding list. On update, omit to keep the current one.
+    #[serde(default)]
+    name: Option<String>,
+    /// local and dynamic: address to listen on, on this computer. remote: address to reach, from this computer. Default 127.0.0.1.
+    #[serde(default)]
+    local_host: Option<String>,
+    /// local and dynamic: port to listen on, on this computer. remote: port to reach, from this computer.
+    local_port: u16,
+    /// local: address to reach, as seen from the host. remote: address to listen on, on the host. Default localhost, unused for dynamic.
+    #[serde(default)]
+    remote_host: Option<String>,
+    /// local: port to reach, as seen from the host. remote: port to listen on, on the host. Unused for dynamic.
+    #[serde(default)]
+    remote_port: Option<u16>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct CreateForwardArgs {
+    host_id: String,
+    #[serde(flatten)]
+    forward: ForwardFields,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct UpdateForwardArgs {
+    host_id: String,
+    forward_id: String,
+    #[serde(flatten)]
+    forward: ForwardFields,
+}
+
+fn build_forward(id: Uuid, a: ForwardFields, name: String) -> std::result::Result<PortForward, String> {
+    let kind = match a.kind.as_str() {
+        "local" => ForwardKind::Local,
+        "remote" => ForwardKind::Remote,
+        "dynamic" => ForwardKind::Dynamic,
+        other => return Err(format!("unknown kind '{other}', use local, remote or dynamic")),
+    };
+    let addr = |v: Option<String>, default: &str| {
+        let v = v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| default.to_string());
+        if v.chars().any(char::is_whitespace) {
+            Err(format!("address '{v}' cannot contain spaces"))
+        } else {
+            Ok(v)
+        }
+    };
+    let remote_port = match (kind, a.remote_port) {
+        (ForwardKind::Dynamic, p) => p.unwrap_or(1),
+        (_, Some(p)) => p,
+        (_, None) => return Err("remote_port is required for local and remote forwards".into()),
+    };
+    if a.local_port == 0 || remote_port == 0 {
+        return Err("ports must be between 1 and 65535".into());
+    }
+    Ok(PortForward {
+        id,
+        name: a.name.map(|n| n.trim().to_string()).unwrap_or(name),
+        local_host: addr(a.local_host, "127.0.0.1")?,
+        local_port: a.local_port,
+        remote_host: addr(a.remote_host, "localhost")?,
+        remote_port,
+        autostart: false,
+        kind,
+        start_on_connect: false,
+        ai_edited: true,
+    })
+}
+
+fn route(f: &PortForward) -> String {
+    match f.kind {
+        ForwardKind::Local => format!("local {}:{} -> {}:{}", f.local_host, f.local_port, f.remote_host, f.remote_port),
+        ForwardKind::Remote => format!("remote {}:{} -> {}:{}", f.remote_host, f.remote_port, f.local_host, f.local_port),
+        ForwardKind::Dynamic => format!("dynamic {}:{}", f.local_host, f.local_port),
+    }
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct DeleteSnippetArgs {
     snippet_id: String,
 }
@@ -175,7 +256,7 @@ impl KestralMcp {
         }
     }
 
-    #[tool(description = "List the configured SSH hosts (id, name, address, user, ai policy, group, tags) as JSON.")]
+    #[tool(description = "List the configured SSH hosts (id, name, address, user, ai policy, group, tags, port forwards) as JSON.")]
     async fn list_hosts(&self) -> Result<CallToolResult, McpError> {
         if !self.services.policy.is_active() {
             return Ok(Self::disabled());
@@ -622,6 +703,114 @@ impl KestralMcp {
     }
 
     #[tool(
+        description = "Add a port forward to a host. local listens on local_host:local_port on this computer and reaches remote_host:remote_port as seen from the host. remote listens on remote_host:remote_port on the host and reaches local_host:local_port from this computer. dynamic is a SOCKS proxy on local_host:local_port. It never starts on its own: the user reviews and starts it in Kestral."
+    )]
+    async fn create_port_forward(
+        &self,
+        Parameters(a): Parameters<CreateForwardArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if !self.services.policy.is_active() {
+            return Ok(Self::disabled());
+        }
+        if !self.services.policy.caps().manage_forwards {
+            return Ok(Self::cap_denied("creating or changing port forwards"));
+        }
+        let Some(host_id) = self.resolve_host(&a.host_id) else {
+            return Ok(CallToolResult::error(vec![Content::text(format!("Unknown host: {}", a.host_id))]));
+        };
+        let mut host = match self.services.hosts.get(host_id) {
+            Ok(h) => h,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        };
+        let fwd = match build_forward(Uuid::new_v4(), a.forward, String::new()) {
+            Ok(f) => f,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
+        host.forwards.push(fwd.clone());
+        match self.services.hosts.update(host.clone()) {
+            Ok(()) => {
+                crate::events::data_changed("hosts");
+                self.services.audit.record(
+                    host.id.to_string(),
+                    host.name.clone(),
+                    format!("create port forward {}", route(&fwd)),
+                    "config",
+                    None,
+                    true,
+                    None,
+                );
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Created port forward {} on '{}' with id {}. It stays off until the user reviews and starts it in Kestral.",
+                    route(&fwd),
+                    host.name,
+                    fwd.id
+                ))]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
+        description = "Change a port forward by id. The fields mean the same as in create_port_forward. A running forward is stopped and stays off until the user reviews and starts it again."
+    )]
+    async fn update_port_forward(
+        &self,
+        Parameters(a): Parameters<UpdateForwardArgs>,
+    ) -> Result<CallToolResult, McpError> {
+        if !self.services.policy.is_active() {
+            return Ok(Self::disabled());
+        }
+        if !self.services.policy.caps().manage_forwards {
+            return Ok(Self::cap_denied("creating or changing port forwards"));
+        }
+        let Some(host_id) = self.resolve_host(&a.host_id) else {
+            return Ok(CallToolResult::error(vec![Content::text(format!("Unknown host: {}", a.host_id))]));
+        };
+        let mut host = match self.services.hosts.get(host_id) {
+            Ok(h) => h,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        };
+        let Some(idx) = Uuid::parse_str(&a.forward_id).ok().and_then(|id| host.forwards.iter().position(|f| f.id == id)) else {
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "Unknown port forward {} on '{}'",
+                a.forward_id, host.name
+            ))]));
+        };
+        let existing = host.forwards[idx].clone();
+        let mut fwd = match build_forward(existing.id, a.forward, existing.name) {
+            Ok(f) => f,
+            Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
+        };
+        fwd.autostart = existing.autostart;
+        fwd.start_on_connect = existing.start_on_connect;
+        host.forwards[idx] = fwd.clone();
+        match self.services.hosts.update(host.clone()) {
+            Ok(()) => {
+                if let Some(app) = crate::events::app() {
+                    use tauri::Manager;
+                    app.state::<crate::forward::ForwardManager>().stop(host.id, fwd.id).await;
+                }
+                crate::events::data_changed("hosts");
+                self.services.audit.record(
+                    host.id.to_string(),
+                    host.name.clone(),
+                    format!("update port forward {}", route(&fwd)),
+                    "config",
+                    None,
+                    true,
+                    None,
+                );
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Updated port forward {} on '{}'. It stays off until the user reviews and starts it in Kestral.",
+                    route(&fwd),
+                    host.name
+                ))]))
+            }
+            Err(e) => Ok(CallToolResult::error(vec![Content::text(e.to_string())])),
+        }
+    }
+
+    #[tool(
         description = "List a remote directory over SFTP. Subject to the per-host file policy (may require approval)."
     )]
     async fn sftp_list(
@@ -742,6 +931,7 @@ fn host_views(services: &Services) -> Vec<HostView> {
             ai_file_policy: h.ai_file_policy,
             group: h.group,
             tags: h.tags,
+            forwards: h.forwards,
         })
         .collect()
 }

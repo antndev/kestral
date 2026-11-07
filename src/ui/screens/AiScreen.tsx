@@ -31,6 +31,7 @@ const CAPS: { key: keyof AiCaps; label: string; hint?: string; group: "read" | "
   { key: "audit_log", label: "Read audit log", group: "read" },
   { key: "manage_hosts", label: "Create and change hosts", group: "manage" },
   { key: "manage_snippets", label: "Create, change and delete snippets", hint: "Deleting cannot be undone.", group: "manage" },
+  { key: "manage_forwards", label: "Create and change port forwards", hint: "They only start after you review them.", group: "manage" },
 ];
 
 const SKILL_LABELS = ["Install", "Installing…", "Remove", "Removing…", "Retry", "Checking…"];

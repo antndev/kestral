@@ -395,6 +395,7 @@ pub fn run() {
             commands::snippet_add,
             commands::snippet_update,
             commands::snippet_mark_reviewed,
+            commands::forward_mark_reviewed,
             commands::snippet_delete,
             commands::mcp_info,
             commands::install_skill,
