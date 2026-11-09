@@ -28,6 +28,33 @@ export function useAlive() {
   return alive;
 }
 
+let leaveFn: (() => Promise<boolean>) | null = null;
+let leaving: Promise<boolean> | null = null;
+
+export function useLeave(leave: (() => Promise<boolean>) | false) {
+  const ref = useRef(leave);
+  ref.current = leave;
+  const on = !!leave;
+  useEffect(() => {
+    if (!on) return;
+    const fn = () => (ref.current ? ref.current() : Promise.resolve(true));
+    leaveFn = fn;
+    return () => {
+      if (leaveFn === fn) leaveFn = null;
+    };
+  }, [on]);
+}
+
+function leave(): Promise<boolean> {
+  if (!leaveFn) return Promise.resolve(true);
+  return (leaving ??= leaveFn().catch(() => false).finally(() => (leaving = null)));
+}
+
+export function whenLeft(then: () => void, always = false) {
+  if (!leaveFn) return then();
+  void leave().then((ok) => (ok || always) && then());
+}
+
 export function ScreenHeader({ title, meta, children }: { title: string; meta?: ReactNode; children?: ReactNode }) {
   return (
     <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, minHeight: 56, flex: "none", padding: "12px 18px 12px 28px", boxSizing: "border-box" }}>
@@ -40,10 +67,28 @@ export function ScreenHeader({ title, meta, children }: { title: string; meta?: 
 }
 
 export function SplitView({ list, children, detailLabel }: { list: ReactNode; children: ReactNode; detailLabel: string }) {
+  const detail = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const inside = (t: EventTarget | null) => t instanceof Node && !!detail.current?.contains(t);
+    const click = (e: MouseEvent) => {
+      if (leaveFn && !inside(e.target) && !(e.target instanceof Element && e.target.closest('[role="menu"], [data-anim="overlay"]'))) void leave();
+    };
+    const key = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || !leaveFn || !(inside(e.target) || e.target === document.body)) return;
+      e.preventDefault();
+      void leave();
+    };
+    document.addEventListener("click", click, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("click", click, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, []);
   return (
     <div style={{ display: "flex", flex: 1, minHeight: 0, borderTop: "1px solid var(--line)" }}>
       <div style={{ flex: "0 0 280px", minWidth: 0, display: "flex", flexDirection: "column", gap: 8, padding: "12px 10px", borderRight: "1px solid var(--line)", boxSizing: "border-box", overflow: "auto" }}>{list}</div>
-      <section aria-label={detailLabel} style={{ flex: 1, minWidth: 0, padding: "24px 28px", overflow: "auto", boxSizing: "border-box" }}>
+      <section ref={detail} aria-label={detailLabel} style={{ flex: 1, minWidth: 0, padding: "24px 28px", overflow: "auto", boxSizing: "border-box" }}>
         <div style={{ width: "100%", maxWidth: 760, display: "flex", flexDirection: "column", gap: 22 }}>{children}</div>
       </section>
     </div>

@@ -46,6 +46,8 @@ import {
   sectionLabel,
   smallBtn,
   srOnly,
+  useLeave,
+  whenLeft,
   type Fact,
 } from "../kit";
 
@@ -669,11 +671,13 @@ export function SnippetsScreen({
 
   function select(id: string) {
     if (id === selId) return;
-    void flush();
-    setSelId(id);
-    setEditId(null);
-    setFreshId(null);
-    setSaveStatus((s) => (s.state === "saved" ? NO_SAVE : s));
+    whenLeft(() => {
+      void flush();
+      setSelId(id);
+      setEditId(null);
+      setFreshId(null);
+      setSaveStatus((s) => (s.state === "saved" ? NO_SAVE : s));
+    });
   }
 
   function startEdit() {
@@ -688,6 +692,21 @@ export function SnippetsScreen({
     setEditId(null);
     setFreshId(null);
   }
+
+  async function leaveEdit(): Promise<boolean> {
+    if (!selected) return true;
+    const id = selected.id;
+    if (fresh && selected.label === "New snippet" && !selected.script && !selected.folder && selected.target_host_ids.length === 0) {
+      await discardNew(selected);
+      return !snippetsRef.current.some((s) => s.id === id);
+    }
+    await flush();
+    if (dirty.current.has(id)) return false;
+    setEditId(null);
+    setFreshId(null);
+    return true;
+  }
+  useLeave(editing && leaveEdit);
 
   const selectRef = useRef(select);
   selectRef.current = select;
@@ -961,7 +980,7 @@ export function SnippetsScreen({
   const fullState = failed || emptyVault;
   const focusRow = (id: string) => rowRefs.current.get(id)?.focus();
   const newButton = (style: CSSProperties) => (
-    <button type="button" onClick={newSnippet} disabled={creating} style={off(style, creating)}>
+    <button type="button" onClick={() => whenLeft(() => void newSnippet())} disabled={creating} style={off(style, creating)}>
       <PlusIcon size={14} sw={1.75} />
       <Stable text={creating ? "Creating…" : "New snippet"} alts={["New snippet", "Creating…"]} />
     </button>

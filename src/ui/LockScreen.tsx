@@ -68,7 +68,7 @@ function LockFrame({ className, children }: { className: string; children: React
       className={className}
       style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
       <style>{LOCK_CSS}</style>
-      <header data-tauri-drag-region style={{ display: "flex", alignItems: "center", height: 40, flex: "none", padding: IS_MAC ? "8px 14px 0 0" : "0 0 0 12px", boxSizing: "border-box" }}>
+      <header data-tauri-drag-region style={{ display: "flex", alignItems: "center", height: 40, flex: "none", padding: IS_MAC ? "0 14px 0 0" : "0 0 0 12px" }}>
         {!IS_MAC && <Brand />}
         <span data-tauri-drag-region style={{ flex: 1, alignSelf: "stretch" }} />
         {IS_MAC ? <Brand /> : <WindowControls />}

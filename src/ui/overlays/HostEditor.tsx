@@ -6,9 +6,10 @@ import type { AiPolicy, AuthMethod, ForwardKind, Host, Identity, LocalAgentInfo,
 import { TERMINAL_THEMES } from "../../lib/terminal-themes";
 import { IS_MAC, MONO, cleanText, errText } from "../mock";
 import { CheckIcon, ChevronIcon, CloseIcon, CopyIcon, PlusIcon, TrashIcon } from "../icons";
-import { ConfirmDialog, Overlay, useModalLayer } from "./Dialogs";
+import { Overlay, useModalLayer } from "./Dialogs";
 import { GenerateDialog, ImportDialog, freeName, keyAlgo, nameError } from "../screens/KeychainScreen";
 import { Stable } from "../Stable";
+import { useLeave } from "../kit";
 
 type AuthKind = AuthMethod["kind"];
 type Errors = Record<string, string>;
@@ -309,7 +310,6 @@ export function HostEditor(p: {
   inline?: boolean;
   onClose(): void;
   onSaved(h: Host, connect: boolean): void;
-  onDirtyChange?(dirty: boolean): void;
 }) {
   const { host, hosts } = p;
   const src: Partial<NewHost> = host ?? p.prefill ?? {};
@@ -456,9 +456,9 @@ export function HostEditor(p: {
   const [busy, setBusy] = useState<null | "save" | "connect">(null);
   // Set when the host was saved but a follow-up step (new password, tunnel restart) failed.
   const [saved, setSaved] = useState<Host | null>(null);
+  const left = useRef(false);
   const current = saved ?? host;
   const editing = current !== null;
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [test, setTest] = useState<{ state: "idle" | "busy" | "ok" | "err"; msg: string }>({ state: "idle", msg: "" });
 
   const clearErr = (...keys: string[]) =>
@@ -615,8 +615,8 @@ export function HostEditor(p: {
     return { stopped, restart };
   }
 
-  async function save(connect: boolean) {
-    if (busy) return;
+  async function save(connect: boolean): Promise<boolean> {
+    if (busy) return false;
     const e = validate();
     setErrors(e);
     setSaveErr("");
@@ -628,7 +628,7 @@ export function HostEditor(p: {
       const el = dialogRef.current?.querySelector<HTMLElement>(`[data-field="${first}"]`);
       el?.focus();
       el?.scrollIntoView({ block: "center", behavior: "smooth" });
-      return;
+      return false;
     }
     const pendingTags = tagDraft.split(",").map((t) => t.trim()).filter(Boolean);
     const finalTags = [...tags];
@@ -716,7 +716,7 @@ export function HostEditor(p: {
         }
       }
       if (problems.length > 0 && newPassword) await reloadSecrets();
-      if (!alive.current) return;
+      if (!alive.current) return true;
       setBusy(null);
       if (problems.length > 0) {
         if (newPassword) {
@@ -728,16 +728,19 @@ export function HostEditor(p: {
         setBaseline(snapAtSave);
         setSaved(result);
         setSaveErr(`Saved the host. ${problems.join(" ")}`);
-        return;
+        return false;
       }
       setPwValue("");
+      left.current = true;
       p.onSaved(result, connect);
+      return true;
     } catch (err) {
       if (createdSecret) await api.secretDelete(createdSecret).catch(() => undefined);
       if (alive.current) {
         setSaveErr(errText(err));
         setBusy(null);
       }
+      return false;
     }
   }
 
@@ -799,20 +802,22 @@ export function HostEditor(p: {
     if (authKind === "identity") return identitySel !== b.identity;
     return false;
   };
-  const dirty = isDirty();
-  const onDirtyChange = p.onDirtyChange;
-  useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
-  const leave = () => {
+  const exit = () => {
+    left.current = true;
     if (saved) p.onSaved(saved, false);
     else p.onClose();
   };
-  const close = () => {
-    if (busy) return;
-    if (isDirty()) setConfirmDiscard(true);
-    else leave();
+  const leave = async () => {
+    if (left.current) return true;
+    if (busy) return false;
+    if (!isDirty()) {
+      exit();
+      return true;
+    }
+    return save(false);
   };
+  useLeave(leave);
+  const close = () => void leave();
   const z = useModalLayer(dialogRef, {
     inline: p.inline,
     initialFocus: labelRef,
@@ -853,7 +858,7 @@ export function HostEditor(p: {
     </button>
   );
   const cancelBtn = (
-    <button key="cancel" type="button" disabled={!!busy} onClick={close} style={btn("secondary", { disabled: !!busy })}>
+    <button key="cancel" type="button" disabled={!!busy} onClick={exit} style={btn("secondary", { disabled: !!busy })}>
       <Stable text={saved ? "Close" : "Cancel"} alts={["Cancel", "Close"]} />
     </button>
   );
@@ -881,15 +886,6 @@ export function HostEditor(p: {
           aria-modal={p.inline ? undefined : "true"}
           aria-labelledby={fid("title")}
           aria-busy={!!busy || undefined}
-          onKeyDown={
-            p.inline
-              ? (e) => {
-                  if (e.key !== "Escape" || e.defaultPrevented) return;
-                  e.preventDefault();
-                  close();
-                }
-              : undefined
-          }
           style={p.inline ? { display: "flex", flexDirection: "column", color: "var(--text)" } : { width: 680, maxWidth: "100%", maxHeight: "100%", display: "flex", flexDirection: "column", borderRadius: 12, background: "var(--bg)", color: "var(--text)", boxShadow: "var(--shadow)", overflow: "hidden" }}
         >
           <div style={p.inline ? { display: "flex", alignItems: "center", gap: 12, paddingBottom: 18 } : { display: "flex", alignItems: "center", gap: 12, padding: "16px 20px", borderBottom: "1px solid var(--line)" }}>
@@ -1788,16 +1784,6 @@ export function HostEditor(p: {
           </form>
         </section>
       </Frame>
-      {confirmDiscard && (
-        <ConfirmDialog
-          title="Discard changes?"
-          message={current ? `Your changes to ${current.name} are not saved.` : "This host is not saved yet."}
-          confirmLabel="Discard"
-          danger
-          onConfirm={leave}
-          onClose={() => setConfirmDiscard(false)}
-        />
-      )}
       {keyDialog === "generate" && <GenerateDialog taken={allSecretIds} onClose={() => setKeyDialog(null)} onDone={(id) => keyAdded(id, true)} />}
       {keyDialog === "import" && <ImportDialog taken={allSecretIds} onClose={() => setKeyDialog(null)} onDone={(id) => keyAdded(id, false)} />}
     </>

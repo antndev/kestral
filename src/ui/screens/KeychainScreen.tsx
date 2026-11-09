@@ -2099,6 +2099,7 @@ function IdentityDialog(p: { identity: Identity | null; identities: Identity[]; 
   const [pwName, setPwName] = useState("");
   const [pwValue, setPwValue] = useState("");
   const createdPw = useRef<string | null>(null);
+  const start = useRef({ kind, keyId, pwId }).current;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -2144,8 +2145,15 @@ function IdentityDialog(p: { identity: Identity | null; identities: Identity[]; 
     }
   }
 
+  const leave = () => {
+    if (busy) return;
+    const changed = !!init && (kind !== start.kind || (kind === "key" ? keyId !== start.keyId : kind === "password" && pwId !== start.pwId));
+    if (changed || name !== (init?.name ?? "") || user !== (init?.username ?? "") || pwValue !== "" || (pwId === NEW_PASSWORD && pwName !== "")) void save();
+    else p.onClose();
+  };
+
   return (
-    <Modal label={init ? "Edit identity" : "Add identity"} onClose={() => !busy && p.onClose()} width={460} dirty={name !== (init?.name ?? "") || user !== (init?.username ?? "") || pwValue !== "" || (pwId === NEW_PASSWORD && pwName !== "")}>
+    <Modal label={init ? "Edit identity" : "Add identity"} onClose={leave} width={460}>
       <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, overflowWrap: "anywhere" }}>{init ? `Edit ${init.name}` : "Add identity"}</h2>
       <form
         onSubmit={(e) => {
@@ -2275,8 +2283,14 @@ function PasswordDialog(p: { secret: SecretMeta | null; taken: string[]; onClose
     }
   }
 
+  const leave = () => {
+    if (busy) return;
+    if ((!editing && name !== "") || value !== "") void save();
+    else p.onClose();
+  };
+
   return (
-    <Modal label={editing ? "Change password" : "Add password"} onClose={() => !busy && p.onClose()} dirty={(!editing && name !== "") || value !== ""}>
+    <Modal label={editing ? "Change password" : "Add password"} onClose={leave}>
       <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, overflowWrap: "anywhere" }}>{p.secret ? `Change ${p.secret.id}` : "Add password"}</h2>
       <form
         onSubmit={(e) => {

@@ -51,6 +51,7 @@ import { WelcomeScreen } from "./ui/screens/WelcomeScreen";
 import { SettingsScreen, showSettingsPage } from "./ui/screens/SettingsScreen";
 import { CommandPalette, type PaletteAction } from "./ui/overlays/CommandPalette";
 import { AiStoppedDialog, ApprovalDialog, ConfirmDialog, HostKeyChangedDialog, HostKeyDialog, TrayOnboardingDialog, VisibleLine } from "./ui/overlays/Dialogs";
+import { whenLeft } from "./ui/kit";
 
 // ------------------------------------------------------------------ theme
 
@@ -242,6 +243,9 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   const contentRef = useRef<HTMLDivElement | null>(null);
   const stages = useSyncExternalStore(paneStore.subscribeStages, paneStore.stages);
   const [activeTab, setActiveTab] = useState<string>("vault");
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+  const leaveVault = (then: () => void) => (activeTabRef.current === "vault" ? whenLeft(then) : then());
   const [lastTerminal, setLastTerminal] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => readJson("kestral-sidebar-open", true));
   useEffect(() => writeJson("kestral-sidebar-open", sidebarOpen), [sidebarOpen]);
@@ -256,30 +260,14 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   const toastRef = useRef<(kind: "info" | "error" | "ok", text: string) => void>(() => {});
   const [confirm, setConfirm] = useState<Confirm | null>(null);
   const [editor, setEditorState] = useState<EditorState | null>(null);
-  const editorRef = useRef(editor);
-  const editorDirty = useRef(false);
   const editorSeq = useRef(0);
-  const setEditor = (st: EditorState | null) => {
-    editorDirty.current = false;
-    editorRef.current = st && { ...st, seq: ++editorSeq.current };
-    setEditorState(editorRef.current);
-  };
-  const onEditorDirty = useCallback((d: boolean) => {
-    editorDirty.current = d;
-  }, []);
-  const discardEditorFirst = (then: () => void) => {
-    if (!editorRef.current || !editorDirty.current) return then();
-    const cur = editorRef.current.host;
-    setConfirm({ title: "Discard changes?", message: cur ? `Your changes to ${cur.name} are not saved.` : "This host is not saved yet.", confirmLabel: "Discard", danger: true, onConfirm: then });
-  };
-  const editHost = (st: EditorState) => {
-    const cur = editorRef.current;
-    const same = !!cur && (cur.host || st.host ? cur.host?.id === st.host?.id : !cur.prefill && !st.prefill);
-    setSection("hosts");
-    setActiveTab("vault");
-    if (same) return;
-    discardEditorFirst(() => setEditor(st));
-  };
+  const setEditor = (st: EditorState | null) => setEditorState(st && { ...st, seq: ++editorSeq.current });
+  const editHost = (st: EditorState) =>
+    whenLeft(() => {
+      setSection("hosts");
+      setActiveTab("vault");
+      setEditor(st);
+    });
   const [approvals, setApprovals] = useState<(ApprovalRequest & { receivedAt: number; expired?: boolean })[]>([]);
   const [aiStopped, setAiStopped] = useState<{ host_name: string; path: string } | null>(null);
   const [hostKeyReqs, setHostKeyReqs] = useState<(HostKeyRequest & { receivedAt: number; expired?: boolean; replaced?: boolean })[]>([]);
@@ -512,13 +500,15 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
 
   // ---------------------------------------------------------------- sessions
   const openTerminalNow = useCallback((host: Host, initialCommand?: string, password?: string | null) => {
-    const tabId = crypto.randomUUID();
-    const paneId = newPaneId();
-    if (password) termBus.handOver(paneId, password);
-    setSpecs((sp) => ({ ...sp, [paneId]: { hostId: host.id, initialCommand } }));
-    setSessions((s) => [...s, { tabId, kind: "terminal", host, status: "warn", layout: leaf(paneId), focus: paneId, zoom: null, broadcast: false }]);
-    setActiveTab(tabId);
-    setLastTerminal(tabId);
+    leaveVault(() => {
+      const tabId = crypto.randomUUID();
+      const paneId = newPaneId();
+      if (password) termBus.handOver(paneId, password);
+      setSpecs((sp) => ({ ...sp, [paneId]: { hostId: host.id, initialCommand } }));
+      setSessions((s) => [...s, { tabId, kind: "terminal", host, status: "warn", layout: leaf(paneId), focus: paneId, zoom: null, broadcast: false }]);
+      setActiveTab(tabId);
+      setLastTerminal(tabId);
+    });
   }, []);
   const openTerminal = useCallback(
     (host: Host, initialCommand?: string, password?: string | null) => gateAi([host.id], () => openTerminalNow(host, initialCommand, password)),
@@ -530,15 +520,19 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   const openSftp = useCallback((host: Host) => {
     const open = sessionsRef.current.find((s) => s.kind === "sftp" && s.host.id === host.id);
     if (open) {
-      setSessions((ss) => ss.map((s) => (s.tabId === open.tabId ? { ...s, openSeq: (s.openSeq ?? 0) + 1 } : s)));
-      setActiveTab(open.tabId);
+      leaveVault(() => {
+        setSessions((ss) => ss.map((s) => (s.tabId === open.tabId ? { ...s, openSeq: (s.openSeq ?? 0) + 1 } : s)));
+        setActiveTab(open.tabId);
+      });
       return;
     }
-    gateAi([host.id], () => {
-      const tabId = crypto.randomUUID();
-      setSessions((s) => [...s, { tabId, kind: "sftp", host, status: "warn" }]);
-      setActiveTab(tabId);
-    });
+    gateAi([host.id], () =>
+      leaveVault(() => {
+        const tabId = crypto.randomUUID();
+        setSessions((s) => [...s, { tabId, kind: "sftp", host, status: "warn" }]);
+        setActiveTab(tabId);
+      }),
+    );
   }, [gateAi]);
   const dropTab = useCallback((tabId: string) => {
     sftpUnsaved.current.delete(tabId);
@@ -570,20 +564,22 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
     });
   }, []);
   const selectTab = useCallback((id: string) => {
-    setActiveTab(id);
-    setBellTabs((b) => {
-      if (!b.has(id)) return b;
-      const n = new Set(b);
-      n.delete(id);
-      return n;
-    });
-    setSessions((s) => {
-      if (s.find((t) => t.tabId === id)?.kind === "terminal") setLastTerminal(id);
-      return s;
-    });
+    const go = () => {
+      setActiveTab(id);
+      setBellTabs((b) => {
+        if (!b.has(id)) return b;
+        const n = new Set(b);
+        n.delete(id);
+        return n;
+      });
+      setSessions((s) => {
+        if (s.find((t) => t.tabId === id)?.kind === "terminal") setLastTerminal(id);
+        return s;
+      });
+    };
+    if (id === "vault") go();
+    else leaveVault(go);
   }, []);
-  const activeTabRef = useRef(activeTab);
-  activeTabRef.current = activeTab;
   const ringBell = useCallback((tabId: string) => {
     if (activeTabRef.current === tabId) return;
     setBellTabs((b) => (b.has(tabId) ? b : new Set(b).add(tabId)));
@@ -869,22 +865,16 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
   }
 
   function goSection(s: SectionId) {
-    const go = () => {
+    whenLeft(() => {
       setSection(s);
       setActiveTab("vault");
-    };
-    if (s === "hosts") return go();
-    discardEditorFirst(() => {
-      if (editorDirty.current) setEditor(null);
-      go();
     });
   }
 
   function lock() {
     if (lockingRef.current) return;
     const open = sessionsRef.current.length;
-    const ed = editorRef.current && editorDirty.current ? (editorRef.current.host ? `Your changes to ${editorRef.current.host.name} are not saved.` : "The new host is not saved yet.") : "";
-    const lost = [...new Set(sftpUnsaved.current.values()), ed].filter(Boolean);
+    const lost = [...new Set(sftpUnsaved.current.values())];
     if (!open && !lost.length) {
       lockNow();
       return;
@@ -906,11 +896,15 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
     setSessions([]);
     setSpecs({});
     setActiveTab("vault");
-    void flushSnippetSaves()
-      .catch(() => {})
-      .then(() => api.vaultLock())
-      .catch(() => {})
-      .finally(() => window.setTimeout(onLocked, 450));
+    whenLeft(
+      () =>
+        void flushSnippetSaves()
+          .catch(() => {})
+          .then(() => api.vaultLock())
+          .catch(() => {})
+          .finally(() => window.setTimeout(onLocked, 450)),
+      true,
+    );
   }
 
   function quickConnect(q: QuickConnect) {
@@ -1231,7 +1225,6 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
           onQuickConnect={quickConnect}
           onDragHost={(e, id, label) => startDrag(e, { kind: "host", hostId: id }, label)}
           editor={editor}
-          onEditorDirty={onEditorDirty}
           onEditorClose={() => setEditor(null)}
           onEditorSaved={(h, connect) => {
             setEditor(null);

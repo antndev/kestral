@@ -45,8 +45,10 @@ const NAV: { id: SectionId; label: string; icon: ReactNode }[] = [
   { id: "settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 const STRIP = 40;
-const TAB_GAP = 8;
+const TAB_GAP = 4;
 const TAB_H = STRIP - TAB_GAP;
+const FOOT = TAB_GAP + 1;
+const footBg = (at: string) => `radial-gradient(circle at ${at}, transparent ${TAB_GAP - 0.4}px, var(--line) ${TAB_GAP + 0.1}px, var(--line) ${TAB_GAP + 0.9}px, var(--tab) ${TAB_GAP + 1.4}px)`;
 const SIDEBAR_W = 240;
 const SLIDE_MS = 240;
 const slide = (prop: string) => `${prop} ${SLIDE_MS}ms var(--ease-out)`;
@@ -205,7 +207,7 @@ function NewTabButton({ onClick, tabSized }: { onClick: () => void; tabSized?: b
 }
 
 function TabLabel({ text }: { text: string }) {
-  return <span style={{ flex: "0 1 auto", minWidth: 0, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>;
+  return <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>;
 }
 
 function TitleBar({
@@ -344,7 +346,7 @@ function TitleBar({
   const inset = useMacInset();
 
   return (
-    <header data-tauri-drag-region data-tab-strip style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, height: STRIP, paddingTop: TAB_GAP, paddingLeft: sidebarOpen ? 0 : inset + 36, background: "var(--bg-chrome)", boxSizing: "border-box", transition: slide("padding-left") }}>
+    <header data-tauri-drag-region data-tab-strip style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, height: STRIP, paddingLeft: sidebarOpen ? 0 : inset + 36, background: "var(--bg-chrome)", boxSizing: "border-box", transition: slide("padding-left") }}>
       <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 1, background: "var(--line)", pointerEvents: "none" }} />
       <nav
         ref={stripRef}
@@ -412,10 +414,11 @@ function TitleBar({
                 display: "flex",
                 alignItems: "center",
                 gap: 6,
+                width: 180,
                 minWidth: 88,
                 flex: "0 1 auto",
                 height: TAB_H,
-                padding: "0 6px 1px 10px",
+                padding: `0 6px ${TAB_GAP + 1}px 10px`,
                 background: into ? (here?.ok ? "var(--accent-tint)" : "var(--err-tint)") : active ? "var(--tab)" : "transparent",
                 borderWidth: "1px 1px 0",
                 borderStyle: "solid",
@@ -432,15 +435,15 @@ function TitleBar({
               }}
             >
               {!active && !into && (
-                <span aria-hidden="true" style={{ position: "absolute", inset: "3px 1px", zIndex: -1, borderRadius: 7, background: t.attention ? "var(--accent-tint)" : "var(--hover)", opacity: hovered || t.attention ? 1 : 0, transition: "opacity 120ms", pointerEvents: "none" }} />
+                <span aria-hidden="true" style={{ position: "absolute", inset: `3px 1px ${3 + TAB_GAP}px`, zIndex: -1, borderRadius: 7, background: t.attention ? "var(--accent-tint)" : "var(--hover)", opacity: hovered || t.attention ? 1 : 0, transition: "opacity 120ms", pointerEvents: "none" }} />
               )}
               {active && !into && (
                 <>
-                  <span aria-hidden="true" style={{ position: "absolute", left: -9, bottom: 0, width: 9, height: 9, background: "radial-gradient(circle at 0 0, transparent 7.6px, var(--line) 8.1px, var(--line) 8.9px, var(--tab) 9.4px)", pointerEvents: "none" }} />
-                  <span aria-hidden="true" style={{ position: "absolute", right: -9, bottom: 0, width: 9, height: 9, background: "radial-gradient(circle at 100% 0, transparent 7.6px, var(--line) 8.1px, var(--line) 8.9px, var(--tab) 9.4px)", pointerEvents: "none" }} />
+                  <span aria-hidden="true" style={{ position: "absolute", left: -FOOT, bottom: 0, width: FOOT, height: FOOT, background: footBg("0 0"), pointerEvents: "none" }} />
+                  <span aria-hidden="true" style={{ position: "absolute", right: -FOOT, bottom: 0, width: FOOT, height: FOOT, background: footBg("100% 0"), pointerEvents: "none" }} />
                 </>
               )}
-              {divider && <span aria-hidden="true" style={{ position: "absolute", right: -1, top: 8, bottom: 8, width: 1, background: "var(--line)", pointerEvents: "none" }} />}
+              {divider && <span aria-hidden="true" style={{ position: "absolute", right: -1, top: 7, bottom: 7 + TAB_GAP, width: 1, background: "var(--line)", pointerEvents: "none" }} />}
               <span aria-hidden="true" data-anim={t.status === "warn" ? "pulse" : undefined} style={{ width: 7, height: 7, flex: "none", borderRadius: "50%", background: t.status === "idle" ? "transparent" : statusColor(t.status), border: t.status === "idle" ? "1.5px solid var(--ring-idle)" : "none", boxSizing: "border-box" }} />
               {t.kind === "sftp" && (
                 <span aria-label="SFTP" style={{ display: "flex", flex: "none", color: "var(--text-2)" }}>
@@ -483,11 +486,7 @@ function TitleBar({
       <button type="button" aria-label="Lock vault" title={`Lock vault (${KEYS.lock})`} onClick={onLock} style={{ ...iconBtn(), flex: "none", marginRight: IS_MAC ? 9 : 8, color: "var(--text-2)" }}>
         <LockIcon />
       </button>
-      {!IS_MAC && (
-        <div style={{ display: "flex", alignSelf: "flex-start", height: STRIP, marginTop: -TAB_GAP }}>
-          <WindowControls />
-        </div>
-      )}
+      {!IS_MAC && <WindowControls />}
       {tabCtx && <Menu anchor={tabCtx.anchor} label="Tab actions" items={tabMenu(tabCtx.id)} onClose={() => setTabCtx(null)} />}
     </header>
   );
@@ -629,7 +628,7 @@ export function Shell({
   }, [sidebarOpen]);
   return (
     <div className={theme === "light" ? "t-light" : "t-dark"} data-anim="app" style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
-      <button type="button" aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} title={sidebarOpen ? "Hide sidebar" : "Show sidebar"} onClick={onToggleSidebar} style={{ ...iconBtn(), position: "absolute", top: TAB_GAP + (TAB_H - 28) / 2, left: inset, zIndex: 3, color: "var(--text-2)" }}>
+      <button type="button" aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} title={sidebarOpen ? "Hide sidebar" : "Show sidebar"} onClick={onToggleSidebar} style={{ ...iconBtn(), position: "absolute", top: (STRIP - 28) / 2, left: inset, zIndex: 3, color: "var(--text-2)" }}>
         <SidebarToggleIcon />
       </button>
       <div style={{ display: "flex", height: STRIP, flex: "none" }}>

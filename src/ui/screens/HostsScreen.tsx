@@ -7,7 +7,7 @@ import { CheckIcon, HostsIcon, PlusIcon, WarningIcon } from "../icons";
 import { ItemMenu, MoreButton, useMenu, type MenuEntry, type MenuState } from "../Menu";
 import type { DragHost } from "../Shell";
 import { parseTarget, type QuickConnect, type Target } from "../target";
-import { Block, Blocks, DetailHead, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, chip, mono, muted, oneLine, pageBtn, primaryBtn, srOnly, useAlive, type Fact } from "../kit";
+import { Block, Blocks, DetailHead, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, chip, mono, muted, oneLine, pageBtn, primaryBtn, srOnly, useAlive, whenLeft, type Fact } from "../kit";
 
 export type { QuickConnect } from "../target";
 
@@ -188,7 +188,6 @@ export function HostsScreen(p: {
   editor?: { host: Host | null; prefill?: Partial<NewHost>; connectAfterSave?: boolean; seq?: number } | null;
   onEditorClose?(): void;
   onEditorSaved?(h: Host, connect: boolean): void;
-  onEditorDirty?(dirty: boolean): void;
 }) {
   const { hosts, statuses } = p;
   const [query, setQuery] = useState("");
@@ -249,6 +248,7 @@ export function HostsScreen(p: {
   const viaOf = (h: Host) => (h.jump_host_id ? hosts.find((x) => x.id === h.jump_host_id)?.name ?? "missing host" : undefined);
 
   const focusItem = (id: string) => itemRefs.current.get(id)?.focus();
+  const select = (id: string) => whenLeft(() => setSel(id));
 
   const itemHost = (e: ReactMouseEvent): Host | undefined => {
     const btn = (e.target as HTMLElement).closest("button");
@@ -396,9 +396,9 @@ export function HostsScreen(p: {
                           title={h.name}
                           sub={`${hostAddress({ ...h, username: userOf(h) })}${via ? ` via ${via}` : ""}`}
                           selected={h.id === current?.id}
-                          onSelect={() => setSel(h.id)}
+                          onSelect={() => select(h.id)}
                           onOpen={() => p.onConnect(h)}
-                          onKeyDown={(e) => arrowNav(filtered, i, e, setSel, focusItem)}
+                          onKeyDown={(e) => arrowNav(filtered, i, e, select, focusItem)}
                         />
                       );
                     })}
@@ -417,7 +417,6 @@ export function HostsScreen(p: {
               hosts={hosts}
               connectAfterSave={p.editor.connectAfterSave}
               onClose={() => p.onEditorClose?.()}
-              onDirtyChange={p.onEditorDirty}
               onSaved={(h, connect) => {
                 setSel(h.id);
                 p.onEditorSaved?.(h, connect);

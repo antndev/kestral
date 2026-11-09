@@ -1,4 +1,4 @@
-import { CSSProperties, FormEvent, ReactNode, RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, ReactNode, RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../../api";
 import type { ForwardKind, Host, PortForward } from "../../api";
@@ -8,7 +8,7 @@ import { ConfirmDialog as SharedConfirm } from "../overlays/Dialogs";
 import { ItemMenu, MoreButton, useMenu, type MenuState } from "../Menu";
 import { Stable } from "../Stable";
 import { SegGroup, segItem } from "../SegGroup";
-import { Block, Blocks, DetailHead, EditFooter, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, mono, muted, oneLine, pageBtn, primaryBtn, type Fact } from "../kit";
+import { Block, Blocks, DetailHead, EditFooter, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, mono, muted, oneLine, pageBtn, primaryBtn, useLeave, whenLeft, type Fact } from "../kit";
 
 const fieldLabel: CSSProperties = { display: "block", marginBottom: 6, fontSize: 12, fontWeight: 500, color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const input: CSSProperties = { width: "100%", height: 32, padding: "0 10px", borderWidth: 1, borderStyle: "solid", borderColor: "var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
@@ -139,10 +139,6 @@ const START_MODES: StartMode[] = ["manual", "open", "connect"];
 const START_LABEL: Record<StartMode, string> = { manual: "Manually", open: "When Kestral opens", connect: "When the host connects", both: "When Kestral opens or the host connects" };
 const startModeOf = (d: Draft): StartMode => (d.autostart ? (d.startOnConnect ? "both" : "open") : d.startOnConnect ? "connect" : "manual");
 
-// Unsaved edits per rule. Module level so they survive selecting another rule
-// and leaving the screen.
-let keptDrafts: Record<string, Draft> = {};
-
 function Toggle({ on, busy, disabled, label, title, onClick }: { on: boolean; busy: boolean; disabled?: boolean; label: string; title?: string; onClick(): void }) {
   return (
     <button
@@ -163,12 +159,6 @@ function Toggle({ on, busy, disabled, label, title, onClick }: { on: boolean; bu
   );
 }
 
-const Dot = ({ color, label }: { color: string; label: string }) => (
-  <span role="img" aria-label={label} title={label} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, flex: "none" }}>
-    <span style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
-  </span>
-);
-
 const At = ({ addr, where }: { addr: string; where: string }) => (
   <span title={`${addr} on ${where}`}>
     <span style={mono}>{addr}</span>
@@ -176,7 +166,7 @@ const At = ({ addr, where }: { addr: string; where: string }) => (
   </span>
 );
 
-type Item = { id: string; row: Row | null; name: string; d: Draft; hostName: string; unsaved: boolean };
+type Item = { id: string; row: Row | null; name: string; d: Draft; hostName: string };
 
 function routeFacts(d: Draft, hostName: string): Fact[] {
   const k = d.kind;
@@ -210,12 +200,12 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
   const [stats, setStats] = useState<Record<string, number>>({});
   const [pending, setPending] = useState<Record<string, "start" | "stop">>({});
   const [rowErr, setRowErr] = useState<Record<string, string>>({});
-  const [selId, setSelId] = useState<string | null>(() => hostsProp.flatMap((h) => h.forwards).find((f) => f.id in keptDrafts)?.id ?? null);
+  const [selId, setSelId] = useState<string | null>(null);
   const [newDraft, setNewDraft] = useState<{ id: string; draft: Draft } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Row | null>(null);
   const [review, setReview] = useState<{ r: Row; changed: boolean; seq: number } | null>(null);
   const reviewSeq = useRef(0);
-  const [drafts, setDraftsState] = useState<Record<string, Draft>>(keptDrafts);
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [filter, setFilter] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const menu = useMenu<string>();
@@ -254,14 +244,6 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
     return () => window.clearInterval(iv);
   }, [refreshActive]);
 
-  const setDrafts = useCallback((fn: (d: Record<string, Draft>) => Record<string, Draft>) => {
-    setDraftsState((cur) => {
-      const next = fn(cur);
-      keptDrafts = next;
-      return next;
-    });
-  }, []);
-
   const rows: Row[] = useMemo(() => hosts.flatMap((h) => h.forwards.map((f) => ({ host: h, f }))), [hosts]);
   const activeCount = rows.filter((r) => active.has(r.f.id)).length;
   const newRow = newDraft && !rows.some((r) => r.f.id === newDraft.id) ? newDraft : null;
@@ -272,8 +254,8 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
   const detailId = current?.f.id ?? (showingNew && newRow ? newRow.id : null);
   const empty = rows.length === 0 && !newRow;
 
-  const items: Item[] = rows.map((r) => ({ id: r.f.id, row: r, name: ruleName(r.f), d: draftOf(r), hostName: r.host.name, unsaved: r.f.id in drafts }));
-  if (newRow) items.push({ id: newRow.id, row: null, name: newRow.draft.name.trim() || "New rule", d: newRow.draft, hostName: hosts.find((h) => h.id === newRow.draft.hostId)?.name ?? "", unsaved: true });
+  const items: Item[] = rows.map((r) => ({ id: r.f.id, row: r, name: ruleName(r.f), d: draftOf(r), hostName: r.host.name }));
+  if (newRow) items.push({ id: newRow.id, row: null, name: newRow.draft.name.trim() || "New rule", d: newRow.draft, hostName: hosts.find((h) => h.id === newRow.draft.hostId)?.name ?? "" });
 
   const q = filter.trim().toLowerCase();
   const shown = q ? items.filter((it) => [it.name, routeOf(it)].some((s) => s.toLowerCase().includes(q))) : items;
@@ -298,8 +280,10 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
   }, [showingNew]);
 
   function select(id: string) {
-    if (newRow && id === newRow.id && selectedId !== id) prevSel.current = selectedId;
-    setSelId(id);
+    whenLeft(() => {
+      if (newRow && id === newRow.id && selectedId !== id) prevSel.current = selectedId;
+      setSelId(id);
+    });
   }
 
   async function toggle(r: Row, checked = false) {
@@ -394,7 +378,7 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
       <ScreenHeader title="Port forwarding" meta={rows.length > 0 ? <span style={{ fontVariantNumeric: "tabular-nums" }}>{activeCount} of {rows.length} active</span> : undefined}>
         {!empty && (
-          <button type="button" onClick={startNewRule} style={primaryBtn}>
+          <button type="button" onClick={() => whenLeft(startNewRule)} style={primaryBtn}>
             <PlusIcon size={14} sw={1.75} />
             New rule
           </button>
@@ -436,12 +420,7 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
                         }}
                         icon={<ForwardIcon />}
                         iconColor={on ? "var(--ok)" : err ? "var(--err)" : undefined}
-                        title={
-                          <span style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
-                            <span title={it.name} style={oneLine}>{it.name}</span>
-                            {it.unsaved && <Dot color="var(--warn)" label="Unsaved changes" />}
-                          </span>
-                        }
+                        title={<span title={it.name}>{it.name}</span>}
                         sub={<span title={routeOf(it)}>{routeOf(it)}</span>}
                         selected={it.id === selectedId}
                         onSelect={() => select(it.id)}
@@ -621,7 +600,7 @@ function RuleDetail({
     const to = focusTo.current;
     focusTo.current = null;
     if (to === "name") nameRef.current?.focus();
-    else if (to === "edit") editRef.current?.focus();
+    else if (to === "edit" && document.activeElement === document.body) editRef.current?.focus();
   }, [editMode, nameRef]);
 
   const closeMenu = menu.close;
@@ -686,9 +665,8 @@ function RuleDetail({
   const dynamic = kind === "dynamic";
   const listenDefault = kind === "remote" ? "localhost" : "127.0.0.1";
 
-  async function save(e: FormEvent) {
-    e.preventDefault();
-    if (!dirty || saving || pending) return;
+  async function save(): Promise<boolean> {
+    if (!dirty || saving || pending) return false;
     const lport = parsePort(draft.listenPort);
     const dport = dynamic ? row?.f.remote_port || 1 : parsePort(draft.destPort);
     const destHost = dynamic ? row?.f.remote_host || "localhost" : draft.destHost.trim();
@@ -702,7 +680,7 @@ function RuleDetail({
     if (!throughHost || lport === null || dport === null || Object.keys(nextBad).length > 0) {
       setBad(nextBad);
       setFormErr(!throughHost ? "Choose a host." : lport === null || dport === null ? "Enter a port from 1 to 65535." : !destHost ? "Enter a destination." : "Addresses cannot contain spaces.");
-      return;
+      return false;
     }
     setFormWarn("");
     const listenChanged = !row || kind !== kindOf(row.f) || lport !== row.f.local_port || listenHost !== bindHost(row.f.local_host) || draft.hostId !== row.host.id;
@@ -710,7 +688,7 @@ function RuleDetail({
     if (clash && (clash.host.id === draft.hostId || activeIds.has(clash.f.id))) {
       setBad({ listenPort: true });
       setFormErr(`Port ${lport} is used by "${ruleName(clash.f)}"${activeIds.has(clash.f.id) ? ", which is running" : ""}.`);
-      return;
+      return false;
     }
     if (clash) setFormWarn(`"${ruleName(clash.f)}" on ${clash.host.name} uses this port too, so only one can run at a time.`);
 
@@ -768,14 +746,26 @@ function RuleDetail({
         focusTo.current = "edit";
         setEditing(false);
       }
+      return true;
     } catch (e) {
       if (stopped && row) await api.forwardStart(row.host.id, id).catch(() => {});
       if (alive.current) setFormErr(errText(e));
       void refreshActive();
+      return false;
     } finally {
       if (alive.current) setSaving(false);
     }
   }
+
+  const leave = async () => {
+    if (saved ? sameDraft(draft, saved) : sameDraft(draft, blankDraft(draft.hostId))) {
+      cancelEdit();
+      return true;
+    }
+    if (saving || pending) return false;
+    return save();
+  };
+  useLeave(editMode && leave);
 
   const status: { dot: string; text: string } = !row
     ? { dot: "var(--ring-idle)", text: "Not saved yet" }
@@ -918,7 +908,15 @@ function RuleDetail({
   }
 
   return (
-    <form onSubmit={(e) => void save(e)} noValidate aria-label={title} style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+      noValidate
+      aria-label={title}
+      style={{ display: "flex", flexDirection: "column", gap: 22 }}
+    >
       <DetailHead title={title} sub={sub} />
 
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>

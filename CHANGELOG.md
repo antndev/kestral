@@ -3,6 +3,13 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.29 - 2026-11-09
+
+### Changed
+- Forms save on their own: leaving a host, snippet, port forward, identity or password form by any route keeps your changes. Only Cancel discards. A form with an error stays open.
+- Tabs have one width, so a split tab that switches its title no longer moves the other tabs.
+- The title bar is back to one line for plus, lock and window buttons, with the same small gap above and beside the tabs.
+
 ## 0.2.28 - 2026-11-09
 
 ### Changed
