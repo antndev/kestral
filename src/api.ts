@@ -11,7 +11,7 @@ export type AuthMethod =
 
 export type ForwardKind = "local" | "remote" | "dynamic";
 
-export interface EnvVar {
+interface EnvVar {
   name: string;
   value: string;
 }
@@ -41,7 +41,7 @@ export interface Identity {
   auth: Exclude<AuthMethod, { kind: "identity" }>;
 }
 
-export interface NewIdentity {
+interface NewIdentity {
   name: string;
   username: string;
   auth: Exclude<AuthMethod, { kind: "identity" }>;
@@ -188,7 +188,7 @@ export const vaultExport = (path: string, password: string) =>
 export const vaultImport = (path: string, password: string) =>
   invoke<ImportReport>("vault_import", { path, password });
 
-export interface AppSettings {
+interface AppSettings {
   minimizeToTray: boolean;
   onboarded: boolean;
 }
@@ -242,7 +242,7 @@ export interface LocalAgentInfo {
 }
 export const localAgentIdentities = () => invoke<LocalAgentInfo>("local_agent_identities");
 
-export interface HostTestResult {
+interface HostTestResult {
   ok: boolean;
   message: string;
   auth: string;
@@ -326,11 +326,11 @@ export interface Snippet {
   open_tabs: boolean;
   ai_edited?: boolean;
 }
-export interface SnippetVar {
+interface SnippetVar {
   value: string;
   ask: boolean;
 }
-export interface NewSnippet {
+interface NewSnippet {
   label: string;
   script: string;
   target_host_ids: string[];
@@ -368,7 +368,7 @@ export const appChangelog = () => invoke<string>("app_changelog");
 export const mcpInfo = () => invoke<McpInfo>("mcp_info");
 export const dataWarnings = () => invoke<string[]>("data_warnings");
 
-export interface InstallResult {
+interface InstallResult {
   skill_path: string;
   script_path: string;
   runtime: string;
@@ -474,7 +474,7 @@ export interface SshConfigHost {
 }
 export const sshConfigHosts = () => invoke<SshConfigHost[]>("ssh_config_hosts");
 
-export interface StreamExit {
+interface StreamExit {
   exit_status: number | null;
   exit_signal: string | null;
 }

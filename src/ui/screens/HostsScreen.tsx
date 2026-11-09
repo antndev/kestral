@@ -15,7 +15,7 @@ const STATUS_LABEL: Record<Status, string> = { ok: "Connected", warn: "Connectin
 const KIND_LABEL: Record<PortForward["kind"], string> = { local: "Local", remote: "Remote", dynamic: "SOCKS" };
 
 
-export function hostAddress(h: Pick<Host, "username" | "hostname" | "port">): string {
+function hostAddress(h: Pick<Host, "username" | "hostname" | "port">): string {
   const custom = h.port !== 22;
   const host = custom && h.hostname.includes(":") ? `[${h.hostname}]` : h.hostname;
   return `${h.username}@${host}${custom ? `:${h.port}` : ""}`;
@@ -231,20 +231,21 @@ export function HostsScreen(p: {
     }
   }, [quickErr, errId]);
 
-  const target = useMemo(() => parseTarget(query), [query]);
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return hosts;
-    return hosts.filter((h) => h.name.toLowerCase().includes(q) || hostAddress(h).toLowerCase().includes(q) || h.tags.some((t) => t.toLowerCase().includes(q)) || (target.ok && sameTarget(h, target.value)));
-  }, [hosts, query, target]);
-
-  const current = filtered.find((h) => h.id === sel) ?? filtered[0] ?? null;
-
   const identityOf = (h: Host): Identity | undefined => {
     const a = h.auth;
     return a.kind === "identity" ? identities?.find((i) => i.id === a.identity_id) : undefined;
   };
   const userOf = (h: Host) => identityOf(h)?.username || h.username;
+
+  const target = useMemo(() => parseTarget(query), [query]);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return hosts;
+    return hosts.filter((h) => h.name.toLowerCase().includes(q) || hostAddress({ ...h, username: userOf(h) }).toLowerCase().includes(q) || h.tags.some((t) => t.toLowerCase().includes(q)) || (target.ok && sameTarget(h, target.value)));
+  }, [hosts, query, target, identities]);
+
+  const current = filtered.find((h) => h.id === sel) ?? filtered[0] ?? null;
+
   const viaOf = (h: Host) => (h.jump_host_id ? hosts.find((x) => x.id === h.jump_host_id)?.name ?? "missing host" : undefined);
 
   const focusItem = (id: string) => itemRefs.current.get(id)?.focus();
@@ -259,7 +260,7 @@ export function HostsScreen(p: {
   const copyAddress = async (h: Host) => {
     let note: Note;
     try {
-      await clipWriteText(sshCommand(h));
+      await clipWriteText(sshCommand({ ...h, username: userOf(h) }));
       note = { text: "Address copied", err: false };
     } catch {
       note = { text: "Copy failed", err: true };
@@ -411,7 +412,7 @@ export function HostsScreen(p: {
             <HostEditor
               key={p.editor.seq ?? p.editor.host?.id ?? "new"}
               inline
-              host={p.editor.host}
+              host={hosts.find((h) => h.id === p.editor?.host?.id) ?? p.editor.host}
               prefill={p.editor.prefill}
               hosts={hosts}
               connectAfterSave={p.editor.connectAfterSave}

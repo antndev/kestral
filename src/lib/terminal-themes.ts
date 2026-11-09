@@ -1,6 +1,6 @@
 import type { ITheme } from "@xterm/xterm";
 
-export type TermTheme = { name: string; theme: ITheme };
+type TermTheme = { name: string; theme: ITheme };
 export type TermThemeId = string;
 
 export const TERMINAL_THEMES: Record<string, TermTheme> = {

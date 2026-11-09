@@ -3,7 +3,7 @@ import type { Host, SshConfigHost } from "../api";
 
 export const NEW_HOST_EXTRAS = { jump_host_id: null, options: api.DEFAULT_HOST_OPTIONS };
 
-export function jumpTarget(jump: string, hosts: Pick<Host, "id" | "name" | "hostname" | "port" | "username">[]): string | null {
+function jumpTarget(jump: string, hosts: Pick<Host, "id" | "name" | "hostname" | "port" | "username">[]): string | null {
   let spec = jump.trim();
   const at = spec.lastIndexOf("@");
   const user = at >= 0 ? spec.slice(0, at) : "";

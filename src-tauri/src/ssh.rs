@@ -16,7 +16,7 @@ use crate::identities::IdentityStore;
 use crate::known_hosts::{self, Verdict};
 use crate::model::{AuthMethod, Host};
 use crate::util::blocking;
-use crate::vault::{SecretKind, SecretStore, Vault};
+use crate::vault::{SecretKind, Vault};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandOutput {
@@ -462,11 +462,19 @@ impl SshManager {
                     .copied()
                     .ok_or_else(|| AppError::Ssh(format!("Could not find {}", host.hostname)))?;
                 on_stage("resolved", &first.ip().to_string());
-                on_stage("connecting", &first.to_string());
-                let stream = tokio::time::timeout(budget, tokio::net::TcpStream::connect(&addrs[..]))
-                    .await
-                    .map_err(|_| AppError::Ssh(format!("Connection timed out after {}s", budget.as_secs())))?
-                    .map_err(|e| AppError::Ssh(format!("Could not connect to {first}: {e}")))?;
+                let mut connected = Err(AppError::Ssh(format!("Could not find {}", host.hostname)));
+                for addr in &addrs {
+                    on_stage("connecting", &addr.to_string());
+                    connected = match tokio::time::timeout(budget, tokio::net::TcpStream::connect(addr)).await {
+                        Ok(Ok(s)) => Ok(s),
+                        Ok(Err(e)) => Err(AppError::Ssh(format!("Could not connect to {addr}: {e}"))),
+                        Err(_) => Err(AppError::Ssh(format!("Connection timed out after {}s", budget.as_secs()))),
+                    };
+                    if connected.is_ok() {
+                        break;
+                    }
+                }
+                let stream = connected?;
                 let _ = stream.set_nodelay(true);
                 Box::pin(client::connect_stream(config, stream, handler))
             }
@@ -607,17 +615,18 @@ impl SshManager {
         let mut stderr: Vec<u8> = Vec::new();
         let mut exit_status: Option<i32> = None;
         let mut exit_signal: Option<String> = None;
-        let mut truncated = false;
+        let mut out_truncated = false;
+        let mut err_truncated = false;
 
         let collect = async {
             while let Some(msg) = channel.wait().await {
                 match msg {
                     ChannelMsg::Data { ref data } => {
-                        append_capped(&mut stdout, data, MAX_OUTPUT, &mut truncated)
+                        append_capped(&mut stdout, data, MAX_OUTPUT, &mut out_truncated)
                     }
                     ChannelMsg::ExtendedData { ref data, ext } => {
                         if ext == 1 {
-                            append_capped(&mut stderr, data, MAX_OUTPUT, &mut truncated)
+                            append_capped(&mut stderr, data, MAX_OUTPUT, &mut err_truncated)
                         }
                     }
                     ChannelMsg::ExitStatus { exit_status: code } => {
@@ -655,12 +664,16 @@ impl SshManager {
         }
 
         let mut stdout = String::from_utf8_lossy(&stdout).into_owned();
-        if truncated {
+        if out_truncated {
             stdout.push_str("\n[output truncated at 16 MB]");
+        }
+        let mut stderr = String::from_utf8_lossy(&stderr).into_owned();
+        if err_truncated {
+            stderr.push_str("\n[output truncated at 16 MB]");
         }
         Ok(CommandOutput {
             stdout,
-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+            stderr,
             exit_status,
             exit_signal,
         })

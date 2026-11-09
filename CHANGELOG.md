@@ -3,6 +3,37 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.28 - 2026-11-09
+
+### Changed
+- Selected items get brighter instead of bold, so nothing shifts when you click. Tabs keep their width.
+- The tab strip has even spacing, and everything in it sits on one line.
+- Dragging a tab no longer switches to it, so you can drop it onto the open tab to split.
+- An AI change of a host's address keeps its port forwards; they wait for your review.
+- README and SECURITY describe the app as it is today.
+
+### Fixed
+- AI access could turn itself back on right after you switched it off while changing the duration.
+- A password typed before the sudo prompt appeared could end up in the audit log.
+- Test connection now respects the review of hosts the AI changed, including jump hosts.
+- Protected paths with a leading slash could be reached with ../ over SFTP.
+- Saving a file over SFTP keeps its owner.
+- Copying a folder into itself on the same host is refused.
+- New file no longer replaces a file that appeared on the server meanwhile.
+- Remote folder links can be downloaded and copied.
+- The host editor no longer drops port forwards added while it was open.
+- Copy address uses the user of the host's identity.
+- Ctrl+L keeps multi-line prompts intact.
+- Alt+Shift+D no longer splits a pane behind an open dialog.
+- Windows Hello errors are shown on the lock screen.
+- Reconnect shows the real reason it failed and no longer takes focus from dialogs.
+- Terminals get their fast renderer back after the browser dropped it.
+- Connecting tries every address of a host with its own timeout, so a blocked IPv6 no longer hides IPv4.
+- Stopping a remote port forward no longer hangs on a dead connection.
+- Settings that fail to save report an error instead of reverting after a restart.
+- Hosts and snippets can no longer be overwritten while the vault is still loading.
+- Imported identities with a clashing name get " (imported)" added.
+
 ## 0.2.27 - 2026-11-07
 
 ### Changed

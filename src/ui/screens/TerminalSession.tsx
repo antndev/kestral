@@ -13,7 +13,7 @@ import type { MenuEntry } from "../Menu";
 export { termBus };
 export type { SessionStatus };
 
-export function encodingLabel(enc: string | undefined): string {
+function encodingLabel(enc: string | undefined): string {
   const e = (enc || "utf-8").toLowerCase();
   return e === "iso-8859-1" ? "ISO-8859-1" : e === "windows-1252" ? "Windows-1252" : "UTF-8";
 }
@@ -465,7 +465,7 @@ export function TerminalSession({
         </span>
         <span role="status" style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, color: "var(--text)" }}>
           <span aria-hidden="true" style={{ width: 7, height: 7, flex: "none", borderRadius: "50%", boxSizing: "border-box", ...paneDot(focusStage) }} />
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{stateText}</span>
+          <span title={focusStage === "failed" && note ? note : undefined} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{stateText}</span>
         </span>
         {focusStage === "connected" && typeof focusInfo?.latency === "number" && <span title="Latency">{focusInfo.latency} ms</span>}
         {encoding !== "UTF-8" && <span>{encoding}</span>}

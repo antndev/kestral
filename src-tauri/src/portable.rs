@@ -7,7 +7,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 use crate::error::{AppError, Result};
 use crate::model::{AuthMethod, Host, Identity, Snippet};
 use crate::state::Services;
-use crate::vault::{SecretKind, SecretStore};
+use crate::vault::SecretKind;
 
 const BUNDLE_VERSION: u8 = 1;
 

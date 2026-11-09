@@ -272,7 +272,9 @@ function MasterCard({ onAiChanged }: { onAiChanged?(active: boolean): void }) {
   }, [expiresAt]);
 
   useEffect(() => {
-    if (!active) setStartedMinutes(null);
+    if (active) return;
+    setStartedMinutes(null);
+    window.clearTimeout(durationTimer.current);
   }, [active]);
 
   const remainingMs = expiresAt != null ? expiresAt - now : null;
@@ -283,6 +285,7 @@ function MasterCard({ onAiChanged }: { onAiChanged?(active: boolean): void }) {
   }, [expired, load]);
 
   async function apply(on: boolean, minutes = aiMinutes) {
+    window.clearTimeout(durationTimer.current);
     if (busyRef.current) return;
     busyRef.current = true;
     ++seq.current;

@@ -24,7 +24,6 @@ struct Active {
     task: tokio::task::JoinHandle<()>,
     session: Arc<client::Handle<ClientHandler>>,
     conns: Arc<AtomicU32>,
-    remote_bind: Option<(String, u32)>,
 }
 
 type ActiveMap = Arc<Mutex<HashMap<(Uuid, Uuid), (u64, Option<Active>)>>>;
@@ -108,7 +107,7 @@ impl ForwardManager {
         attempt: u64,
     ) -> Result<()> {
         let conns = Arc::new(AtomicU32::new(0));
-        let (task, session, remote_bind) = match fwd.kind {
+        let (task, session) = match fwd.kind {
             ForwardKind::Local | ForwardKind::Dynamic => {
                 let listener = bind_local(fwd).await?;
                 let session = Arc::new(ssh.connect(host, vault).await?);
@@ -117,24 +116,23 @@ impl ForwardManager {
                 } else {
                     spawn_dynamic(listener, session.clone(), conns.clone(), self.active.clone(), key)
                 };
-                (task, session, None)
+                (task, session)
             }
             ForwardKind::Remote => {
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                 let session = Arc::new(ssh.connect_forwarding(host, vault, tx).await?);
                 let bind = remote_bind_host(fwd);
-                let port = session
+                session
                     .tcpip_forward(bind.clone(), u32::from(fwd.remote_port))
                     .await
                     .map_err(|e| AppError::Ssh(format!("{} refused to listen on {bind}:{}: {e}", host.name, fwd.remote_port)))?;
-                let port = if port == 0 { u32::from(fwd.remote_port) } else { port };
                 let target_host = local_target_host(fwd);
                 let task = spawn_remote(rx, session.clone(), target_host, fwd.local_port, conns.clone(), self.active.clone(), key);
-                (task, session, Some((bind, port)))
+                (task, session)
             }
         };
 
-        let active = Active { task, session, conns, remote_bind };
+        let active = Active { task, session, conns };
         let orphan = {
             let mut map = self.active.lock().unwrap();
             match map.get_mut(&key) {
@@ -542,9 +540,6 @@ fn spawn_remote(
 async fn shutdown(a: Active) {
     a.task.abort();
     let _ = a.task.await;
-    if let Some((bind, port)) = &a.remote_bind {
-        let _ = a.session.cancel_tcpip_forward(bind.clone(), *port).await;
-    }
     let _ = a.session.disconnect(russh::Disconnect::ByApplication, "", "").await;
 }
 
@@ -558,9 +553,13 @@ struct ForwardFailed {
 pub async fn start_on_connect(app: &tauri::AppHandle, host: &Host) {
     let forwards = app.state::<ForwardManager>();
     let state = app.state::<crate::state::AppState>();
+    let Ok(host) = state.services.hosts.get(host.id) else { return };
+    if crate::commands::ensure_reviewed(&state.services, &host).is_err() {
+        return;
+    }
     let running = forwards.active_ids();
     for f in host.forwards.iter().filter(|f| f.start_on_connect && !running.contains(&f.id)) {
-        if let Err(e) = forwards.start(&state.services.ssh, host, &state.services.vault, f).await {
+        if let Err(e) = forwards.start(&state.services.ssh, &host, &state.services.vault, f).await {
             let name = if f.name.trim().is_empty() { format!("port {}", f.local_port) } else { f.name.clone() };
             let _ = app.emit("forward-failed", ForwardFailed { host: host.name.clone(), name, error: e.to_string() });
         }

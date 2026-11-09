@@ -14,7 +14,7 @@ use crate::model::{AiPolicy, Host, NewHost, NewSnippet, PortForward, Snippet};
 use crate::policy::AiStatus;
 use crate::sftp::{FileEntry, SftpSessions};
 use crate::state::{AppState, McpInfo};
-use crate::vault::{SecretKind, SecretMeta, SecretStore};
+use crate::vault::{SecretKind, SecretMeta};
 
 fn parse_id(id: &str) -> Result<Uuid> {
     Uuid::parse_str(id).map_err(|_| AppError::NotFound(id.to_string()))
@@ -30,20 +30,23 @@ pub async fn vault_status(state: State<'_, AppState>) -> Result<bool> {
     Ok(state.services.vault.is_unlocked())
 }
 
+pub(crate) fn load_unlocked(services: &crate::state::Services) {
+    if let Err(e) = services.hosts.load() {
+        tracing::error!("Loading hosts after unlock failed: {e}");
+    }
+    if let Err(e) = services.snippets.load() {
+        tracing::error!("Loading snippets after unlock failed: {e}");
+    }
+    services.audit.load();
+}
+
 #[tauri::command]
 pub async fn vault_create(state: State<'_, AppState>, master: String) -> Result<()> {
-    let vault = state.services.vault.clone();
-    let hosts = state.services.hosts.clone();
-    let snippets = state.services.snippets.clone();
+    let services = state.services.clone();
     let master = Zeroizing::new(master);
     tokio::task::spawn_blocking(move || -> Result<()> {
-        vault.create(master.as_str())?;
-        if let Err(e) = hosts.load() {
-            tracing::error!("Loading hosts after vault creation failed: {e}");
-        }
-        if let Err(e) = snippets.load() {
-            tracing::error!("Loading snippets after vault creation failed: {e}");
-        }
+        services.vault.create(master.as_str())?;
+        load_unlocked(&services);
         Ok(())
     })
     .await
@@ -52,29 +55,18 @@ pub async fn vault_create(state: State<'_, AppState>, master: String) -> Result<
 
 #[tauri::command]
 pub async fn vault_unlock(state: State<'_, AppState>, master: String) -> Result<()> {
-    let vault = state.services.vault.clone();
-    let hosts = state.services.hosts.clone();
-    let snippets = state.services.snippets.clone();
-    let audit = state.services.audit.clone();
+    let services = state.services.clone();
     let master = Zeroizing::new(master);
     tokio::task::spawn_blocking(move || -> Result<()> {
         let started = std::time::Instant::now();
-        vault.unlock(master.as_str())?;
+        services.vault.unlock(master.as_str())?;
         let kdf = started.elapsed();
-        if let Err(e) = hosts.load() {
-            tracing::error!("Loading hosts after unlock failed: {e}");
-        }
-        if let Err(e) = snippets.load() {
-            tracing::error!("Loading snippets after unlock failed: {e}");
-        }
-        let lists = started.elapsed();
-        audit.load();
+        load_unlocked(&services);
         tracing::info!(
-            "unlock took {} ms (vault {} ms, hosts and snippets {} ms, audit {} ms)",
+            "unlock took {} ms (vault {} ms, hosts, snippets and audit {} ms)",
             started.elapsed().as_millis(),
             kdf.as_millis(),
-            (lists - kdf).as_millis(),
-            (started.elapsed() - lists).as_millis()
+            (started.elapsed() - kdf).as_millis()
         );
         Ok(())
     })
@@ -377,6 +369,10 @@ pub struct HostTestResult {
 #[tauri::command]
 pub async fn host_test(state: State<'_, AppState>, mut host: Host, password: Option<String>) -> Result<HostTestResult> {
     host.normalize();
+    if let Ok(stored) = state.services.hosts.get(host.id) {
+        host.ai_changed = stored.ai_changed;
+    }
+    ensure_reviewed(&state.services, &host)?;
     let password = password.map(Zeroizing::new);
     let started = std::time::Instant::now();
     let result = state
@@ -534,8 +530,7 @@ pub async fn ai_caps(state: State<'_, AppState>) -> Result<crate::policy::AiCaps
 
 #[tauri::command]
 pub async fn ai_set_caps(state: State<'_, AppState>, caps: crate::policy::AiCaps) -> Result<()> {
-    state.services.policy.set_caps(caps);
-    Ok(())
+    state.services.policy.set_caps(caps)
 }
 
 #[tauri::command]
@@ -545,8 +540,7 @@ pub async fn ai_protected_list(state: State<'_, AppState>) -> Result<Vec<String>
 
 #[tauri::command]
 pub async fn ai_set_protected(state: State<'_, AppState>, paths: Vec<String>) -> Result<()> {
-    state.services.policy.set_protected_paths(paths);
-    Ok(())
+    state.services.policy.set_protected_paths(paths)
 }
 
 #[tauri::command]
@@ -715,7 +709,11 @@ pub async fn run_command_stream(
 }
 
 pub(crate) fn ensure_reviewed(services: &crate::state::Services, host: &Host) -> Result<()> {
-    let mut chain = services.ssh.jump_chain(host)?;
+    ensure_chain_reviewed(&services.ssh, host)
+}
+
+fn ensure_chain_reviewed(ssh: &crate::ssh::SshManager, host: &Host) -> Result<()> {
+    let mut chain = ssh.jump_chain(host)?;
     chain.push(host.clone());
     if let Some(h) = chain.iter().find(|h| h.ai_changed) {
         return Err(AppError::Other(format!(
@@ -1154,4 +1152,61 @@ pub async fn snippet_folder_remove(state: State<'_, AppState>, name: String) -> 
     let moved = s.snippets.set_folder(&name, "")?;
     s.collections.remove(&name, s.snippets.folders())?;
     Ok(moved)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::AuthMethod;
+
+    fn host(name: &str, jump: Option<Uuid>) -> Host {
+        let mut h = NewHost {
+            name: name.to_string(),
+            hostname: "h".into(),
+            port: 22,
+            username: "root".into(),
+            auth: AuthMethod::Agent,
+            ai_policy: AiPolicy::Locked,
+            ai_file_policy: AiPolicy::Locked,
+            forward_agent: false,
+            agent_keys: Vec::new(),
+            forwards: Vec::new(),
+            group: String::new(),
+            tags: Vec::new(),
+            jump_host_id: None,
+            options: Default::default(),
+        }
+        .into_host();
+        h.jump_host_id = jump;
+        h
+    }
+
+    #[test]
+    fn review_gate_covers_the_whole_jump_chain() {
+        let dir = std::env::temp_dir().join(format!("kestral_cmd_test_{}", crate::vault::random_token()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault = Arc::new(crate::vault::Vault::new(dir.join("vault.json")));
+        vault.create("pw").unwrap();
+        let hosts = Arc::new(crate::hosts::HostStore::new(dir.join("hosts.json"), vault.clone()));
+        hosts.load().unwrap();
+        let audit = Arc::new(crate::audit::AuditLog::new(dir.join("audit.log"), vault.clone()));
+        let identities = Arc::new(crate::identities::IdentityStore::new(vault.clone()));
+        let ssh = crate::ssh::SshManager::new(audit, hosts.clone(), identities);
+
+        let mut jump = host("jump", None);
+        jump.ai_changed = true;
+        let jump = hosts.add_host(jump).unwrap();
+        let mid = hosts.add_host(host("mid", Some(jump.id))).unwrap();
+        let leaf = host("leaf", Some(mid.id));
+
+        assert!(ensure_chain_reviewed(&ssh, &leaf).is_err());
+        assert!(ensure_chain_reviewed(&ssh, &mid).is_err());
+        assert!(ensure_chain_reviewed(&ssh, &host("alone", None)).is_ok());
+
+        hosts.update(Host { ai_changed: false, ..jump }).unwrap();
+        assert!(ensure_chain_reviewed(&ssh, &leaf).is_ok());
+        assert!(ensure_chain_reviewed(&ssh, &Host { ai_changed: true, ..leaf }).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

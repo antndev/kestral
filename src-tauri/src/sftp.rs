@@ -163,6 +163,7 @@ async fn create_part(
         }
     }
     let tmp = remote_part(&target);
+    let owner = existing.as_ref().and_then(|m| m.uid.zip(m.gid));
     let permissions = existing.and_then(|m| m.permissions).or(source_mode);
     let mut attrs = russh_sftp::protocol::FileAttributes::empty();
     if permissions.is_some() {
@@ -171,13 +172,25 @@ async fn create_part(
     let flags = russh_sftp::protocol::OpenFlags::CREATE
         | russh_sftp::protocol::OpenFlags::TRUNCATE
         | russh_sftp::protocol::OpenFlags::WRITE;
-    match sftp.open_with_flags_and_attributes(tmp.as_str(), flags, attrs).await {
-        Ok(f) => Ok((f, Some(Part { tmp, target, permissions }))),
-        Err(_) => {
-            let f = sftp.create(path).await.map_err(|e| ferr("create", e))?;
-            Ok((f, None))
+    if let Ok(mut f) = sftp.open_with_flags_and_attributes(tmp.as_str(), flags, attrs).await {
+        let owned = match owner {
+            None => true,
+            Some((uid, gid)) => {
+                let mut own = russh_sftp::protocol::FileAttributes::empty();
+                own.uid = Some(uid);
+                own.gid = Some(gid);
+                sftp.set_metadata(tmp.as_str(), own).await.is_ok()
+                    || sftp.metadata(tmp.as_str()).await.is_ok_and(|m| m.uid.zip(m.gid) == owner)
+            }
+        };
+        if owned {
+            return Ok((f, Some(Part { tmp, target, permissions })));
         }
+        let _ = f.shutdown().await;
+        let _ = sftp.remove_file(tmp.as_str()).await;
     }
+    let f = sftp.create(path).await.map_err(|e| ferr("create", e))?;
+    Ok((f, None))
 }
 
 async fn finish_part(sftp: &SftpSession, part: Option<Part>, result: Result<u64>) -> Result<u64> {

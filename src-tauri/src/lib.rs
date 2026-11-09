@@ -232,7 +232,7 @@ pub fn run() {
 
             let token_path = base_dir.join("mcp_token");
             let token = vault::load_or_create_token(&token_path);
-            let bearer: mcp::Bearer = Arc::new(std::sync::RwLock::new(token));
+            let bearer: mcp::Bearer = Arc::from(token);
             let mcp = McpInfo {
                 url: format!("http://127.0.0.1:{MCP_PORT}/mcp"),
                 running: false,
@@ -271,7 +271,7 @@ pub fn run() {
             let _tray = tauri::tray::TrayIconBuilder::with_id("kestral-tray")
                 .icon(app.default_window_icon().cloned().expect("window icon"))
                 // On macOS the menu-bar icon must be a template: macOS then draws
-                // the feather's silhouette from its alpha as a native monochrome
+                // the bird's silhouette from its alpha as a native monochrome
                 // glyph instead of squeezing in the full-colour app icon. No-op
                 // on Windows, where the tray keeps the colour icon.
                 .icon_as_template(cfg!(target_os = "macos"))

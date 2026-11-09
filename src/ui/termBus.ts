@@ -11,7 +11,7 @@ export interface PaneInput {
   paste?: boolean;
 }
 
-export interface PaneApi {
+interface PaneApi {
   hostId: string;
   /** False when the pane has no open shell, so nothing was sent. */
   write(data: string, input?: PaneInput): boolean;
@@ -84,10 +84,6 @@ export const termBus = {
       }
     }
     return n;
-  },
-
-  pane(tabId: string, paneId: string): PaneApi | undefined {
-    return panes.get(tabId)?.get(paneId);
   },
 
   byId(paneId: string): PaneApi | undefined {

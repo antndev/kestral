@@ -1,13 +1,13 @@
 import { ClipboardEvent, CSSProperties, KeyboardEvent as ReactKeyboardEvent, ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { readText as clipReadText, writeText as clipWriteText } from "@tauri-apps/plugin-clipboard-manager";
+import { writeText as clipWriteText } from "@tauri-apps/plugin-clipboard-manager";
 import * as api from "../../api";
-import type { AiPolicy, AuthMethod, ForwardKind, Host, Identity, KeyAlgorithm, LocalAgentInfo, NewHost, PortForward, PubkeyInfo, SecretMeta } from "../../api";
+import type { AiPolicy, AuthMethod, ForwardKind, Host, Identity, LocalAgentInfo, NewHost, PortForward, PubkeyInfo, SecretMeta } from "../../api";
 import { TERMINAL_THEMES } from "../../lib/terminal-themes";
 import { IS_MAC, MONO, cleanText, errText } from "../mock";
 import { CheckIcon, ChevronIcon, CloseIcon, CopyIcon, PlusIcon, TrashIcon } from "../icons";
 import { ConfirmDialog, Overlay, useModalLayer } from "./Dialogs";
+import { GenerateDialog, ImportDialog, freeName, keyAlgo, nameError } from "../screens/KeychainScreen";
 import { Stable } from "../Stable";
 
 type AuthKind = AuthMethod["kind"];
@@ -27,14 +27,6 @@ interface ForwardDraft {
 }
 
 const NEW = "__new__";
-const KEY_ALGOS: { value: KeyAlgorithm; label: string }[] = [
-  { value: "ed25519", label: "ED25519" },
-  { value: "ecdsa-p256", label: "ECDSA P-256" },
-  { value: "ecdsa-p384", label: "ECDSA P-384" },
-  { value: "ecdsa-p521", label: "ECDSA P-521" },
-  { value: "rsa-3072", label: "RSA 3072" },
-  { value: "rsa-4096", label: "RSA 4096" },
-];
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const TEST_FIELDS = ["hostname", "port", "username", "password", "key", "identity"];
 const inAdvanced = (k: string) => k === "keepalive" || k === "timeout" || k.startsWith("env:") || k.startsWith("fwd:");
@@ -46,7 +38,6 @@ const h3Style: CSSProperties = { margin: 0, fontSize: 13, fontWeight: 500 };
 const sectionStyle: CSSProperties = { display: "flex", flexDirection: "column", gap: 12 };
 const grid2: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 };
 const hint: CSSProperties = { margin: 0, fontSize: 12, color: "var(--text-2)", lineHeight: 1.45 };
-const errStyle: CSSProperties = { display: "block", marginTop: 4, fontSize: 12, color: "var(--err)", overflowWrap: "anywhere" };
 const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
 const chip: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, maxWidth: "100%", minWidth: 0, height: 24, padding: "0 4px 0 8px", borderRadius: 12, background: "var(--bg-raised)", fontSize: 12, color: "var(--text)", boxSizing: "border-box" };
 const panel: CSSProperties = { display: "flex", flexDirection: "column", gap: 10, padding: 12, border: "1px solid var(--line)", borderRadius: 8 };
@@ -112,23 +103,6 @@ function isLoopbackBind(host: string): boolean {
   return v === "" || v === "127.0.0.1" || v === "localhost" || v === "::1";
 }
 
-function sshKeyType(publicKey: string): string {
-  const t = (publicKey.trim().split(/\s+/)[0] || "").toLowerCase();
-  if (t === "ssh-ed25519") return "ED25519";
-  if (t === "sk-ssh-ed25519@openssh.com") return "ED25519-SK";
-  if (t === "ssh-rsa") return "RSA";
-  if (t === "ssh-dss") return "DSA";
-  if (t.startsWith("ecdsa-sha2-")) return "ECDSA " + t.replace("ecdsa-sha2-nistp", "P-");
-  if (t.startsWith("sk-ecdsa-sha2-")) return "ECDSA-SK";
-  return t || "Key";
-}
-
-function uniqueId(base: string, taken: string[]): string {
-  const lower = new Set(taken.map((t) => t.toLowerCase()));
-  const b = base.trim() || "key";
-  if (!lower.has(b.toLowerCase())) return b;
-  for (let i = 2; ; i++) if (!lower.has(`${b}-${i}`.toLowerCase())) return `${b}-${i}`;
-}
 function uniqueLabel(base: string, hosts: Host[]): string {
   const b = base.trim();
   const taken = new Set(hosts.map((h) => h.name.trim().toLowerCase()));
@@ -136,13 +110,6 @@ function uniqueLabel(base: string, hosts: Host[]): string {
   const sep = /\s/.test(b) ? " " : "-";
   for (let i = 2; ; i++) if (!taken.has(`${b}${sep}${i}`.toLowerCase())) return `${b}${sep}${i}`;
 }
-function slug(s: string): string {
-  return s.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "host";
-}
-function baseName(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
-
 function toDraft(f: PortForward): ForwardDraft {
   return { id: f.id, name: f.name ?? "", local_host: f.local_host, local_port: String(f.local_port), remote_host: f.remote_host, remote_port: String(f.remote_port), autostart: f.autostart, kind: f.kind ?? "local", start_on_connect: !!f.start_on_connect };
 }
@@ -159,6 +126,11 @@ function fromDraft(d: ForwardDraft): PortForward {
     kind: d.kind,
     start_on_connect: d.start_on_connect,
   };
+}
+function mergeForwards(drafts: ForwardDraft[], opened: PortForward[], fresh: PortForward[]): PortForward[] {
+  const was = new Map(opened.map((f) => [f.id, JSON.stringify(toDraft(f))]));
+  const kept = drafts.flatMap((d) => (was.get(d.id) === JSON.stringify(d) ? fresh.filter((f) => f.id === d.id) : [fromDraft(d)]));
+  return [...kept, ...fresh.filter((f) => !was.has(f.id) && !drafts.some((d) => d.id === f.id))];
 }
 
 /** Splits "user@host:port" typed into the address field into its parts. */
@@ -292,7 +264,7 @@ function KeyInfo({ info }: { info: PubkeyInfo }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "80px minmax(0, 1fr) auto", alignItems: "center", gap: "6px 10px", padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg-sunken)", fontSize: 12 }}>
       <span style={key}>Type</span>
-      <span style={{ gridColumn: "2 / 4", fontWeight: 500 }}>{sshKeyType(info.public_key)}</span>
+      <span style={{ gridColumn: "2 / 4", fontWeight: 500 }}>{keyAlgo(info.public_key)}</span>
       <span style={key}>Fingerprint</span>
       <code data-selectable style={value}>{info.fingerprint}</code>
       <CopyTextButton text={info.fingerprint} label="Copy" ariaLabel="Copy fingerprint" />
@@ -471,6 +443,7 @@ export function HostEditor(p: {
 
   // Port forwards
   const [forwards, setForwards] = useState<ForwardDraft[]>((src.forwards ?? []).map(toDraft));
+  const openedForwards = useRef(host?.forwards ?? []);
   const patchForward = (id: string, patch: Partial<ForwardDraft>) => setForwards((cur) => cur.map((f) => (f.id === id ? { ...f, ...patch } : f)));
 
   // AI access
@@ -514,7 +487,7 @@ export function HostEditor(p: {
     };
   }, [authKind, keySel, keyIds, keyInfo]);
 
-  const [keyPanel, setKeyPanel] = useState<null | "generate" | "import">(null);
+  const [keyDialog, setKeyDialog] = useState<null | "generate" | "import">(null);
   const dialogRef = useRef<HTMLElement>(null);
   const focusTarget = useRef<string | null>(null);
   const rescueFocus = (selector: string) => {
@@ -528,189 +501,20 @@ export function HostEditor(p: {
     if (active && active !== document.body) return;
     dialogRef.current?.querySelector<HTMLElement>(selector)?.focus();
   });
-  const [genName, setGenName] = useState("");
-  const [genAlgo, setGenAlgo] = useState<KeyAlgorithm>("ed25519");
-  const [genBusy, setGenBusy] = useState(false);
-  const [genErr, setGenErr] = useState("");
   const [justCreated, setJustCreated] = useState("");
-
-  const [impName, setImpName] = useState("");
-  const [impSource, setImpSource] = useState("");
-  const [impInfo, setImpInfo] = useState<PubkeyInfo | null>(null);
-  const [impBusy, setImpBusy] = useState<null | "load" | "save">(null);
-  const [impErr, setImpErr] = useState("");
-  const [impLocked, setImpLocked] = useState(false);
-  const [impPass, setImpPass] = useState("");
-  // The private key stays out of React state and is never rendered.
-  const impPem = useRef<string | null>(null);
-  useEffect(
-    () => () => {
-      impPem.current = null;
-    },
-    [],
-  );
 
   const allSecretIds = secrets.map((s) => s.id);
   /** Fresh ids straight from the vault, so a new secret can never overwrite an existing one. */
   const takenIds = async () => (await api.secretList()).map((s) => s.id.toLowerCase());
 
-  function openGenerate() {
-    setKeyPanel("generate");
-    setGenErr("");
-    setGenName(uniqueId(`${slug(name || hostname)}-${genAlgo}`, allSecretIds));
-  }
-  function openImport() {
-    setKeyPanel("import");
-    setImpErr("");
-    setImpName("");
-    setImpSource("");
-    setImpInfo(null);
-    setImpLocked(false);
-    setImpPass("");
-    impPem.current = null;
-  }
-  function closeKeyPanel() {
-    if (keyPanel) rescueFocus(`[data-focus="${keyPanel}"]`);
-    setKeyPanel(null);
-    impPem.current = null;
-    setImpInfo(null);
-  }
-
-  async function generate() {
-    const id = genName.trim();
-    if (!id) return setGenErr("Enter a name for the key");
-    setGenBusy(true);
-    setGenErr("");
-    try {
-      if ((await takenIds()).includes(id.toLowerCase())) throw "A key or password with this name already exists";
-      const pem = await api.generateKey(genAlgo, id);
-      await api.secretPut(id, "private_key", pem);
-      await reloadSecrets();
-      if (!alive.current) return;
-      touchAuth();
-      setKeySel(id);
-      setJustCreated(id);
-      clearErr("key");
-      rescueFocus('[data-field="key"]');
-      setKeyPanel(null);
-    } catch (e) {
-      if (alive.current) setGenErr(errText(e));
-    } finally {
-      if (alive.current) setGenBusy(false);
-    }
-  }
-
-  async function loadKeyText(text: string, source: string) {
-    const pem = cleanText(text).trim();
-    if (/^(ssh-|ecdsa-|sk-)/.test(pem) || pem.includes("PUBLIC KEY")) throw "That is a public key. Pick the private key, usually the file without .pub.";
-    if (!pem.includes("PRIVATE KEY")) throw "No private key found. It should start with -----BEGIN OPENSSH PRIVATE KEY-----.";
-    let info: PubkeyInfo | null = null;
-    try {
-      info = await api.derivePubkey(pem);
-    } catch (e) {
-      if (!api.isPassphraseError(e)) throw `Could not read the key. (${errText(e)})`;
-    }
-    impPem.current = pem;
-    setImpSource(source);
-    setImpPass("");
-    if (!info || info.encrypted) {
-      setImpLocked(true);
-      setImpInfo(info);
-      return;
-    }
-    setImpLocked(false);
-    setImpInfo(info);
-  }
-
-  async function unlockImported() {
-    if (!impPem.current || !impPass) return;
-    setImpBusy("load");
-    setImpErr("");
-    try {
-      const plain = await api.decryptKey(impPem.current, impPass);
-      const info = await api.derivePubkey(plain);
-      if (!alive.current) return;
-      impPem.current = plain;
-      setImpPass("");
-      setImpLocked(false);
-      setImpInfo(info);
-    } catch (e) {
-      if (alive.current) setImpErr(errText(e));
-    } finally {
-      if (alive.current) setImpBusy(null);
-    }
-  }
-
-  async function importFromFile() {
-    setImpErr("");
-    try {
-      let defaultPath: string | undefined;
-      try {
-        const home = await api.localHome();
-        defaultPath = home + (home.includes("\\") ? "\\.ssh" : "/.ssh");
-      } catch {
-        defaultPath = undefined;
-      }
-      const picked = await openDialog({ multiple: false, directory: false, defaultPath, title: "Import a private key" });
-      if (typeof picked !== "string") return;
-      setImpBusy("load");
-      const text = await api.localReadText(picked);
-      await loadKeyText(text, baseName(picked));
-      if (!alive.current) return;
-      if (!impName.trim()) setImpName(uniqueId(baseName(picked).replace(/\.(pem|key|ppk)$/i, ""), allSecretIds));
-    } catch (e) {
-      if (alive.current) {
-        impPem.current = null;
-        setImpInfo(null);
-        setImpErr(errText(e));
-      }
-    } finally {
-      if (alive.current) setImpBusy(null);
-    }
-  }
-
-  async function importFromClipboard() {
-    setImpErr("");
-    setImpBusy("load");
-    try {
-      const text = await clipReadText();
-      if (!text) throw "The clipboard is empty.";
-      await loadKeyText(text, "the clipboard");
-      if (alive.current && !impName.trim()) setImpName(uniqueId(`${slug(name || hostname)}-key`, allSecretIds));
-    } catch (e) {
-      if (alive.current) {
-        impPem.current = null;
-        setImpInfo(null);
-        setImpErr(errText(e));
-      }
-    } finally {
-      if (alive.current) setImpBusy(null);
-    }
-  }
-
-  async function saveImported() {
-    const id = impName.trim();
-    if (!impPem.current) return setImpErr("Choose a key file or paste a key first");
-    if (!id) return setImpErr("Enter a name for the key");
-    setImpBusy("save");
-    setImpErr("");
-    try {
-      if ((await takenIds()).includes(id.toLowerCase())) throw "A key or password with this name already exists";
-      await api.secretPut(id, "private_key", impPem.current);
-      impPem.current = null;
-      await reloadSecrets();
-      if (!alive.current) return;
-      touchAuth();
-      setKeySel(id);
-      clearErr("key");
-      rescueFocus('[data-field="key"]');
-      setKeyPanel(null);
-      setImpInfo(null);
-    } catch (e) {
-      if (alive.current) setImpErr(errText(e));
-    } finally {
-      if (alive.current) setImpBusy(null);
-    }
+  async function keyAdded(id: string, generated: boolean) {
+    await reloadSecrets();
+    if (!alive.current) return;
+    touchAuth();
+    setKeySel(id);
+    if (generated) setJustCreated(id);
+    clearErr("key");
+    setKeyDialog(null);
   }
 
   // ---- Tags ----
@@ -757,7 +561,8 @@ export function HostEditor(p: {
     if (!username.trim()) e.username = "Enter a user name";
     else if (/\s/.test(username.trim())) e.username = "The user name cannot contain spaces";
     if (authKind === "password" && effPwSel === NEW && !pwValue) e.password = "Enter a password";
-    if (authKind === "password" && effPwSel === NEW && pwName.trim() && allSecretIds.some((x) => x.toLowerCase() === pwName.trim().toLowerCase())) e.pwname = "Name already in use";
+    const pwNameErr = authKind === "password" && effPwSel === NEW && pwName.trim() ? nameError(pwName.trim(), allSecretIds) : "";
+    if (pwNameErr) e.pwname = pwNameErr;
     if (authKind === "key" && (!keySel || !keyIds.includes(keySel))) e.key = !secretsLoaded && secretsErr ? "Could not load the vault keys" : keyIds.length ? "Pick a key" : "Generate or import a key first";
     if (authKind === "identity" && !identities.some((i) => i.id === identitySel)) e.identity = identities.length ? "Pick an identity" : "Create an identity in Keychain first";
     if (keepalive.trim() && (!/^\d+$/.test(keepalive.trim()) || (Number(keepalive) !== 0 && (Number(keepalive) < 5 || Number(keepalive) > 3600)))) e.keepalive = "Use 5 to 3600, or 0";
@@ -841,7 +646,7 @@ export function HostEditor(p: {
           const taken = await takenIds();
           const wanted = pwName.trim();
           if (wanted && taken.includes(wanted.toLowerCase())) throw "A key or password with this name already exists. Pick another name under Save as.";
-          const id = wanted || uniqueId(`${username.trim()}@${hostname.trim()}`, taken);
+          const id = wanted || freeName(`${username.trim()}@${hostname.trim()}`, taken);
           await api.secretPut(id, "password", pwValue);
           createdSecret = id;
           newPassword = id;
@@ -866,7 +671,7 @@ export function HostEditor(p: {
         ai_file_policy: aiFilePolicy,
         forward_agent: forwardAgent,
         agent_keys: secretsLoaded ? agentKeys.filter((k) => keyIds.includes(k)) : agentKeys,
-        forwards: forwards.map(fromDraft),
+        forwards: host ? mergeForwards(forwards, openedForwards.current, host.forwards) : forwards.map(fromDraft),
         group: src.group ?? "",
         tags: finalTags,
         jump_host_id: jumpId || null,
@@ -1011,13 +816,7 @@ export function HostEditor(p: {
   const z = useModalLayer(dialogRef, {
     inline: p.inline,
     initialFocus: labelRef,
-    onEscape: () => {
-      if (keyPanel) {
-        closeKeyPanel();
-        return;
-      }
-      close();
-    },
+    onEscape: close,
     onTab: (backwards) => {
       const root = dialogRef.current;
       if (!root) return;
@@ -1087,8 +886,7 @@ export function HostEditor(p: {
               ? (e) => {
                   if (e.key !== "Escape" || e.defaultPrevented) return;
                   e.preventDefault();
-                  if (keyPanel) closeKeyPanel();
-                  else close();
+                  close();
                 }
               : undefined
           }
@@ -1429,10 +1227,10 @@ export function HostEditor(p: {
                       </select>
                     </Field>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button type="button" data-focus="generate" aria-expanded={keyPanel === "generate"} onClick={() => (keyPanel === "generate" ? closeKeyPanel() : openGenerate())} style={{ ...btn("secondary"), background: keyPanel === "generate" ? "var(--bg-raised)" : "var(--bg)" }}>
+                      <button type="button" aria-haspopup="dialog" onClick={() => setKeyDialog("generate")} style={btn("secondary")}>
                         Generate key
                       </button>
-                      <button type="button" data-focus="import" aria-expanded={keyPanel === "import"} onClick={() => (keyPanel === "import" ? closeKeyPanel() : openImport())} style={{ ...btn("secondary"), background: keyPanel === "import" ? "var(--bg-raised)" : "var(--bg)" }}>
+                      <button type="button" aria-haspopup="dialog" onClick={() => setKeyDialog("import")} style={btn("secondary")}>
                         Import key
                       </button>
                     </div>
@@ -1453,138 +1251,6 @@ export function HostEditor(p: {
                           Add the public key to <code style={{ fontFamily: MONO, fontSize: 12 }}>~/.ssh/authorized_keys</code> on the server before you connect.
                         </p>
                       )}
-                    </div>
-                  )}
-
-                  {keyPanel === "generate" && (
-                    <div style={panel}>
-                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 160px", gap: 10 }}>
-                        <Field id={fid("genname")} label="Name">
-                          <input
-                            id={fid("genname")}
-                            type="text"
-                            autoFocus
-                            value={genName}
-                            spellCheck={false}
-                            onChange={(e) => {
-                              setGenName(cleanText(e.target.value));
-                              setGenErr("");
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                void generate();
-                              }
-                            }}
-                            style={inputStyle({ mono: true })}
-                          />
-                        </Field>
-                        <Field id={fid("genalgo")} label="Algorithm">
-                          <select
-                            id={fid("genalgo")}
-                            value={genAlgo}
-                            onChange={(e) => {
-                              const next = e.target.value as KeyAlgorithm;
-                              setGenName((n) => (n === uniqueId(`${slug(name || hostname)}-${genAlgo}`, allSecretIds) ? uniqueId(`${slug(name || hostname)}-${next}`, allSecretIds) : n));
-                              setGenAlgo(next);
-                            }}
-                            style={selectStyle()}
-                          >
-                            {KEY_ALGOS.map((a) => (
-                              <option key={a.value} value={a.value}>{a.label}</option>
-                            ))}
-                          </select>
-                        </Field>
-                      </div>
-                      {genAlgo.startsWith("rsa") && <p style={hint}>RSA keys take a few seconds to generate.</p>}
-                      {genErr && <span role="alert" style={{ ...errStyle, marginTop: 0 }}>{genErr}</span>}
-                      <div style={{ display: "flex", gap: 6, justifyContent: IS_MAC ? "flex-end" : "flex-start" }}>
-                        {IS_MAC && <button type="button" onClick={closeKeyPanel} style={btn("secondary", { small: true })}>Cancel</button>}
-                        <button type="button" disabled={genBusy} onClick={generate} style={btn("primary", { small: true, disabled: genBusy })}>
-                          <Stable text={genBusy ? "Generating…" : "Generate and save"} alts={["Generate and save", "Generating…"]} />
-                        </button>
-                        {!IS_MAC && <button type="button" onClick={closeKeyPanel} style={btn("secondary", { small: true })}>Cancel</button>}
-                      </div>
-                    </div>
-                  )}
-
-                  {keyPanel === "import" && (
-                    <div style={panel}>
-                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "end" }}>
-                        <Field id={fid("impname")} label="Name">
-                          <input
-                            id={fid("impname")}
-                            type="text"
-                            value={impName}
-                            placeholder="prod-key"
-                            spellCheck={false}
-                            onChange={(e) => {
-                              setImpName(cleanText(e.target.value));
-                              setImpErr("");
-                            }}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                if (impInfo && !impLocked && !impBusy) void saveImported();
-                              }
-                            }}
-                            style={inputStyle({ mono: true })}
-                          />
-                        </Field>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button type="button" disabled={!!impBusy} onClick={importFromFile} style={btn("secondary", { disabled: !!impBusy })}>
-                            Choose file…
-                          </button>
-                          <button type="button" disabled={!!impBusy} onClick={importFromClipboard} style={btn("secondary", { disabled: !!impBusy })}>
-                            Paste from clipboard
-                          </button>
-                        </div>
-                      </div>
-                      {impBusy === "load" && <p style={hint}>Reading the key…</p>}
-                      {impLocked && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <p style={hint}>This key from {impSource} has a passphrase. Enter it once, you are not asked again.</p>
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <input
-                              type="password"
-                              aria-label="Key passphrase"
-                              autoFocus
-                              value={impPass}
-                              placeholder="Passphrase"
-                              onChange={(e) => {
-                                setImpPass(e.target.value);
-                                setImpErr("");
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  e.preventDefault();
-                                  void unlockImported();
-                                }
-                              }}
-                              style={inputStyle()}
-                            />
-                            <button type="button" disabled={!impPass || !!impBusy} onClick={unlockImported} style={btn("secondary", { disabled: !impPass || !!impBusy })}>
-                              Unlock
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      {impInfo && !impLocked ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <p style={hint}>Loaded from {impSource}. The private key is never shown.</p>
-                          <KeyInfo info={impInfo} />
-                        </div>
-                      ) : (
-                        !impBusy && <p style={hint}>Pick a private key file, for example id_ed25519, or copy the key and paste it here.</p>
-                      )}
-                      {impErr && <span role="alert" style={{ ...errStyle, marginTop: 0 }}>{impErr}</span>}
-                      <div style={{ display: "flex", gap: 6, justifyContent: IS_MAC ? "flex-end" : "flex-start" }}>
-                        {IS_MAC && <button type="button" onClick={closeKeyPanel} style={btn("secondary", { small: true })}>Cancel</button>}
-                        <button type="button" disabled={!!impBusy || !impInfo || impLocked} onClick={saveImported} style={btn("primary", { small: true, disabled: !!impBusy || !impInfo || impLocked })}>
-                          <Stable text={impBusy === "save" ? "Saving…" : "Save key"} alts={["Save key", "Saving…"]} />
-                        </button>
-                        {!IS_MAC && <button type="button" onClick={closeKeyPanel} style={btn("secondary", { small: true })}>Cancel</button>}
-                      </div>
                     </div>
                   )}
                 </div>
@@ -2132,6 +1798,8 @@ export function HostEditor(p: {
           onClose={() => setConfirmDiscard(false)}
         />
       )}
+      {keyDialog === "generate" && <GenerateDialog taken={allSecretIds} onClose={() => setKeyDialog(null)} onDone={(id) => keyAdded(id, true)} />}
+      {keyDialog === "import" && <ImportDialog taken={allSecretIds} onClose={() => setKeyDialog(null)} onDone={(id) => keyAdded(id, false)} />}
     </>
   );
 }

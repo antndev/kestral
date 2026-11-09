@@ -103,10 +103,18 @@ impl IdentityStore {
         let _g = self.lock.lock().unwrap();
         let mut items = self.list()?;
         let (mut added, mut skipped) = (0, 0);
-        for ident in incoming {
+        for mut ident in incoming {
             if items.iter().any(|i| i.id == ident.id) {
                 skipped += 1;
                 continue;
+            }
+            let base = ident.name.trim().to_string();
+            let taken = |name: &str| items.iter().any(|i| i.name.trim().eq_ignore_ascii_case(name));
+            ident.name = base.clone();
+            let mut n = 1;
+            while taken(&ident.name) {
+                ident.name = if n == 1 { format!("{base} (imported)") } else { format!("{base} (imported {n})") };
+                n += 1;
             }
             items.push(ident);
             added += 1;
@@ -128,5 +136,30 @@ impl IdentityStore {
             }
             other => Ok((host.username.clone(), other.clone())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault::random_token;
+
+    #[test]
+    fn import_renames_a_clashing_name() {
+        let path = std::env::temp_dir().join(format!("kestral_ident_test_{}.json", random_token()));
+        let vault = Arc::new(Vault::new(path.clone()));
+        vault.create("pw").unwrap();
+        let store = IdentityStore::new(vault);
+        let auth = AuthMethod::Password { secret_id: "s".into() };
+        let mine = store.add(NewIdentity { name: "Admin".into(), username: "root".into(), auth: auth.clone() }).unwrap();
+        let ident = |name: &str| Identity { id: Uuid::new_v4(), name: name.into(), username: "x".into(), auth: auth.clone() };
+
+        assert_eq!(store.import(vec![ident("admin"), ident("ADMIN "), ident("other"), mine]).unwrap(), (3, 1));
+        let items = store.list().unwrap();
+        let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, ["Admin", "admin (imported)", "ADMIN (imported 2)", "other"]);
+        store.update(Identity { username: "y".into(), ..items[1].clone() }).unwrap();
+
+        let _ = std::fs::remove_file(&path);
     }
 }

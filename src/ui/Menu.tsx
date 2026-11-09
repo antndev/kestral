@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { DotsIcon } from "./icons";
 
-export type MenuItem = {
+type MenuItem = {
   label: string;
   hint?: string;
   disabled?: boolean;

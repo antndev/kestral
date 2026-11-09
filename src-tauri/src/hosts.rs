@@ -93,25 +93,26 @@ impl HostStore {
             path,
             vault,
             warning: Mutex::new(None),
-            unreadable: AtomicBool::new(false),
+            unreadable: AtomicBool::new(true),
             hosts: Mutex::new(Vec::new()),
         }
     }
 
     pub fn load(&self) -> Result<()> {
+        let mut hosts = self.hosts.lock().unwrap();
         if let Some(bytes) = self.vault.get_blob(Vault::hosts_blob_id())? {
             match serde_json::from_slice::<Vec<Host>>(&bytes) {
                 Ok(items) => {
                     *self.warning.lock().unwrap() = None;
                     self.unreadable.store(false, Ordering::SeqCst);
-                    *self.hosts.lock().unwrap() = items;
+                    *hosts = items;
                 }
                 Err(e) => {
                     *self.warning.lock().unwrap() = Some(format!(
                         "Hosts in the vault could not be read ({e}). Nothing was changed."
                     ));
                     self.unreadable.store(true, Ordering::SeqCst);
-                    *self.hosts.lock().unwrap() = Vec::new();
+                    *hosts = Vec::new();
                 }
             }
             return Ok(());
@@ -125,7 +126,7 @@ impl HostStore {
         };
         *self.warning.lock().unwrap() = None;
         self.unreadable.store(false, Ordering::SeqCst);
-        *self.hosts.lock().unwrap() = items.clone();
+        *hosts = items.clone();
 
         if had_file {
             self.save(&items)?;
@@ -148,8 +149,8 @@ impl HostStore {
                     *self.warning.lock().unwrap() = Some(format!(
                         "Hosts could not be decrypted ({e}). The old file is left untouched."
                     ));
-                    tracing::error!("hosts could not be decrypted ({e}), starting empty");
-                    Ok(Vec::new())
+                    tracing::error!("hosts could not be decrypted ({e}), old file left untouched");
+                    Err(e)
                 }
             },
             _ => Ok(Vec::new()),
@@ -161,11 +162,16 @@ impl HostStore {
     }
 
     pub fn clear(&self) {
-        *self.hosts.lock().unwrap() = Vec::new();
+        let mut hosts = self.hosts.lock().unwrap();
+        self.unreadable.store(true, Ordering::SeqCst);
+        *hosts = Vec::new();
     }
 
     fn save(&self, items: &[Host]) -> Result<()> {
         if self.unreadable.load(Ordering::SeqCst) {
+            if self.warning().is_none() {
+                return Err(AppError::VaultLocked);
+            }
             return Err(AppError::Other(
                 "Hosts in the vault could not be read, so no changes are saved until that is fixed.".into(),
             ));
@@ -310,7 +316,7 @@ impl HostStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::{random_token, SecretStore};
+    use crate::vault::random_token;
 
     fn tmp_dir(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!("kestral_hosts_test_{tag}_{}", random_token()))
@@ -468,6 +474,26 @@ mod tests {
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].ai_policy, AiPolicy::Free, "the failed change never reaches the disk");
         assert_eq!(back[0].ai_file_policy, AiPolicy::Confirm);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nothing_is_saved_before_load() {
+        let dir = tmp_dir("preload");
+        std::fs::create_dir_all(&dir).unwrap();
+        let vault = Arc::new(Vault::new(dir.join("vault.json")));
+        vault.create("pw").unwrap();
+        let store = HostStore::new(dir.join("hosts.json"), vault.clone());
+        assert!(store.add_host(host("early", None)).is_err());
+        assert!(vault.get_blob(Vault::hosts_blob_id()).unwrap().is_none());
+
+        store.load().unwrap();
+        let a = store.add_host(host("a", None)).unwrap();
+        store.clear();
+        assert!(store.add_host(host("b", None)).is_err());
+        store.load().unwrap();
+        assert_eq!(store.list().iter().map(|h| h.id).collect::<Vec<_>>(), vec![a.id]);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

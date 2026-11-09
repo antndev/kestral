@@ -12,7 +12,7 @@ import type { PaneInput, PaneStage } from "./ui/termBus";
 import { Menu } from "./ui/Menu";
 import type { MenuEntry } from "./ui/Menu";
 import { CheckIcon, WarningIcon } from "./ui/icons";
-import { IS_MAC, KEYS, errText, termFontStack } from "./ui/mock";
+import { IS_MAC, KEYS, MONO, errText, termFontStack } from "./ui/mock";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -27,7 +27,7 @@ const cleanPaste = (text: string) =>
     })
     .join("");
 
-export type TerminalStage = PaneStage;
+type TerminalStage = PaneStage;
 
 // Prompts after which the typed line is treated as a secret and NOT recorded in
 // the audit log. Kept deliberately broad and fail-safe: over-suppressing a
@@ -94,14 +94,14 @@ function hostKeyMessage(detail: string): string | null {
 }
 
 
-export interface UserInputInfo {
+interface UserInputInfo {
   /** The line belongs to a password or token prompt; never audit it, wherever it is mirrored. */
   secret: boolean;
   /** A bracketed paste, already unwrapped; receivers re-wrap it for their own paste mode. */
   paste: boolean;
 }
 
-export interface SshTerminalProps {
+interface SshTerminalProps {
   hostId: string;
   hostName: string;
   hostAddress: string;
@@ -130,7 +130,7 @@ export interface SshTerminalProps {
   onEditHost?(): void;
 }
 
-export type ConnNote = { attempt: number; of: number; at: number | null; text: string };
+type ConnNote = { attempt: number; of: number; at: number | null; text: string };
 
 type Step = { id: string; text: string; doneText: string; done: boolean };
 type Conn =
@@ -284,37 +284,27 @@ export function SshTerminal(props: SshTerminalProps) {
     // xterm keeps its DOM renderer, and on context loss we dispose so it degrades
     // gracefully rather than showing a black box.
     let webgl: WebglAddon | undefined;
-    try {
-      webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        try {
-          webgl?.dispose();
-        } catch {
-          /* renderer already torn down */
-        }
-        webgl = undefined;
-      });
-      term.loadAddon(webgl);
-    } catch {
-      /* no WebGL; DOM renderer stays */
-      webgl = undefined;
-    }
-    // After a `clear` (ED2), also drop the scrollback so you cannot scroll back
-    // to the output from before the clear.
-    term.parser.registerCsiHandler({ final: "J" }, (params) => {
-      // Only on the normal buffer, so a full-screen app (vim, less, htop) that
-      // erases its own screen on the alternate buffer is left alone.
-      if (params[0] === 2 && term.buffer.active.type === "normal") {
-        queueMicrotask(() => {
+    let webglLost = false;
+    const loadWebgl = () => {
+      try {
+        const addon = new WebglAddon();
+        addon.onContextLoss(() => {
           try {
-            term.clear();
+            addon.dispose();
           } catch {
-            /* disposed */
+            /* renderer already torn down */
           }
+          if (webgl === addon) webgl = undefined;
+          webglLost = true;
         });
+        term.loadAddon(addon);
+        webgl = addon;
+      } catch {
+        /* no WebGL; DOM renderer stays */
+        webgl = undefined;
       }
-      return false; // let xterm still perform its normal erase
-    });
+    };
+    loadWebgl();
     // Count cursor position requests so their replies are told apart from keys.
     let pendingCpr = 0;
     term.parser.registerCsiHandler({ final: "n" }, (params) => {
@@ -405,6 +395,7 @@ export function SshTerminal(props: SshTerminalProps) {
 
     let lineBuf = "";
     let lineSecret = false;
+    const atPasswordPrompt = () => PW_PROMPT.test((outTailRef.current.split(/[\r\n]/).pop() ?? "").replace(ANSI, ""));
     // Feeds input into the audit line buffer. `force` marks the line secret
     // (input mirrored from a pane that is at a password prompt). Returns true
     // when any of the input belonged to a secret line.
@@ -414,7 +405,8 @@ export function SshTerminal(props: SshTerminalProps) {
         if (lineSecret || force) touchedSecret = true;
         if (ch === "\r" || ch === "\n") {
           const cmd = lineBuf.trim();
-          const secret = lineSecret || force;
+          const secret = lineSecret || force || atPasswordPrompt();
+          if (secret) touchedSecret = true;
           lineBuf = "";
           lineSecret = false;
           if (cmd && !secret) {
@@ -427,10 +419,7 @@ export function SshTerminal(props: SshTerminalProps) {
           lineBuf = "";
           lineSecret = false;
         } else if (ch >= " ") {
-          if (lineBuf === "") {
-            const lastLine = (outTailRef.current.split(/[\r\n]/).pop() ?? "").replace(ANSI, "");
-            lineSecret = PW_PROMPT.test(lastLine);
-          }
+          if (lineBuf === "") lineSecret = atPasswordPrompt();
           if (force) lineSecret = true;
           if (lineSecret) touchedSecret = true;
           lineBuf += ch;
@@ -510,6 +499,10 @@ export function SshTerminal(props: SshTerminalProps) {
     // remote PTY to a tiny width and garble the prompt on the next redraw.
     const refit = () => {
       if (disposed || el.clientWidth === 0 || el.clientHeight === 0) return;
+      if (webglLost && !webgl) {
+        webglLost = false;
+        loadWebgl();
+      }
       try {
         fit.fit();
       } catch {
@@ -618,12 +611,13 @@ export function SshTerminal(props: SshTerminalProps) {
       if (settled || cancelled) return;
       settled = true;
       const c = connRef.current;
-      if (c.kind === "connecting" && c.quiet && c.attempt < MAX_ATTEMPTS && !hostKeyMessage(message)) {
+      const final = hostKeyMessage(message) ?? (/confirm it before connecting/i.test(message) ? message : null);
+      if (c.kind === "connecting" && c.quiet && c.attempt < MAX_ATTEMPTS && !final) {
         setConn({ kind: "lost", attempt: c.attempt + 1, at: Date.now() + RETRY_DELAYS[c.attempt] * 1000, gaveUp: false });
         return;
       }
       if (c.kind === "connecting" && c.quiet) {
-        setConn({ kind: "lost", attempt: c.attempt, at: 0, gaveUp: true, reason: hostKeyMessage(message) ?? undefined });
+        setConn({ kind: "lost", attempt: c.attempt, at: 0, gaveUp: true, reason: final ?? `Could not reconnect after ${MAX_ATTEMPTS} attempts. ${message.replace(/^SSH: /, "")}` });
         return;
       }
       setConn({ kind: "error", message });
@@ -779,7 +773,7 @@ export function SshTerminal(props: SshTerminalProps) {
   }, [tabId, paneId, hostId, reconnect]);
 
   useEffect(() => {
-    if (focused) termRef.current?.focus();
+    if (focused && !document.querySelector('[aria-modal="true"]')) termRef.current?.focus();
   }, [focused, gen]);
 
   // The default scheme follows the app theme, which is a class on the app root.
@@ -927,7 +921,7 @@ export function SshTerminal(props: SshTerminalProps) {
             <WarningIcon size={18} />
           </span>
           <div style={{ fontWeight: 500 }}>Authentication failed</div>
-          <code style={{ fontFamily: "ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace", fontSize: 12, color: dim }}>{conn.message}</code>
+          <code style={{ fontFamily: MONO, fontSize: 12, color: dim }}>{conn.message}</code>
           <p style={{ margin: 0, maxWidth: 340, fontSize: 12, color: dim }}>{credentialText(conn)}</p>
           {pwOpen ? (
             <form
@@ -996,7 +990,7 @@ export function SshTerminal(props: SshTerminalProps) {
             <WarningIcon size={18} />
           </span>
           <div style={{ fontWeight: 500 }}>{errorKey ? "Host key not trusted" : "Connection failed"}</div>
-          <code style={{ maxWidth: 420, fontFamily: "ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace", fontSize: 12, color: dim, overflowWrap: "anywhere" }}>{errorKey ?? conn.message.replace(/^SSH: /, "")}</code>
+          <code style={{ maxWidth: 420, fontFamily: MONO, fontSize: 12, color: dim, overflowWrap: "anywhere" }}>{errorKey ?? conn.message.replace(/^SSH: /, "")}</code>
           <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 8 }}>
             <button type="button" onClick={() => reconnect()} style={primary}>
               Retry

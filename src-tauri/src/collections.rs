@@ -132,7 +132,6 @@ impl CollectionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::SecretStore;
 
     #[test]
     fn merge_keeps_stored_order_and_casing() {

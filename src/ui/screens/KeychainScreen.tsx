@@ -152,7 +152,7 @@ function rsaBits(b64: string): number | null {
   }
 }
 
-function keyAlgo(pub: string): string {
+export function keyAlgo(pub: string): string {
   const [type = "", b64 = ""] = pub.trim().split(/\s+/);
   if (type === "ssh-ed25519") return "ED25519";
   if (type === "sk-ssh-ed25519@openssh.com") return "ED25519-SK";
@@ -211,19 +211,23 @@ async function readKey(id: string, gen: number): Promise<KeyInfo> {
   }
 }
 
-function nameError(name: string, taken: string[]): string {
+function nameTaken(name: string, taken: string[]): boolean {
+  return taken.some((t) => t.toLowerCase() === name.toLowerCase());
+}
+
+export function nameError(name: string, taken: string[]): string {
   if (!name) return "Enter a name.";
   if (/[\r\n\t]/.test(name)) return "No line breaks or tabs.";
   if (name.startsWith("__kestral_")) return "The __kestral_ prefix is reserved.";
   if (/PRIVATE KEY|-----BEGIN/.test(name)) return "This looks like a key, not a name.";
-  if (taken.includes(name)) return "This name is already taken.";
+  if (nameTaken(name, taken)) return "This name is already taken.";
   return "";
 }
 
-function freeName(base: string, taken: string[]): string {
+export function freeName(base: string, taken: string[]): string {
   const b = base.trim() || "key";
-  if (!taken.includes(b)) return b;
-  for (let i = 2; ; i++) if (!taken.includes(`${b}-${i}`)) return `${b}-${i}`;
+  if (!nameTaken(b, taken)) return b;
+  for (let i = 2; ; i++) if (!nameTaken(`${b}-${i}`, taken)) return `${b}-${i}`;
 }
 
 function createdLabel(at: string | null): string {
@@ -1645,7 +1649,7 @@ function Segmented<T extends string>(p: { label: string; value: T; options: { id
   );
 }
 
-function GenerateDialog(p: { taken: string[]; onClose(): void; onDone(id: string): Promise<void> }) {
+export function GenerateDialog(p: { taken: string[]; onClose(): void; onDone(id: string): Promise<void> }) {
   const alive = useAlive();
   const [name, setName] = useState(() => freeName("id_ed25519", p.taken));
   const suggestedRef = useRef(name);
@@ -1677,7 +1681,7 @@ function GenerateDialog(p: { taken: string[]; onClose(): void; onDone(id: string
     setBusy(true);
     setErr("");
     try {
-      if ((await api.secretList()).some((x) => x.id === id)) throw new Error("This name is already taken.");
+      if (nameTaken(id, (await api.secretList()).map((x) => x.id))) throw new Error("This name is already taken.");
       const key = await api.generateKey(algo, comment.trim() || id);
       await api.secretPut(id, "private_key", key);
       await p.onDone(id);
@@ -1735,7 +1739,7 @@ function GenerateDialog(p: { taken: string[]; onClose(): void; onDone(id: string
 
 type Loaded = { algo: string; fp: string; source: string };
 
-function ImportDialog(p: { taken: string[]; onClose(): void; onDone(id: string): Promise<void> }) {
+export function ImportDialog(p: { taken: string[]; onClose(): void; onDone(id: string): Promise<void> }) {
   const alive = useAlive();
   const keyRef = useRef<string | null>(null);
   const lockedRef = useRef<string | null>(null);
@@ -1864,7 +1868,7 @@ function ImportDialog(p: { taken: string[]; onClose(): void; onDone(id: string):
     setBusy("save");
     setErr("");
     try {
-      if ((await api.secretList()).some((x) => x.id === id)) throw new Error("This name is already taken.");
+      if (nameTaken(id, (await api.secretList()).map((x) => x.id))) throw new Error("This name is already taken.");
       await api.secretPut(id, "private_key", keyRef.current);
       keyRef.current = null;
       await p.onDone(id);
@@ -2125,7 +2129,7 @@ function IdentityDialog(p: { identity: Identity | null; identities: Identity[]; 
     setErr("");
     try {
       if (newPw) {
-        if ((await api.secretList()).some((x) => x.id === newPw.id)) throw new Error("This name is already taken.");
+        if (nameTaken(newPw.id, (await api.secretList()).map((x) => x.id))) throw new Error("This name is already taken.");
         await api.secretPut(newPw.id, "password", newPw.value);
         createdPw.current = newPw.id;
         if (alive.current) setPwValue("");
@@ -2260,7 +2264,7 @@ function PasswordDialog(p: { secret: SecretMeta | null; taken: string[]; onClose
     setBusy(true);
     setErr("");
     try {
-      if (!p.secret && (await api.secretList()).some((x) => x.id === id)) throw new Error("This name is already taken.");
+      if (!p.secret && nameTaken(id, (await api.secretList()).map((x) => x.id))) throw new Error("This name is already taken.");
       await api.secretPut(id, "password", value);
       setValue("");
       await p.onDone(editing ? `Changed ${id}.` : `Added ${id}.`);

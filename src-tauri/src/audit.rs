@@ -359,7 +359,7 @@ impl AuditLog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::{random_token, SecretStore};
+    use crate::vault::random_token;
 
     #[test]
     fn survives_restart_and_password_change() {

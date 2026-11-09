@@ -1,13 +1,13 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { TERMINAL_THEMES, DEFAULT_TERM_THEME, termThemeOf, type TermThemeId } from "./terminal-themes";
+import { TERMINAL_THEMES, DEFAULT_TERM_THEME, type TermThemeId } from "./terminal-themes";
 
 export type Theme = "system" | "light" | "dark";
 
-export const ANIM_MIN = 0;
-export const ANIM_MAX = 1.5;
-export const ANIM_DEFAULT = 1;
+const ANIM_MIN = 0;
+const ANIM_MAX = 1.5;
+const ANIM_DEFAULT = 1;
 
 const THEME_KEY = "kestral-theme";
 const ANIM_KEY = "kestral-anim";
@@ -149,33 +149,6 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   const [termRightClick, setTermRightClickState] = useState<RightClickMode>(() => readEnum(TERM_RCLICK_KEY, ["paste", "menu"] as const, "paste"));
 
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.storageArea !== localStorage || (e.key !== null && !e.key.startsWith("kestral-"))) return;
-      setThemeState(readEnum(THEME_KEY, THEMES, "system"));
-      setAnimScaleState(readAnimScale());
-      const tt = localStorage.getItem(TERM_KEY);
-      setTermThemeState(tt && TERMINAL_THEMES[tt] ? tt : DEFAULT_TERM_THEME);
-      const ai = localStorage.getItem(AI_MIN_KEY);
-      const aiV = ai == null ? 30 : Number(ai);
-      setAiMinutesState(Number.isFinite(aiV) && aiV >= 0 ? aiV : 30);
-      setSftpShowHiddenState(localStorage.getItem(SFTP_HIDDEN_KEY) !== "false");
-      setSftpAutoRefreshState(localStorage.getItem(SFTP_AUTOREFRESH_KEY) !== "false");
-      setTermColorsState(localStorage.getItem(TERM_COLORS_KEY) !== "false");
-      setTermFontSizeState(readNum(TERM_FONT_KEY, 13, 8, 32));
-      setTermFontFamilyState(localStorage.getItem(TERM_FAMILY_KEY) ?? "");
-      setTermLineHeightState(readNum(TERM_LH_KEY, 1.2, 1, 2.5));
-      setTermScrollbackState(readNum(TERM_SCROLLBACK_KEY, 5000, 0, 200000));
-      setTermCursorState(readEnum(TERM_CURSOR_KEY, ["block", "bar", "underline"] as const, "block"));
-      setTermCursorBlinkState(localStorage.getItem(TERM_BLINK_KEY) !== "false");
-      setTermCopyOnSelectState(localStorage.getItem(TERM_COPYSEL_KEY) === "true");
-      setTermBellState(readEnum(TERM_BELL_KEY, ["flash", "sound", "off"] as const, "flash"));
-      setTermRightClickState(readEnum(TERM_RCLICK_KEY, ["paste", "menu"] as const, "paste"));
-    };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  useEffect(() => {
     void applyTheme(theme);
     const m = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = () => {
@@ -190,10 +163,6 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     root.style.setProperty("--anim-scale", String(animScale));
     root.toggleAttribute("data-anim-scaled", Math.abs(animScale - 1) > 0.001);
   }, [animScale]);
-
-  useEffect(() => {
-    document.documentElement.style.setProperty("--term-bg", termThemeOf(termTheme).theme.background ?? "#1e1e1e");
-  }, [termTheme]);
 
   const setTheme = (t: Theme) => {
     localStorage.setItem(THEME_KEY, t);

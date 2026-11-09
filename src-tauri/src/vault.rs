@@ -94,18 +94,6 @@ struct Unlocked {
 /// for whether the file was in an older format and should be re-sealed.
 type DecryptedVault = (Zeroizing<[u8; 32]>, [u8; 16], BTreeMap<String, Record>, bool);
 
-pub trait SecretStore: Send + Sync {
-    fn is_unlocked(&self) -> bool;
-    fn exists(&self) -> bool;
-    fn create(&self, master: &str) -> Result<()>;
-    fn unlock(&self, master: &str) -> Result<()>;
-    fn lock(&self);
-    fn put_secret(&self, id: &str, kind: SecretKind, value: &[u8]) -> Result<()>;
-    fn get_secret(&self, id: &str) -> Result<Zeroizing<Vec<u8>>>;
-    fn delete_secret(&self, id: &str) -> Result<()>;
-    fn list_secrets(&self) -> Result<Vec<SecretMeta>>;
-}
-
 pub struct Vault {
     path: PathBuf,
     state: Mutex<Option<Unlocked>>,
@@ -490,16 +478,16 @@ impl Vault {
     }
 }
 
-impl SecretStore for Vault {
-    fn is_unlocked(&self) -> bool {
+impl Vault {
+    pub fn is_unlocked(&self) -> bool {
         self.state.lock().unwrap().is_some()
     }
 
-    fn exists(&self) -> bool {
+    pub fn exists(&self) -> bool {
         self.path.exists()
     }
 
-    fn create(&self, master: &str) -> Result<()> {
+    pub fn create(&self, master: &str) -> Result<()> {
         if self.exists() {
             return Err(AppError::VaultExists);
         }
@@ -517,7 +505,7 @@ impl SecretStore for Vault {
         Ok(())
     }
 
-    fn unlock(&self, master: &str) -> Result<()> {
+    pub fn unlock(&self, master: &str) -> Result<()> {
         if !self.exists() {
             return Err(AppError::VaultMissing);
         }
@@ -539,11 +527,11 @@ impl SecretStore for Vault {
         Ok(())
     }
 
-    fn lock(&self) {
+    pub fn lock(&self) {
         *self.state.lock().unwrap() = None;
     }
 
-    fn put_secret(&self, id: &str, kind: SecretKind, value: &[u8]) -> Result<()> {
+    pub fn put_secret(&self, id: &str, kind: SecretKind, value: &[u8]) -> Result<()> {
         if is_reserved(id) {
             return Err(AppError::NotFound(id.to_string()));
         }
@@ -558,7 +546,7 @@ impl SecretStore for Vault {
         self.apply(unlocked, vec![(id.to_string(), Some(rec))])
     }
 
-    fn get_secret(&self, id: &str) -> Result<Zeroizing<Vec<u8>>> {
+    pub fn get_secret(&self, id: &str) -> Result<Zeroizing<Vec<u8>>> {
         if is_reserved(id) {
             return Err(AppError::NotFound(id.to_string()));
         }
@@ -571,7 +559,7 @@ impl SecretStore for Vault {
         Ok(Zeroizing::new(rec.value.clone()))
     }
 
-    fn delete_secret(&self, id: &str) -> Result<()> {
+    pub fn delete_secret(&self, id: &str) -> Result<()> {
         if is_reserved(id) {
             return Err(AppError::NotFound(id.to_string()));
         }
@@ -580,7 +568,7 @@ impl SecretStore for Vault {
         self.apply(unlocked, vec![(id.to_string(), None)])
     }
 
-    fn list_secrets(&self) -> Result<Vec<SecretMeta>> {
+    pub fn list_secrets(&self) -> Result<Vec<SecretMeta>> {
         let guard = self.state.lock().unwrap();
         let unlocked = guard.as_ref().ok_or(AppError::VaultLocked)?;
         Ok(unlocked

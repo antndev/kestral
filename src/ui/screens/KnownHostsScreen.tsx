@@ -131,13 +131,17 @@ function globMatch(pattern: string, text: string): boolean {
   return p.slice(pi).every((c) => c === "*");
 }
 
+const hmacKeys = new Map<string, Promise<CryptoKey>>();
+
 /** One `|1|base64(salt)|base64(HMAC-SHA1(salt, name))` part against several spellings of a name. */
 async function hashedMatch(entry: string, candidates: string[]): Promise<boolean> {
   const [, , salt, hash] = entry.split("|");
   if (!salt || !hash) return false;
   try {
     const want = b64ToBytes(hash);
-    const key = await crypto.subtle.importKey("raw", b64ToBytes(salt), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+    let pending = hmacKeys.get(salt);
+    if (!pending) hmacKeys.set(salt, (pending = crypto.subtle.importKey("raw", b64ToBytes(salt), { name: "HMAC", hash: "SHA-1" }, false, ["sign"])));
+    const key = await pending;
     for (const c of candidates) {
       const got = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(c)));
       if (got.length === want.length && got.every((b, i) => b === want[i])) return true;

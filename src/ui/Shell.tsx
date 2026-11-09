@@ -45,7 +45,8 @@ const NAV: { id: SectionId; label: string; icon: ReactNode }[] = [
   { id: "settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 const STRIP = 40;
-const TAB_H = 36;
+const TAB_GAP = 8;
+const TAB_H = STRIP - TAB_GAP;
 const SIDEBAR_W = 240;
 const SLIDE_MS = 240;
 const slide = (prop: string) => `${prop} ${SLIDE_MS}ms var(--ease-out)`;
@@ -73,7 +74,7 @@ function AiLive({ until }: { until: number | null }) {
   );
 }
 
-export function useMacInset() {
+function useMacInset() {
   const [full, setFull] = useState(false);
   useEffect(() => {
     if (!IS_MAC) return;
@@ -203,16 +204,8 @@ function NewTabButton({ onClick, tabSized }: { onClick: () => void; tabSized?: b
   );
 }
 
-function TabLabel({ text, bold }: { text: string; bold: boolean }) {
-  const item: CSSProperties = { gridArea: "1 / 1", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-  return (
-    <span style={{ display: "grid", flex: "0 1 auto", minWidth: 0, maxWidth: 150 }}>
-      <span aria-hidden="true" style={{ ...item, fontWeight: 500, visibility: "hidden" }}>
-        {text}
-      </span>
-      <span style={{ ...item, fontWeight: bold ? 600 : 400 }}>{text}</span>
-    </span>
-  );
+function TabLabel({ text }: { text: string }) {
+  return <span style={{ flex: "0 1 auto", minWidth: 0, maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>;
 }
 
 function TitleBar({
@@ -289,7 +282,6 @@ function TitleBar({
       if (!started) {
         if (Math.abs(dx) < 5 && Math.abs(ev.clientY - sy) < 5) return;
         started = true;
-        onSelectTab(id);
         document.documentElement.style.cursor = "grabbing";
       }
       ev.preventDefault();
@@ -352,7 +344,7 @@ function TitleBar({
   const inset = useMacInset();
 
   return (
-    <header data-tauri-drag-region data-tab-strip style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, height: STRIP, paddingLeft: sidebarOpen ? 0 : inset + 36, background: "var(--bg-chrome)", boxSizing: "border-box", transition: slide("padding-left") }}>
+    <header data-tauri-drag-region data-tab-strip style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, height: STRIP, paddingTop: TAB_GAP, paddingLeft: sidebarOpen ? 0 : inset + 36, background: "var(--bg-chrome)", boxSizing: "border-box", transition: slide("padding-left") }}>
       <span aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 1, background: "var(--line)", pointerEvents: "none" }} />
       <nav
         ref={stripRef}
@@ -361,7 +353,7 @@ function TitleBar({
         onWheel={(e) => {
           if (e.deltaY && stripRef.current) stripRef.current.scrollLeft += e.deltaY;
         }}
-        style={{ display: "flex", alignItems: "flex-end", alignSelf: "stretch", minWidth: 0, overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none", padding: tabs.length ? "0 9px" : 0 }}
+        style={{ display: "flex", alignItems: "flex-end", alignSelf: "stretch", minWidth: 0, overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none", padding: tabs.length ? `0 ${TAB_GAP}px` : 0 }}
       >
         {tabs.map((t, i) => {
           const active = activeTab === t.id;
@@ -423,7 +415,7 @@ function TitleBar({
                 minWidth: 88,
                 flex: "0 1 auto",
                 height: TAB_H,
-                padding: `0 6px ${STRIP - TAB_H + 1}px 10px`,
+                padding: "0 6px 1px 10px",
                 background: into ? (here?.ok ? "var(--accent-tint)" : "var(--err-tint)") : active ? "var(--tab)" : "transparent",
                 borderWidth: "1px 1px 0",
                 borderStyle: "solid",
@@ -440,7 +432,7 @@ function TitleBar({
               }}
             >
               {!active && !into && (
-                <span aria-hidden="true" style={{ position: "absolute", inset: `3px 1px ${3 + STRIP - TAB_H}px`, zIndex: -1, borderRadius: 7, background: t.attention ? "var(--accent-tint)" : "var(--hover)", opacity: hovered || t.attention ? 1 : 0, transition: "opacity 120ms", pointerEvents: "none" }} />
+                <span aria-hidden="true" style={{ position: "absolute", inset: "3px 1px", zIndex: -1, borderRadius: 7, background: t.attention ? "var(--accent-tint)" : "var(--hover)", opacity: hovered || t.attention ? 1 : 0, transition: "opacity 120ms", pointerEvents: "none" }} />
               )}
               {active && !into && (
                 <>
@@ -448,14 +440,14 @@ function TitleBar({
                   <span aria-hidden="true" style={{ position: "absolute", right: -9, bottom: 0, width: 9, height: 9, background: "radial-gradient(circle at 100% 0, transparent 7.6px, var(--line) 8.1px, var(--line) 8.9px, var(--tab) 9.4px)", pointerEvents: "none" }} />
                 </>
               )}
-              {divider && <span aria-hidden="true" style={{ position: "absolute", right: -1, top: 9, bottom: 9, width: 1, background: "var(--line)", pointerEvents: "none" }} />}
+              {divider && <span aria-hidden="true" style={{ position: "absolute", right: -1, top: 8, bottom: 8, width: 1, background: "var(--line)", pointerEvents: "none" }} />}
               <span aria-hidden="true" data-anim={t.status === "warn" ? "pulse" : undefined} style={{ width: 7, height: 7, flex: "none", borderRadius: "50%", background: t.status === "idle" ? "transparent" : statusColor(t.status), border: t.status === "idle" ? "1.5px solid var(--ring-idle)" : "none", boxSizing: "border-box" }} />
               {t.kind === "sftp" && (
                 <span aria-label="SFTP" style={{ display: "flex", flex: "none", color: "var(--text-2)" }}>
                   <SftpIcon size={13} />
                 </span>
               )}
-              <TabLabel text={t.name} bold={active} />
+              <TabLabel text={t.name} />
               {panes > 1 && (
                 <span aria-label={`${panes} panes`} style={{ flex: "none", minWidth: 16, height: 16, padding: "0 4px", borderRadius: 8, background: "var(--bg-raised)", color: "var(--text-2)", fontSize: 11, fontWeight: 500, lineHeight: "16px", textAlign: "center", boxSizing: "border-box" }}>
                   {panes}
@@ -478,7 +470,7 @@ function TitleBar({
           );
         })}
       </nav>
-      <div style={{ position: "relative", display: "flex", alignItems: "center", alignSelf: "center", height: 28, flex: "none", boxSizing: "border-box", marginLeft: tabs.length ? -7 : 2 }}>
+      <div style={{ position: "relative", display: "flex", alignItems: "center", alignSelf: "center", height: 28, flex: "none", boxSizing: "border-box", marginLeft: tabs.length ? 2 - TAB_GAP : 2 }}>
         <NewTabButton onClick={onNewTab} tabSized={tabs.length > 0} />
       </div>
       <div data-tauri-drag-region style={{ flex: 1, alignSelf: "stretch", minWidth: 24 }} />
@@ -491,7 +483,11 @@ function TitleBar({
       <button type="button" aria-label="Lock vault" title={`Lock vault (${KEYS.lock})`} onClick={onLock} style={{ ...iconBtn(), flex: "none", marginRight: IS_MAC ? 9 : 8, color: "var(--text-2)" }}>
         <LockIcon />
       </button>
-      {!IS_MAC && <WindowControls />}
+      {!IS_MAC && (
+        <div style={{ display: "flex", alignSelf: "flex-start", height: STRIP, marginTop: -TAB_GAP }}>
+          <WindowControls />
+        </div>
+      )}
       {tabCtx && <Menu anchor={tabCtx.anchor} label="Tab actions" items={tabMenu(tabCtx.id)} onClose={() => setTabCtx(null)} />}
     </header>
   );
@@ -553,7 +549,7 @@ function Sidebar({
               data-nav
               aria-current={active ? "page" : undefined}
               onClick={() => onSelect(n.id)}
-              style={{ position: "relative", display: "flex", alignItems: "center", gap: 10, height: 32, flex: "none", marginTop: n.id === "settings" ? "auto" : 0, padding: "0 8px", border: 0, borderRadius: 6, color: "var(--text)", fontWeight: active ? 600 : 400, textAlign: "left", cursor: "pointer" }}
+              style={{ position: "relative", display: "flex", alignItems: "center", gap: 10, height: 32, flex: "none", marginTop: n.id === "settings" ? "auto" : 0, padding: "0 8px", border: 0, borderRadius: 6, color: active ? "var(--text)" : "var(--text-2)", textAlign: "left", cursor: "pointer" }}
             >
               <span style={{ display: "flex" }}>{n.icon}</span>
               <span style={{ flex: 1 }}>{n.label}</span>
@@ -633,7 +629,7 @@ export function Shell({
   }, [sidebarOpen]);
   return (
     <div className={theme === "light" ? "t-light" : "t-dark"} data-anim="app" style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
-      <button type="button" aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} title={sidebarOpen ? "Hide sidebar" : "Show sidebar"} onClick={onToggleSidebar} style={{ ...iconBtn(), position: "absolute", top: (STRIP - 28) / 2, left: inset, zIndex: 3, color: "var(--text-2)" }}>
+      <button type="button" aria-label={sidebarOpen ? "Hide sidebar" : "Show sidebar"} title={sidebarOpen ? "Hide sidebar" : "Show sidebar"} onClick={onToggleSidebar} style={{ ...iconBtn(), position: "absolute", top: TAB_GAP + (TAB_H - 28) / 2, left: inset, zIndex: 3, color: "var(--text-2)" }}>
         <SidebarToggleIcon />
       </button>
       <div style={{ display: "flex", height: STRIP, flex: "none" }}>

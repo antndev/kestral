@@ -26,7 +26,7 @@ export const inputStyle: CSSProperties = { width: "100%", height: 32, padding: "
 const disabledLook: CSSProperties = { opacity: 0.5, cursor: "default" };
 export const withDisabled = (base: CSSProperties, disabled: boolean): CSSProperties => (disabled ? { ...base, ...disabledLook } : base);
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       <span style={{ fontSize: 12, fontWeight: 500, color: "var(--text-2)" }}>{label}</span>
@@ -72,7 +72,7 @@ export function Modal({ title, description, width = 420, busy = false, initialFo
 
 const formErr: CSSProperties = { height: 16, margin: "-5px 0", fontSize: 12, lineHeight: "16px", color: "var(--err)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 
-export function ChangeMasterDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+function ChangeMasterDialog({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
   const alive = useAlive();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -341,7 +341,7 @@ function SchemeCard({ id, colors, selected, onSelect }: { id: string; colors: bo
           {SWATCHES.map((k) => <span key={k} style={{ width: 12, height: 12, borderRadius: 2, background: t[k] }} />)}
         </span>
       </span>
-      <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: "7px 10px", fontSize: 12, fontWeight: selected ? 600 : 400, borderTop: "1px solid var(--line)" }}>
+      <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: "7px 10px", fontSize: 12, color: selected ? "var(--text)" : "var(--text-2)", borderTop: "1px solid var(--line)" }}>
         {TERMINAL_THEMES[id].name}
         {selected && <span style={{ display: "flex", color: "var(--link)" }}><CheckIcon /></span>}
       </span>
@@ -562,9 +562,6 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
   const [pending, setPending] = useState<{ version: string; notes: string } | null>(known ? { version: known.version, notes: known.body?.trim() ?? "" } : null);
   const updRef = useRef<PendingUpdate | null>(known ?? null);
   const [linkErr, setLinkErr] = useState("");
-
-  const queryRef = useRef(query);
-  queryRef.current = query;
 
   function loadTray() {
     setTrayLoadErr("");
@@ -1100,7 +1097,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
             const active = !q && page === n;
             const dim = !!q && !pagesWithHits.has(n);
             return (
-              <button key={n} type="button" data-nav aria-current={active ? "page" : undefined} onClick={() => { setQuery(""); setPage(n); }} style={{ height: 32, flex: "none", padding: "0 10px", border: 0, borderRadius: 6, background: active ? "var(--sel)" : undefined, color: dim ? "var(--text-3)" : "var(--text)", fontWeight: active ? 600 : 400, textAlign: "left", cursor: "pointer" }}>{n}</button>
+              <button key={n} type="button" data-nav aria-current={active ? "page" : undefined} onClick={() => { setQuery(""); setPage(n); }} style={{ height: 32, flex: "none", padding: "0 10px", border: 0, borderRadius: 6, background: active ? "var(--sel)" : undefined, color: dim ? "var(--text-3)" : active ? "var(--text)" : "var(--text-2)", textAlign: "left", cursor: "pointer" }}>{n}</button>
             );
           })}
         </nav>

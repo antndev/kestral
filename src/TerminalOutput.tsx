@@ -46,19 +46,26 @@ export function LiveTerminalOutput({ output }: { output: string }) {
     // Crisp GPU text, matching the interactive terminal; falls back to the DOM
     // renderer if WebGL is unavailable.
     let webgl: WebglAddon | undefined;
-    try {
-      webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        try {
-          webgl?.dispose();
-        } catch {
-          /* already gone */
-        }
-      });
-      term.loadAddon(webgl);
-    } catch {
-      webgl = undefined; /* no WebGL; DOM renderer stays */
-    }
+    let webglLost = false;
+    const loadWebgl = () => {
+      try {
+        const addon = new WebglAddon();
+        addon.onContextLoss(() => {
+          try {
+            addon.dispose();
+          } catch {
+            /* already gone */
+          }
+          if (webgl === addon) webgl = undefined;
+          webglLost = true;
+        });
+        term.loadAddon(addon);
+        webgl = addon;
+      } catch {
+        webgl = undefined; /* no WebGL; DOM renderer stays */
+      }
+    };
+    loadWebgl();
     try {
       fit.fit();
     } catch {
@@ -71,6 +78,10 @@ export function LiveTerminalOutput({ output }: { output: string }) {
       written.current = output.length;
     }
     const ro = new ResizeObserver(() => {
+      if (webglLost && !webgl && el.clientWidth > 0 && el.clientHeight > 0) {
+        webglLost = false;
+        loadWebgl();
+      }
       try {
         fit.fit();
       } catch {

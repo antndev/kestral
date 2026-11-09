@@ -254,13 +254,14 @@ button:active:not(:disabled):not([data-no-press]) {
 }
 [data-nav] {
   background: transparent;
-  transition: background calc(120ms * var(--anim-scale, 1)), transform calc(160ms * var(--anim-scale, 1)) var(--ease-out);
+  transition: background calc(120ms * var(--anim-scale, 1)), color calc(120ms * var(--anim-scale, 1)), transform calc(160ms * var(--anim-scale, 1)) var(--ease-out);
 }
 button[data-nav]:active:not(:disabled):not([data-no-press]) {
   transform: scale(0.995);
 }
 [data-nav]:hover:not([aria-current]) {
   background: color-mix(in srgb, var(--sel) 55%, transparent);
+  color: var(--text) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -294,4 +295,7 @@ input[type="password"]::-ms-clear {
 [data-reveal]:focus-within [data-hover-only],
 [data-hover-only][aria-expanded="true"] {
   opacity: 1;
+}
+tr[data-row]:hover {
+  background: var(--bg-sunken);
 }

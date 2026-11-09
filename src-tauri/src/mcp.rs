@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::model::{AiPolicy, AuthMethod, ForwardKind, Host, NewHost, NewSnippet, PortForward, Snippet};
 use crate::state::Services;
-use crate::vault::{SecretKind, SecretStore, Vault};
+use crate::vault::{SecretKind, Vault};
 
 #[derive(Serialize)]
 struct HostView {
@@ -487,11 +487,14 @@ impl KestralMcp {
             } else {
                 existing.agent_keys
             },
-            forwards: if target_changed {
-                Vec::new()
-            } else {
-                existing.forwards
-            },
+            forwards: existing
+                .forwards
+                .into_iter()
+                .map(|mut f| {
+                    f.ai_edited |= target_changed;
+                    f
+                })
+                .collect(),
             group: a.group.unwrap_or(existing.group),
             tags: a.tags.unwrap_or(existing.tags),
             jump_host_id: existing.jump_host_id,
@@ -510,13 +513,16 @@ impl KestralMcp {
                     self.services.ai_pool.forget(*d).await;
                 }
                 crate::events::data_changed("hosts");
-                let note = if !target_changed {
+                let mut note = if !target_changed {
                     String::new()
                 } else if dependents.is_empty() {
                     " Connection target or sign-in changed, so AI access was reset to locked; the user must re-enable it.".to_string()
                 } else {
                     format!(" Connection target or sign-in changed, so AI access was reset to locked for this host and the {} host(s) that connect through it; the user must re-enable it.", dependents.len())
                 };
+                if target_changed && !updated.forwards.is_empty() {
+                    note.push_str(" Its port forwards stay off until the user reviews and starts them in Kestral.");
+                }
                 self.services.audit.record(
                     id.to_string(),
                     updated.name.clone(),
@@ -556,7 +562,7 @@ impl KestralMcp {
             Ok(t) => t,
             Err(e) => return Ok(CallToolResult::error(vec![Content::text(e)])),
         };
-        let new = NewSnippet {
+        let mut s = NewSnippet {
             label: a.label,
             script: a.script,
             target_host_ids: targets,
@@ -564,11 +570,10 @@ impl KestralMcp {
             vars: Default::default(),
             parallel: true,
             open_tabs: false,
-        };
-        let added = self.services.snippets.add(new).and_then(|mut s| {
-            s.ai_edited = true;
-            self.services.snippets.update(s.clone()).map(|()| s)
-        });
+        }
+        .into_snippet();
+        s.ai_edited = true;
+        let added = self.services.snippets.import(vec![s.clone()]).map(|_| s);
         match added {
             Ok(s) => {
                 crate::events::data_changed("snippets");
@@ -952,7 +957,7 @@ fn resolve_host_in(services: &Services, id_or_name: &str) -> Option<Uuid> {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for KestralMcp {}
 
-pub type Bearer = Arc<std::sync::RwLock<String>>;
+pub type Bearer = Arc<str>;
 
 #[derive(Clone)]
 struct AuthState {
@@ -965,10 +970,7 @@ async fn auth_middleware(
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let expected = {
-        let b = state.bearer.read().unwrap();
-        format!("Bearer {}", *b)
-    };
+    let expected = format!("Bearer {}", state.bearer);
     let provided = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())

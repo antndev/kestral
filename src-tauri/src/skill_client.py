@@ -88,7 +88,7 @@ def rpc(method, params=None, notify=False):
             raw = resp.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            die("not authorised. The token was rotated, open Kestral and connect again.")
+            die("not authorised. The token in %s does not match the running Kestral app. Restart Kestral and try again." % (data_dir() / "mcp_token"))
         die("server returned %s" % e.code)
     except urllib.error.URLError as e:
         die("cannot reach Kestral at %s (%s). Is the app running?" % (URL, e.reason))

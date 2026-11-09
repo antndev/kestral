@@ -13,7 +13,7 @@ use crate::policy::{DeniedReason, Gate, PolicyEngine};
 use crate::sftp::{self, FileEntry};
 use crate::snippets::SnippetStore;
 use crate::ssh::{CommandOutput, SshManager};
-use crate::vault::{SecretStore, Vault};
+use crate::vault::Vault;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct McpInfo {

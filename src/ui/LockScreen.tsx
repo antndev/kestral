@@ -68,7 +68,7 @@ function LockFrame({ className, children }: { className: string; children: React
       className={className}
       style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
       <style>{LOCK_CSS}</style>
-      <header data-tauri-drag-region style={{ display: "flex", alignItems: "center", height: 40, flex: "none", padding: IS_MAC ? "0 14px 0 0" : "0 0 0 12px" }}>
+      <header data-tauri-drag-region style={{ display: "flex", alignItems: "center", height: 40, flex: "none", padding: IS_MAC ? "8px 14px 0 0" : "0 0 0 12px", boxSizing: "border-box" }}>
         {!IS_MAC && <Brand />}
         <span data-tauri-drag-region style={{ flex: 1, alignSelf: "stretch" }} />
         {IS_MAC ? <Brand /> : <WindowControls />}
@@ -92,6 +92,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   const [reveal, setReveal] = useState(false);
   const [hello, setHello] = useState<api.HelloStatus | null>(null);
   const [helloBusy, setHelloBusy] = useState(false);
+  const [helloErr, setHelloErr] = useState("");
   const pwRef = useRef<HTMLInputElement | null>(null);
   const prompted = useRef(false);
 
@@ -116,13 +117,15 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   async function unlockWithHello() {
     if (helloBusy || busy) return;
     setErr("");
+    setHelloErr("");
     setHelloBusy(true);
     try {
       await api.helloUnlock();
       await onUnlocked();
       setHelloBusy(false);
     } catch (e) {
-      fail(e);
+      const msg = errText(e);
+      if (!/was canceled/i.test(msg)) setHelloErr(msg);
       setHelloBusy(false);
       pwRef.current?.focus();
       api
@@ -143,6 +146,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
     e.preventDefault();
     if (busy || !pw) return;
     setErr("");
+    setHelloErr("");
     if (!exists && pw.length < 8) {
       fail("Use at least 8 characters.");
       return;
@@ -170,7 +174,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   }
 
   const onKey = (e: ReactKeyboardEvent) => setCaps(e.getModifierState("CapsLock"));
-  const shown = exists ? error : err || error;
+  const shown = exists ? helloErr || error : err || error;
   const ready = !!pw && (exists || !!pw2);
 
   const field = (id: "pw" | "pw2", label: string, eye: boolean) => {

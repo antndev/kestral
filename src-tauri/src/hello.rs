@@ -208,10 +208,7 @@ pub async fn hello_disable(hello: State<'_, Hello>) -> Result<()> {
 #[tauri::command]
 pub async fn hello_unlock(state: State<'_, AppState>, hello: State<'_, Hello>) -> Result<()> {
     let path = hello.path.clone();
-    let vault = state.services.vault.clone();
-    let hosts = state.services.hosts.clone();
-    let snippets = state.services.snippets.clone();
-    let audit = state.services.audit.clone();
+    let services = state.services.clone();
     blocking(move || {
         let raw = std::fs::read(&path).map_err(|_| AppError::Other("Windows Hello is not set up for this vault.".into()))?;
         let file: HelloFile = serde_json::from_slice(&raw)?;
@@ -234,17 +231,11 @@ pub async fn hello_unlock(state: State<'_, AppState>, hello: State<'_, Hello>) -
         }
         let mut file_key = Zeroizing::new([0u8; 32]);
         file_key.copy_from_slice(&plain);
-        match vault.unlock_with_key(&file_key) {
+        match services.vault.unlock_with_key(&file_key) {
             Err(AppError::VaultAuth) => return Err(stale()),
             other => other?,
         }
-        if let Err(e) = hosts.load() {
-            tracing::error!("Loading hosts after unlock failed: {e}");
-        }
-        if let Err(e) = snippets.load() {
-            tracing::error!("Loading snippets after unlock failed: {e}");
-        }
-        audit.load();
+        crate::commands::load_unlocked(&services);
         Ok(())
     })
     .await

@@ -4,7 +4,7 @@ import { addedLabel } from "../../api";
 import type { ApprovalRequest, HostKeyChanged, HostKeyRequest, KnownHostEntry } from "../../api";
 import { IS_MAC, MONO, errText } from "../mock";
 import { CheckIcon, CopyIcon, CpuIcon, ShieldIcon, WarningIcon } from "../icons";
-import { useAlive } from "../kit";
+import { errLine, useAlive } from "../kit";
 
 /* ---------- modal layer: topmost-only Escape, focus trap, focus restore ---------- */
 
@@ -44,7 +44,8 @@ function onModalKeyDown(e: KeyboardEvent) {
   const key = e.key.toLowerCase();
   const mod = IS_MAC ? e.metaKey : e.ctrlKey;
 
-  if (mod && !e.altKey && APP_SHORTCUT_KEYS.has(key)) {
+  const split = !IS_MAC && e.altKey && e.shiftKey && !e.ctrlKey && (key === "d" || e.code === "KeyD");
+  if ((mod && !e.altKey && APP_SHORTCUT_KEYS.has(key)) || split) {
     if (opts.kind === "palette" && PALETTE_KEYS.has(key)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
@@ -169,7 +170,6 @@ const dl: CSSProperties = { display: "grid", gridTemplateColumns: "96px minmax(0
 const dt: CSSProperties = { color: "var(--text-2)" };
 const title: CSSProperties = { margin: 0, fontSize: 16, fontWeight: 600 };
 const lead: CSSProperties = { margin: "6px 0 0", color: "var(--text-2)" };
-const errLine: CSSProperties = { margin: 0, fontSize: 12, color: "var(--err)", overflowWrap: "anywhere" };
 const btnBase: CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, height: 32, padding: "0 14px", borderRadius: 6, boxSizing: "border-box", cursor: "pointer", whiteSpace: "nowrap", outlineColor: "var(--focus)", outlineOffset: 2 };
 const btn = {
   secondary: { ...btnBase, border: "1px solid var(--line)", background: "var(--bg)", color: "var(--text)" } as CSSProperties,
@@ -237,7 +237,7 @@ function Spinner({ size = 14 }: { size?: number }) {
   );
 }
 
-export function useArmed(delay = 750) {
+function useArmed(delay = 750) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     let timer = 0;
@@ -267,7 +267,7 @@ export function useArmed(delay = 750) {
   return armed;
 }
 
-export function ignoreRepeat(e: ReactKeyboardEvent) {
+function ignoreRepeat(e: ReactKeyboardEvent) {
   if (e.repeat && (e.key === "Enter" || e.key === " ")) {
     e.preventDefault();
     e.stopPropagation();

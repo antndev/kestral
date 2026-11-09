@@ -81,9 +81,9 @@ export function shape(l: Layout): string {
   return l.type === "pane" ? l.id : `${l.dir}(${shape(l.a)},${shape(l.b)})`;
 }
 
-export type Rect = { x: number; y: number; w: number; h: number };
+type Rect = { x: number; y: number; w: number; h: number };
 
-export function paneRects(l: Layout, r: Rect, out = new Map<string, Rect>()): Map<string, Rect> {
+function paneRects(l: Layout, r: Rect, out = new Map<string, Rect>()): Map<string, Rect> {
   if (l.type === "pane") {
     out.set(l.id, r);
     return out;
@@ -145,7 +145,7 @@ export function aggregate(stages: PaneStage[]): SessionStatus {
 
 // ---------------------------------------------------------------- runtime info per pane
 
-export type PaneInfo = { stage: PaneStage; title: string; proc: string; auth: string; latency: number | null; cols: number; rows: number; bell: number; attempt: number; of: number; retryAt: number | null; note: string };
+type PaneInfo = { stage: PaneStage; title: string; proc: string; auth: string; latency: number | null; cols: number; rows: number; bell: number; attempt: number; of: number; retryAt: number | null; note: string };
 
 const BLANK: PaneInfo = { stage: "connecting", title: "", proc: "", auth: "", latency: null, cols: 0, rows: 0, bell: 0, attempt: 0, of: 0, retryAt: null, note: "" };
 
@@ -169,7 +169,6 @@ export const paneStore = {
   },
   infos: () => infos,
   stages: () => stages,
-  info: (id: string): PaneInfo => infos[id] ?? BLANK,
   patch(id: string, p: Partial<PaneInfo>) {
     const cur = infos[id] ?? BLANK;
     if ((Object.keys(p) as (keyof PaneInfo)[]).every((k) => cur[k] === p[k])) return;

@@ -16,7 +16,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::audit::AuditLog;
 use crate::error::{AppError, Result};
 use crate::model::Host;
-use crate::vault::{SecretStore, Vault};
+use crate::vault::Vault;
 
 // ssh-agent protocol message numbers (see PROTOCOL.agent).
 const SSH_AGENT_FAILURE: u8 = 5;

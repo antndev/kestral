@@ -676,6 +676,7 @@ function usePane(side: Side, initial: Loc, opts: { active: boolean; autoRefresh:
     setBusy(true);
     setError("");
     try {
+      if ((await fs.list(cwd)).some((e) => sameName(e.name, name, fs.remote))) throw new Error(`"${name}" already exists here.`);
       const target = joinPath(cwd, name, fs.remote);
       if (c.kind === "folder") await fs.mkdir(target);
       else await fs.writeText(target, "");
@@ -1245,7 +1246,6 @@ function PaneView({
   pane,
   hosts,
   stacked,
-  focused,
   focusReq,
   dropHint,
   dragTarget,
@@ -1256,8 +1256,6 @@ function PaneView({
   hosts: Host[];
   confirmHost?(hostId: string, then: () => void): void;
   stacked: boolean;
-  /** This pane receives the toolbar's New folder and New file. */
-  focused: boolean;
   focusReq: { n: number; now: boolean } | null;
   dropHint: { dir: string | null } | null;
   dragTarget: { dir: string | null } | null;
@@ -1265,7 +1263,6 @@ function PaneView({
 }) {
   const uid = useId();
   const [pathDraft, setPathDraft] = useState(pane.cwd);
-  const [hoverPath, setHoverPath] = useState<string | null>(null);
   const [width, setWidth] = useState(600);
   const [listFocus, setListFocus] = useState(false);
   const sectionRef = useRef<HTMLElement>(null);
@@ -1326,10 +1323,6 @@ function PaneView({
   const atRoot = !pane.fs || !pane.cwd || parentPath(pane.cwd, remote) === pane.cwd;
   const locValue = pane.loc.kind === "local" ? "local" : pane.loc.kind === "remote" ? `host:${pane.loc.hostId}` : "";
   const editorOpen = !!pane.editing;
-
-  useEffect(() => {
-    if (hoverPath && (!ready || editorOpen || !pane.visible.some((e) => e.path === hoverPath))) setHoverPath(null);
-  }, [hoverPath, ready, editorOpen, pane.visible]);
 
   useEffect(() => {
     const root = listRef.current;
@@ -1589,9 +1582,8 @@ function PaneView({
                     if (el) rowRefs.current.set(e.path, el);
                     else rowRefs.current.delete(e.path);
                   }}
+                  data-reveal=""
                   aria-selected={isSel}
-                  onMouseEnter={() => setHoverPath(e.path)}
-                  onMouseLeave={() => setHoverPath((p) => (p === e.path ? null : p))}
                   onMouseDown={(ev) => h.onRowMouseDown(e, ev)}
                   onClick={(ev) => h.onRowClick(e, ev)}
                   onDoubleClick={(ev) => {
@@ -1603,7 +1595,7 @@ function PaneView({
                     ev.preventDefault();
                     h.onRowMenu(e, { x: ev.clientX, y: ev.clientY });
                   }}
-                  style={{ background: isDropDir ? "var(--accent-tint)" : isSel ? "var(--sel)" : hoverPath === e.path ? "var(--bg-sunken)" : undefined, boxShadow: isDropDir ? "inset 0 0 0 1px var(--focus)" : undefined, cursor: "default" }}
+                  style={{ background: isDropDir ? "var(--accent-tint)" : isSel ? "var(--sel)" : undefined, boxShadow: isDropDir ? "inset 0 0 0 1px var(--focus)" : undefined, cursor: "default" }}
                 >
                   <td style={isSel && !isDropDir ? { ...nameCell, boxShadow: "inset 2px 0 0 var(--accent)" } : nameCell}>
                     <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -1652,11 +1644,13 @@ function PaneView({
                       type="button"
                       aria-label={`Actions for ${e.name}`}
                       title="Actions"
+                      data-hover-only={isSel ? undefined : ""}
+                      tabIndex={isSel ? undefined : -1}
                       onClick={(ev) => {
                         ev.stopPropagation();
                         h.onRowMenu(e, { el: ev.currentTarget });
                       }}
-                      style={{ ...smallIconBtn, visibility: isSel || hoverPath === e.path ? "visible" : "hidden" }}
+                      style={smallIconBtn}
                     >
                       <DotsIcon />
                     </button>
@@ -1732,7 +1726,7 @@ function PaneView({
       }}
     >
       {editor ? (
-        <EditorView pane={pane} editor={editor} label={label} focused={focused} onClose={h.onCloseEditor} />
+        <EditorView pane={pane} editor={editor} label={label} onClose={h.onCloseEditor} />
       ) : (
         <>
           {header}
@@ -1753,7 +1747,7 @@ function PaneView({
   );
 }
 
-function EditorView({ pane, editor, label, onClose }: { pane: Pane; editor: Editing; label: string; focused: boolean; onClose(): void }) {
+function EditorView({ pane, editor, label, onClose }: { pane: Pane; editor: Editing; label: string; onClose(): void }) {
   const dirty = editor.content !== editor.original;
   const areaRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => areaRef.current?.focus(), []);
@@ -2250,6 +2244,8 @@ export function SftpScreen({
     const srcHostId = src.loc.hostId;
     const dstHostId = dst.loc.hostId;
     if (srcHostId === dstHostId && dir === src.cwd) return src.setError("Source and target are the same folder.");
+    const into = srcHostId === dstHostId ? items.find((e) => dir === e.path || dir.startsWith(e.path + "/")) : undefined;
+    if (into) return src.setError(`Cannot copy ${into.name} into itself.`);
     const skipped: string[] = [];
     const jobs: Transfer[] = [];
     for (const e of items) {
@@ -2264,11 +2260,15 @@ export function SftpScreen({
     queueChecked(jobs, existing, dir, true);
   };
 
+  const resolveLinks = (side: Side, items: FileEntry[]) =>
+    Promise.all(items.map(async (e) => (e.is_symlink && !e.is_dir && (await panesRef.current[side].isDirLink(e)) ? { ...e, is_dir: true } : e)));
+
   const transferAcross = async (from: Side, items: FileEntry[], toDir?: string) => {
     const why = blockReason(from);
     const src = panesRef.current[from];
     if (why) return src.setError(why);
     if (items.length === 0) return;
+    if (src.isRemote) items = await resolveLinks(from, items);
     const dst = panesRef.current[otherSide(from)];
     const dir = toDir ?? dst.cwd;
     if (src.isRemote && dst.isRemote) {
@@ -2285,6 +2285,7 @@ export function SftpScreen({
     if (p.loc.kind !== "remote" || p.phase !== "ready" || items.length === 0) return;
     const hostId = p.loc.hostId;
     try {
+      items = await resolveLinks(side, items);
       if (items.length === 1 && !items[0].is_dir) {
         const it = items[0];
         const dest = await saveDialog({ defaultPath: safeName(it.name) ?? undefined, title: "Save as" });
@@ -2329,6 +2330,7 @@ export function SftpScreen({
     p.setBusy(true);
     cleanTemp();
     try {
+      if ((await resolveLinks(side, items)).some((e) => e.is_dir)) throw new Error("Folders cannot be dragged out of the window. Use Download instead.");
       const base = await pathJoin(await tempDir(), `kestral-drag-${crypto.randomUUID()}`);
       let ownDir = true;
       try {
@@ -2730,8 +2732,6 @@ export function SftpScreen({
 
   const canCreate = !!createPane && !createPane.editing;
   const createTitle = !createPane ? "Open a location first." : createPane.editing ? "Close the editor first." : `In ${createPane.cwd}`;
-  // Marked only when both panes could receive New folder and New file.
-  const markedSide = left.phase === "ready" && right.phase === "ready" ? createPane?.side ?? null : null;
 
   return (
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -2842,7 +2842,6 @@ export function SftpScreen({
             pane={panes[s]}
             hosts={hosts}
             stacked={stacked}
-            focused={markedSide === s}
             focusReq={focusReq?.side === s ? focusReq : null}
             dropHint={osDrop?.side === s ? { dir: osDrop.dir } : null}
             dragTarget={drag?.over === s ? { dir: drag.overDir } : null}

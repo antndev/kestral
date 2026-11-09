@@ -12,13 +12,10 @@ pub enum AppError {
     VaultAuth,
     #[error("Not found: {0}")]
     NotFound(String),
-    #[allow(dead_code)]
     #[error("AI access is off")]
     AiDisabled,
-    #[allow(dead_code)]
     #[error("Host is blocked for the AI")]
     HostLocked,
-    #[allow(dead_code)]
     #[error("Approval denied")]
     ApprovalDenied,
     #[error("I/O error: {0}")]

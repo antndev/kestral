@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -21,12 +21,12 @@
     </script>
     <style>
       /* Paint the theme background before the CSS bundle loads, so there is no
-         white flash while the app boots. Matches the reui --background tokens. */
+         white flash while the app boots. Matches --bg of .t-dark and .t-light in src/tokens.css. */
       html {
-        background: #0a0a0a;
+        background: #111111;
       }
       html:not(.dark) {
-        background: #ffffff;
+        background: #FAF9F5;
       }
       /* Fill the window exactly: no body margin frame, no outer scrollbar. The
          app's own panes scroll internally. */

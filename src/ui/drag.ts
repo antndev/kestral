@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 
-export type DragHandlers = {
+type DragHandlers = {
   label: string;
   onMove(target: Element | null, pt: { x: number; y: number }): void;
   onDrop(target: Element | null, pt: { x: number; y: number }): void;
