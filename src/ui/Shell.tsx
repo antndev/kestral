@@ -435,7 +435,7 @@ function TitleBar({
               }}
             >
               {!active && !into && (
-                <span aria-hidden="true" style={{ position: "absolute", inset: `3px 1px ${3 + TAB_GAP}px`, zIndex: -1, borderRadius: 7, background: t.attention ? "var(--accent-tint)" : "var(--hover)", opacity: hovered || t.attention ? 1 : 0, transition: "opacity 120ms", pointerEvents: "none" }} />
+                <span aria-hidden="true" style={{ position: "absolute", inset: "1px 3px 6px", zIndex: -1, borderRadius: 8, background: t.attention ? "var(--accent-tint)" : "var(--hover)", opacity: hovered || t.attention ? 1 : 0, transition: "opacity 120ms", pointerEvents: "none" }} />
               )}
               {active && !into && (
                 <>
@@ -443,7 +443,7 @@ function TitleBar({
                   <span aria-hidden="true" style={{ position: "absolute", right: -FOOT, bottom: 0, width: FOOT, height: FOOT, background: footBg("100% 0"), pointerEvents: "none" }} />
                 </>
               )}
-              {divider && <span aria-hidden="true" style={{ position: "absolute", right: -1, top: 7, bottom: 7 + TAB_GAP, width: 1, background: "var(--line)", pointerEvents: "none" }} />}
+              {divider && <span aria-hidden="true" style={{ position: "absolute", right: -1, top: 7, bottom: 8 + TAB_GAP, width: 1, background: "var(--line)", pointerEvents: "none" }} />}
               <span aria-hidden="true" data-anim={t.status === "warn" ? "pulse" : undefined} style={{ width: 7, height: 7, flex: "none", borderRadius: "50%", background: t.status === "idle" ? "transparent" : statusColor(t.status), border: t.status === "idle" ? "1.5px solid var(--ring-idle)" : "none", boxSizing: "border-box" }} />
               {t.kind === "sftp" && (
                 <span aria-label="SFTP" style={{ display: "flex", flex: "none", color: "var(--text-2)" }}>

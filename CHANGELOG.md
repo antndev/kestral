@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.30 - 2026-11-09
+
+### Fixed
+- The hover highlight of an inactive tab sits centred in the title bar, the same height as the other buttons there, with room to the active tab. The divider between tabs is centred as well.
+
 ## 0.2.29 - 2026-11-09
 
 ### Changed
