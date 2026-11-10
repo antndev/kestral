@@ -137,10 +137,6 @@ jobs:
       - name: Build without updater artifacts
         run: npx tauri build ${{ matrix.args }}
 
-      - name: Run the Rust tests
-        if: matrix.name == 'windows'
-        run: cargo test --release --manifest-path src-tauri/Cargo.toml
-
       - name: Collect the release files
         shell: bash
         run: |
@@ -165,8 +161,41 @@ jobs:
           compression-level: 0
           overwrite: true
 
+  test:
+    needs: version
+    if: needs.version.outputs.build == 'true'
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          toolchain: stable
+
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: test-${{ runner.os }}
+          cache-on-failure: true
+
+      - run: npm ci --no-audit --no-fund
+
+      - run: npm run build
+
+      - name: Run the Rust tests
+        run: cargo test --release --manifest-path src-tauri/Cargo.toml
+
   publish:
-    needs: [version, build]
+    needs: [version, build, test]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
