@@ -3,6 +3,22 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.33 - 2026-11-10
+
+### Fixed
+- An upload no longer hangs for good when the connection drops in the middle. It ends with an error, Cancel works, and the transfers queued behind it start.
+- Large uploads to slow storage and downloads over a slow line no longer fail after 10 seconds without an answer. Transfers now wait up to two minutes.
+- A socket or device inside a remote folder shows as a file, not as a folder, and a folder download or copy skips it instead of stopping.
+- The exit code of a session shows on servers that send it after the end of output, such as Dropbear.
+- A save error in the host form shows next to the buttons instead of out of sight at the end of the form.
+- Enter in the address field splits user, host and port the same way leaving the field does.
+- Switching a port forward on while its form has unsaved changes saves first, so the tunnel starts with the new values.
+- The snippets screen picks up snippets the AI adds or changes while Kestral is in front.
+- Creating the first host no longer shows "No matching hosts" next to the form.
+- Log entries open again after you selected text in another entry.
+- The connected time in the status bar counts for the pane in focus, and a pane no longer flashes again after a split.
+- Buttons and error lines in the replace key, snippet folder and key passphrase dialogs keep their size.
+
 ## 0.2.32 - 2026-11-10
 
 ### Added

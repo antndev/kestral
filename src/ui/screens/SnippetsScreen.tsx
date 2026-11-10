@@ -15,6 +15,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { Channel } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import * as api from "../../api";
 import type { Host, Snippet } from "../../api";
 import { usePrefs } from "../../lib/prefs";
@@ -551,8 +552,12 @@ export function SnippetsScreen({
     void reload();
     const onFocus = () => void reload();
     window.addEventListener("focus", onFocus);
+    const off = listen<string>("data-changed", (e) => {
+      if (e.payload !== "hosts") void reload();
+    }).catch(() => undefined);
     return () => {
       window.removeEventListener("focus", onFocus);
+      void off.then((f) => f?.());
       alive.current = false;
       if (flushMounted === flush) flushMounted = null;
       void flush();
@@ -1875,7 +1880,7 @@ function FolderDialog({
             placeholder="Docker"
             style={field}
           />
-          {err && <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--err)" }}>{err}</p>}
+          <p role="alert" style={{ margin: "6px 0 0", minHeight: 17, fontSize: 12, color: "var(--err)" }}>{err}</p>
         </div>
         <DialogButtons
           primary={<button type="submit" disabled={busy} style={off(primaryBtn, busy)}><Stable text={busy ? "Saving…" : submitLabel} alts={[submitLabel, "Saving…"]} /></button>}
@@ -1973,7 +1978,7 @@ function ConfirmDeleteDialog({ title, message, onConfirm, onClose }: { title: st
   return (
     <Modal title={title} onClose={() => !busy && onClose()} backdropCloses={false} initialFocus={cancelRef}>
       <p style={{ margin: 0, lineHeight: 1.5 }}>{message}</p>
-      {err && <p style={{ margin: 0, fontSize: 12, color: "var(--err)" }}>{err}</p>}
+      <p role="alert" style={{ margin: 0, minHeight: 17, fontSize: 12, color: "var(--err)" }}>{err}</p>
       <DialogButtons
         primary={
           <button type="button" onClick={confirm} disabled={busy} style={off(btnDanger, busy)}>

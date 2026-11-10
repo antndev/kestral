@@ -145,9 +145,9 @@ export function aggregate(stages: PaneStage[]): SessionStatus {
 
 // ---------------------------------------------------------------- runtime info per pane
 
-type PaneInfo = { stage: PaneStage; title: string; proc: string; auth: string; latency: number | null; cols: number; rows: number; bell: number; attempt: number; of: number; retryAt: number | null; note: string };
+type PaneInfo = { stage: PaneStage; title: string; proc: string; auth: string; latency: number | null; cols: number; rows: number; bell: number; attempt: number; of: number; retryAt: number | null; note: string; since: number | null };
 
-const BLANK: PaneInfo = { stage: "connecting", title: "", proc: "", auth: "", latency: null, cols: 0, rows: 0, bell: 0, attempt: 0, of: 0, retryAt: null, note: "" };
+const BLANK: PaneInfo = { stage: "connecting", title: "", proc: "", auth: "", latency: null, cols: 0, rows: 0, bell: 0, attempt: 0, of: 0, retryAt: null, note: "", since: null };
 
 let infos: Record<string, PaneInfo> = {};
 let stages: Record<string, PaneStage> = {};
@@ -171,6 +171,7 @@ export const paneStore = {
   stages: () => stages,
   patch(id: string, p: Partial<PaneInfo>) {
     const cur = infos[id] ?? BLANK;
+    if (p.stage !== undefined && p.stage !== cur.stage) p = { ...p, since: p.stage === "connected" ? Date.now() : null };
     if ((Object.keys(p) as (keyof PaneInfo)[]).every((k) => cur[k] === p[k])) return;
     infos = { ...infos, [id]: { ...cur, ...p } };
     infoSubs.forEach((f) => f());

@@ -5,7 +5,7 @@ import { termBus } from "../termBus";
 import type { PaneStage, SessionStatus } from "../termBus";
 import { MONO } from "../mock";
 import { CloseIcon, CollapseIcon, DotsIcon, RefreshIcon } from "../icons";
-import { MAX_PANES, aggregate, dnd, equalShare, leaves, paneHost, paneStore, shape } from "../panes";
+import { MAX_PANES, dnd, equalShare, leaves, paneHost, paneStore, shape } from "../panes";
 import type { Layout, PaneSpec, Side, Zone } from "../panes";
 import { ItemMenu, useMenu } from "../Menu";
 import type { MenuEntry } from "../Menu";
@@ -215,8 +215,10 @@ function PaneHeader({
   onClose(): void;
 }) {
   const [flash, setFlash] = useState(false);
+  const rung = useRef(bell);
   useEffect(() => {
-    if (!bell) return;
+    if (bell === rung.current) return;
+    rung.current = bell;
     setFlash(true);
     const t = window.setTimeout(() => setFlash(false), 220);
     return () => window.clearTimeout(t);
@@ -305,7 +307,6 @@ export function TerminalSession({
   const infos = useSyncExternalStore(paneStore.subscribe, paneStore.infos);
   const { hint } = useSyncExternalStore(dnd.subscribe, dnd.get);
   const menu = useMenu<string>();
-  const [connectedAt, setConnectedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   const ids = useMemo(() => leaves(layout), [layout]);
@@ -313,17 +314,12 @@ export function TerminalSession({
   const zoomed = zoom && ids.includes(zoom) ? zoom : null;
   const full = ids.length >= MAX_PANES;
   const stageOf = (id: string): PaneStage => infos[id]?.stage ?? "connecting";
-  const status = aggregate(ids.map(stageOf));
   const hostOf = (id: string) => hosts.find((h) => h.id === specs[id]?.hostId) ?? fallbackHost;
   const focusHost = hostOf(focus);
   const focusInfo = infos[focus];
   const counts = (["connecting", "failed", "reconnecting", "ended"] as const).map((k) => ({ k, n: ids.filter((id) => stageOf(id) === k).length })).filter((x) => x.n > 0);
 
-  useEffect(() => {
-    if (status === "connected") setConnectedAt((t) => t ?? Date.now());
-    else setConnectedAt(null);
-  }, [status]);
-
+  const connectedAt = focusInfo?.since ?? null;
   const retryAt = focusInfo?.retryAt ?? null;
   useEffect(() => {
     if (!active || (connectedAt === null && retryAt === null)) return;

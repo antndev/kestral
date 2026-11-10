@@ -756,6 +756,7 @@ export function HostEditor(p: {
   }
 
   async function testConnection() {
+    setSaveErr("");
     const e = validate();
     const blocking = [...TEST_FIELDS, "keepalive", "timeout"].filter((k) => k in e);
     const newPw = authKind === "password" && (effPwSel === NEW || pwChanging) && pwValue ? pwValue : undefined;
@@ -1002,6 +1003,9 @@ export function HostEditor(p: {
                       })
                     }
                     onBlur={onAddressBlur}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") flushSync(onAddressBlur);
+                    }}
                     style={inputStyle({ error: !!fe("hostname"), mono: true })}
                   />
                 </Field>
@@ -1749,12 +1753,6 @@ export function HostEditor(p: {
                 </div>
               )}
             </section>
-
-            {saveErr && (
-              <p role="alert" style={{ margin: 0, fontSize: 12, color: "var(--err)", overflowWrap: "anywhere" }}>
-                {saveErr}
-              </p>
-            )}
           </div>
 
           <div style={p.inline ? { position: "sticky", bottom: -24, display: "flex", alignItems: "center", gap: 8, padding: "16px 0 24px", borderTop: "1px solid var(--line)", background: "var(--bg)" } : { display: "flex", alignItems: "center", gap: 8, padding: "14px 20px", borderTop: "1px solid var(--line)", background: "var(--bg-side)" }}>
@@ -1769,15 +1767,15 @@ export function HostEditor(p: {
             </button>
             <span
               role="status"
-              title={test.state === "ok" || test.state === "err" ? test.msg : undefined}
-              style={{ flex: "1 1 0", minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden", fontSize: 12, color: test.state === "ok" ? "var(--ok)" : test.state === "err" ? "var(--err)" : "var(--text-2)" }}
+              title={saveErr || (test.state === "ok" || test.state === "err" ? test.msg : undefined)}
+              style={{ flex: "1 1 0", minWidth: 0, display: "flex", alignItems: "center", gap: 6, overflow: "hidden", fontSize: 12, color: saveErr || test.state === "err" ? "var(--err)" : test.state === "ok" ? "var(--ok)" : "var(--text-2)" }}
             >
-              {test.state === "ok" && (
+              {!saveErr && test.state === "ok" && (
                 <span style={{ display: "flex", flex: "none" }}>
                   <CheckIcon />
                 </span>
               )}
-              <span style={{ minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{test.state === "ok" || test.state === "err" ? test.msg : ""}</span>
+              <span style={{ minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{saveErr || (test.state === "ok" || test.state === "err" ? test.msg : "")}</span>
             </span>
             {footerRight}
           </div>

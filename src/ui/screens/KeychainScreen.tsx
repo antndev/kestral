@@ -2077,7 +2077,7 @@ function UnlockBanner(p: { id: string; onUnlocked(): void }) {
         <input type="password" aria-label="Key passphrase" placeholder="Passphrase" value={pass} disabled={busy} onChange={(e) => { setPass(e.target.value); setErr(""); }} style={{ ...field, flex: "1 1 200px", width: "auto" }} />
         <button type="submit" disabled={!pass || busy} style={{ ...pageBtn, ...disabledLook(!pass || busy) }}><Stable text={busy ? "Unlocking…" : "Unlock key"} alts={["Unlock key", "Unlocking…"]} /></button>
       </form>
-      {err && <p style={errLine}>{err}</p>}
+      <p role="alert" style={{ ...errLine, minHeight: 17 }}>{err}</p>
     </div>
   );
 }

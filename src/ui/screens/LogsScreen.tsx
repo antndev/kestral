@@ -413,8 +413,9 @@ export function LogsScreen() {
                     )}
                     <tr
                       data-reveal=""
-                      onClick={() => {
-                        if (window.getSelection()?.toString()) return;
+                      onClick={(ev) => {
+                        const s = window.getSelection();
+                        if (s && !s.isCollapsed && ev.currentTarget.contains(s.anchorNode)) return;
                         toggle(e.id);
                       }}
                       onContextMenu={(ev) => {

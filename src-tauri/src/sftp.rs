@@ -97,7 +97,7 @@ async fn list(sftp: &SftpSession, path: &str) -> Result<Vec<FileEntry>> {
         out.push(FileEntry {
             path: join(path, &name),
             name,
-            is_dir: meta.is_dir(),
+            is_dir: meta.file_type().is_dir(),
             is_symlink: meta.file_type().is_symlink(),
             size: meta.size.unwrap_or(0),
             mtime: meta.mtime.map(|m| m as i64),
@@ -130,6 +130,33 @@ impl Xfer {
 
 fn cancelled() -> AppError {
     AppError::Other("Cancelled".into())
+}
+
+const BROWSE_SECS: u64 = 10;
+const TRANSFER_SECS: u64 = 120;
+const STALL: std::time::Duration = std::time::Duration::from_secs(180);
+
+// Remote writes are acknowledged later, and waiting for those acknowledgements
+// never times out on its own: on a dead connection it would hang for good and
+// ignore Cancel.
+async fn guarded<T>(x: &Xfer, what: &str, work: impl std::future::Future<Output = std::io::Result<T>>) -> Result<T> {
+    tokio::select! {
+        _ = x.cancel.cancelled() => Err(cancelled()),
+        r = tokio::time::timeout(STALL, work) => match r {
+            Ok(r) => r.map_err(|e| ferr(what, e)),
+            Err(_) => Err(stalled(what)),
+        },
+    }
+}
+
+fn stalled(what: &str) -> AppError {
+    AppError::Ssh(format!("SFTP {what}: the server stopped answering"))
+}
+
+// Sockets, devices and pipes cannot be copied. Leaving them out keeps the rest
+// of a folder transfer going.
+fn special(e: &FileEntry) -> bool {
+    e.permissions.is_some_and(|m| russh_sftp::protocol::FileType::from(m).is_other())
 }
 
 fn part_name(name: &str) -> String {
@@ -259,10 +286,10 @@ where
                 )));
             }
         }
-        writer.write_all(&buf[..n]).await.map_err(|e| ferr("write", e))?;
+        guarded(x, "write", writer.write_all(&buf[..n])).await?;
         x.done.fetch_add(n as u64, Ordering::Relaxed);
     }
-    writer.flush().await.map_err(|e| ferr("flush", e))?;
+    guarded(x, "flush", writer.flush()).await?;
     Ok(total)
 }
 
@@ -317,7 +344,7 @@ fn download_dir<'a>(
         let entries = list(sftp, &remote).await?;
         let mut total = 0u64;
         for e in entries {
-            if !is_safe_component(&e.name) || (e.is_symlink && !links_to_file(sftp, &e.path).await) {
+            if !is_safe_component(&e.name) || special(&e) || (e.is_symlink && !links_to_file(sftp, &e.path).await) {
                 continue;
             }
             let child = local.join(&e.name);
@@ -344,7 +371,7 @@ async fn upload(sftp: &SftpSession, local: &Path, remote: &str, x: &Xfer) -> Res
     let result = match pump(&mut lf, &mut wf, x).await {
         Ok(n) => wf.shutdown().await.map(|_| n).map_err(|e| ferr("close", e)),
         Err(e) => {
-            let _ = wf.shutdown().await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(10), wf.shutdown()).await;
             Err(e)
         }
     };
@@ -391,7 +418,7 @@ async fn copy_file(src: &SftpSession, from: &str, dst: &SftpSession, to: &str, x
     let result = match pump(&mut rf, &mut wf, x).await {
         Ok(n) => wf.shutdown().await.map(|_| n).map_err(|e| ferr("close", e)),
         Err(e) => {
-            let _ = wf.shutdown().await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(10), wf.shutdown()).await;
             Err(e)
         }
     };
@@ -409,7 +436,7 @@ fn copy_dir<'a>(
         let _ = dst.create_dir(&to).await;
         let mut total = 0u64;
         for e in list(src, &from).await? {
-            if !is_safe_component(&e.name) || (e.is_symlink && !links_to_file(src, &e.path).await) {
+            if !is_safe_component(&e.name) || special(&e) || (e.is_symlink && !links_to_file(src, &e.path).await) {
                 continue;
             }
             let child = join(&to, &e.name);
@@ -481,27 +508,39 @@ impl SftpHandle {
             .await
             .map_err(|e| ferr("home", e))
     }
+    // A transfer waits longer for the server than browsing does: the fsync that
+    // ends an upload and a read over a slow line both outlast 10 seconds.
+    // shortcut: transfers overlapping on one host end each other's patience, count them if the queue ever runs in parallel
+    async fn patiently<T>(&self, work: impl std::future::Future<Output = T>) -> T {
+        self.sftp.set_timeout(TRANSFER_SECS);
+        let out = work.await;
+        self.sftp.set_timeout(BROWSE_SECS);
+        out
+    }
     pub async fn download(&self, remote: &str, local: &Path, x: &Xfer) -> Result<u64> {
-        download(&self.sftp, remote, local, x).await
+        self.patiently(download(&self.sftp, remote, local, x)).await
     }
     pub async fn download_dir(&self, remote: &str, local: &Path, x: &Xfer) -> Result<u64> {
-        download_dir(&self.sftp, remote.to_string(), local.to_path_buf(), x).await
+        self.patiently(download_dir(&self.sftp, remote.to_string(), local.to_path_buf(), x)).await
     }
     pub async fn upload(&self, local: &Path, remote: &str, x: &Xfer) -> Result<u64> {
-        upload(&self.sftp, local, remote, x).await
+        self.patiently(upload(&self.sftp, local, remote, x)).await
     }
     pub async fn upload_dir(&self, local: &Path, remote: &str, x: &Xfer) -> Result<u64> {
-        upload_dir(&self.sftp, local.to_path_buf(), remote.to_string(), x).await
+        self.patiently(upload_dir(&self.sftp, local.to_path_buf(), remote.to_string(), x)).await
     }
     pub async fn size(&self, path: &str, is_dir: bool) -> u64 {
         remote_size(&self.sftp, path.to_string(), is_dir).await
     }
     pub async fn copy_to(&self, from: &str, dst: &SftpHandle, to: &str, is_dir: bool, x: &Xfer) -> Result<u64> {
-        if is_dir {
-            copy_dir(&self.sftp, from.to_string(), &dst.sftp, to.to_string(), x).await
-        } else {
-            copy_file(&self.sftp, from, &dst.sftp, to, x).await
-        }
+        let copy = async {
+            if is_dir {
+                copy_dir(&self.sftp, from.to_string(), &dst.sftp, to.to_string(), x).await
+            } else {
+                copy_file(&self.sftp, from, &dst.sftp, to, x).await
+            }
+        };
+        self.patiently(dst.patiently(copy)).await
     }
     pub async fn read_text(&self, path: &str) -> Result<String> {
         // Same 1 MiB cap and message as local_read_text; the SFTP view treats it
@@ -528,13 +567,18 @@ impl SftpHandle {
     }
     pub async fn write_text(&self, path: &str, content: &str) -> Result<()> {
         let (mut f, part) = create_part(&self.sftp, path, None).await?;
-        let written = async {
-            f.write_all(content.as_bytes()).await.map_err(|e| ferr("write", e))?;
-            f.flush().await.map_err(|e| ferr("flush", e))
-        }
-        .await;
-        let closed = f.shutdown().await.map_err(|e| ferr("close", e));
-        finish_part(&self.sftp, part, written.and(closed).map(|()| content.len() as u64)).await?;
+        let saved = tokio::time::timeout(STALL, async {
+            let written = async {
+                f.write_all(content.as_bytes()).await.map_err(|e| ferr("write", e))?;
+                f.flush().await.map_err(|e| ferr("flush", e))
+            }
+            .await;
+            let closed = f.shutdown().await.map_err(|e| ferr("close", e));
+            written.and(closed)
+        })
+        .await
+        .unwrap_or_else(|_| Err(stalled("write")));
+        finish_part(&self.sftp, part, saved.map(|()| content.len() as u64)).await?;
         Ok(())
     }
     pub async fn mkdir(&self, path: &str) -> Result<()> {
@@ -617,7 +661,28 @@ impl Transfers {
 
 #[cfg(test)]
 mod tests {
-    use super::windows_safe;
+    use super::{special, windows_safe, FileEntry};
+
+    #[test]
+    fn only_sockets_devices_and_pipes_are_left_out_of_a_folder_transfer() {
+        let entry = |mode: Option<u32>| FileEntry {
+            name: "x".into(),
+            path: "/x".into(),
+            is_dir: false,
+            is_symlink: false,
+            size: 0,
+            mtime: None,
+            permissions: mode,
+            hidden: false,
+        };
+        for mode in [0o140755, 0o060660, 0o020620, 0o010644] {
+            assert!(special(&entry(Some(mode))), "{mode:o}");
+        }
+        for mode in [0o100644, 0o040755, 0o120777] {
+            assert!(!special(&entry(Some(mode))), "{mode:o}");
+        }
+        assert!(!special(&entry(None)));
+    }
 
     #[test]
     fn windows_rejects_names_ntfs_cannot_hold() {

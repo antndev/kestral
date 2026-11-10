@@ -355,7 +355,7 @@ export function HostsScreen(p: {
                   placeholder="Filter, or user@host to connect"
                 />
               </div>
-              {filtered.length === 0 ? (
+              {hosts.length === 0 ? null : filtered.length === 0 ? (
                 <EmptyState>
                   <span style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <span style={{ fontSize: 16, fontWeight: 600 }}>No matching hosts</span>

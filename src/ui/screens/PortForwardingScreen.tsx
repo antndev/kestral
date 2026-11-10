@@ -435,7 +435,7 @@ export function PortForwardingScreen({ hosts: hostsProp, onHostsChanged, onConfi
                         onKeyDown={(e) => arrowNav(shown, i, e, select, (id) => itemRefs.current.get(id)?.focus())}
                         trailing={
                           r ? (
-                            <Toggle on={on} busy={!!pending[it.id]} label={`${it.name} active`} title={err ? `Could not start: ${err}` : undefined} onClick={() => void toggle(r)} />
+                            <Toggle on={on} busy={!!pending[it.id]} label={`${it.name} active`} title={err ? `Could not start: ${err}` : undefined} onClick={() => whenLeft(() => void toggle(r))} />
                           ) : (
                             <Toggle on={false} busy={false} disabled label={`${it.name} active`} onClick={() => {}} />
                           )

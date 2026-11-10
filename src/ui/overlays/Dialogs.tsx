@@ -623,8 +623,12 @@ export function HostKeyChangedDialog({
         <Actions>
           {[
             <Button key="replace" kind="danger" disabled={busy} title={busy ? WORKING : undefined} onClick={replace}>
-              {busy && <Spinner />}
-              Replace key and connect
+              <span style={{ display: "grid", placeItems: "center" }}>
+                <span style={{ gridArea: "1 / 1", opacity: busy ? 0 : 1 }}>Replace key and connect</span>
+                <span style={{ gridArea: "1 / 1", display: "flex", opacity: busy ? 1 : 0 }}>
+                  <Spinner />
+                </span>
+              </span>
             </Button>,
             <Button key="cancel" kind="primary" btnRef={cancelRef} disabled={busy} title={busy ? WORKING : undefined} onClick={cancel}>Cancel</Button>,
           ]}

@@ -246,7 +246,15 @@ pub async fn ssh_open_shell(
         let mut exit_status: Option<u32> = None;
         let mut signal: Option<String> = None;
         let mut ended = false;
-        while let Some(msg) = read_half.wait().await {
+        loop {
+            // The exit status may follow the end of output, so keep reading after
+            // it, but only briefly in case the server never closes the channel.
+            let msg = if ended {
+                tokio::time::timeout(std::time::Duration::from_secs(2), read_half.wait()).await.ok().flatten()
+            } else {
+                read_half.wait().await
+            };
+            let Some(msg) = msg else { break };
             match msg {
                 ChannelMsg::Data { ref data } => {
                     let _ = on_output.send(InvokeResponseBody::Raw(data.to_vec()));
@@ -258,7 +266,8 @@ pub async fn ssh_open_shell(
                 }
                 ChannelMsg::ExitStatus { exit_status: code } => exit_status = Some(code),
                 ChannelMsg::ExitSignal { signal_name, .. } => signal = Some(format!("{signal_name:?}")),
-                ChannelMsg::Eof | ChannelMsg::Close => {
+                ChannelMsg::Eof => ended = true,
+                ChannelMsg::Close => {
                     ended = true;
                     break;
                 }
