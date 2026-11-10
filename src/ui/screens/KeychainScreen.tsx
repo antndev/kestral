@@ -8,7 +8,7 @@ import { CheckIcon, CopyIcon, DownloadIcon, KeyIcon, LockIcon, PlusIcon, Refresh
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import { SegGroup, segItem } from "../SegGroup";
-import { useAlive } from "../kit";
+import { ScreenHeader, useAlive } from "../kit";
 import { ItemMenu, MoreButton, useMenu } from "../Menu";
 import type { MenuState } from "../Menu";
 
@@ -38,7 +38,7 @@ function disabledLook(disabled: boolean): CSSProperties {
 
 /* ---------- helpers ---------- */
 
-type Tab = "keys" | "identities" | "agent";
+type Tab = "keys" | "passwords" | "identities" | "agent";
 type PubInfo = { pub: string; fp: string; algo: string; comment: string; encrypted: boolean };
 /**
  * Derived public half of a vault key. `gen` is the vault generation it was read in;
@@ -276,6 +276,8 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
   const [sel, setSel] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [dialog, setDialog] = useState<"generate" | "import" | null>(null);
+  const [adding, setAdding] = useState<"password" | "identity" | null>(null);
+  const [notice, setNotice] = useNotice();
   const keyMenu = useMenu();
 
   // The app keeps its own copy of the secret list, so tell it about every vault change.
@@ -450,22 +452,35 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
 
   return (
     <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, minHeight: 56, padding: "12px 28px", boxSizing: "border-box" }}>
-        <h1 style={{ position: "relative", top: -1, margin: 0, fontSize: 20, fontWeight: 600 }}>Keychain</h1>
-        <SegGroup label="View" value={tab} style={{ marginLeft: 8 }}>
-          {(
-            [
-              ["keys", "Keys"],
-              ["identities", "Identities"],
-              ["agent", "Agent"],
-            ] as const
-          ).map(([t, label]) => (
-            <button key={t} type="button" aria-pressed={tab === t} onClick={() => setTab(t)} style={segItem(tab === t)}>
-              {label}
-            </button>
-          ))}
-        </SegGroup>
-        <div style={{ flex: 1 }} />
+      <ScreenHeader
+        title="Keychain"
+        meta={
+          <SegGroup label="View" value={tab} style={{ marginLeft: 8 }}>
+            {(
+              [
+                ["keys", "Keys"],
+                ["passwords", "Passwords"],
+                ["identities", "Identities"],
+                ["agent", "Agent"],
+              ] as const
+            ).map(([t, label]) => (
+              <button
+                key={t}
+                type="button"
+                aria-pressed={tab === t}
+                onClick={() => {
+                  setTab(t);
+                  setNotice(null);
+                }}
+                style={segItem(tab === t)}
+              >
+                {label}
+              </button>
+            ))}
+          </SegGroup>
+        }
+      >
+        <StatusText notice={notice} style={{ flex: "1 1 0", textAlign: "right" }} />
         {tab === "keys" && hasKeys && (
           <>
             <button type="button" onClick={() => setDialog("import")} style={pageBtn}>Import</button>
@@ -475,7 +490,19 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
             </button>
           </>
         )}
-      </div>
+        {tab === "passwords" && passwords.length > 0 && (
+          <button type="button" onClick={() => setAdding("password")} style={primaryBtn}>
+            <PlusIcon size={14} sw={1.75} />
+            New password
+          </button>
+        )}
+        {tab === "identities" && identities.length > 0 && (
+          <button type="button" onClick={() => setAdding("identity")} style={primaryBtn}>
+            <PlusIcon size={14} sw={1.75} />
+            New identity
+          </button>
+        )}
+      </ScreenHeader>
 
       {secrets === null ? (
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, borderTop: "1px solid var(--line)", padding: 24, textAlign: "center", color: "var(--text-2)" }}>
@@ -489,9 +516,7 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
           )}
         </div>
       ) : tab === "keys" && !hasKeys ? (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, borderTop: "1px solid var(--line)", padding: 24, textAlign: "center", color: "var(--text-2)" }}>
-          <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 10, background: "var(--bg-raised)", color: "var(--text-2)" }}><KeyIcon size={20} /></span>
-          <span>No SSH keys yet</span>
+        <Empty icon={<KeyIcon size={20} />} text="No SSH keys yet">
           {loadErr && <p style={errLine}>Could not refresh: {loadErr}</p>}
           <div style={{ display: "flex", gap: 8 }}>
             <button type="button" onClick={() => setDialog("generate")} style={primaryBtn}>
@@ -500,7 +525,7 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
             </button>
             <button type="button" onClick={() => setDialog("import")} style={pageBtn}>Import</button>
           </div>
-        </div>
+        </Empty>
       ) : tab === "keys" ? (
         <div style={{ display: "flex", flexWrap: "wrap", flex: 1, minHeight: 0, borderTop: "1px solid var(--line)", overflow: "auto" }}>
           <div style={{ flex: "1 1 280px", minWidth: 0, display: "flex", flexDirection: "column", gap: 8, padding: "12px 10px", borderRight: "1px solid var(--line)", boxSizing: "border-box", overflow: "auto" }}>
@@ -552,6 +577,24 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
             )}
           </section>
         </div>
+      ) : tab === "passwords" ? (
+        <PasswordsTab
+          hosts={p.hosts}
+          passwords={passwords}
+          identities={identities}
+          allIds={allIds}
+          adding={adding === "password"}
+          onAddEnd={() => setAdding(null)}
+          onAdd={() => setAdding("password")}
+          onNotice={setNotice}
+          onShowIdentities={() => setTab("identities")}
+          onEditHost={p.onEditHost}
+          onDelete={deleteSecret}
+          onChanged={async () => {
+            await refresh();
+            notify();
+          }}
+        />
       ) : tab === "identities" ? (
         <IdentitiesTab
           hosts={p.hosts}
@@ -560,9 +603,13 @@ export function KeychainScreen(p: { hosts: Host[]; onHostsChanged(): void; onEdi
           passwords={passwords}
           identities={identities}
           allIds={allIds}
+          adding={adding === "identity"}
+          onAddEnd={() => setAdding(null)}
+          onAdd={() => setAdding("identity")}
+          onNotice={setNotice}
           onShowKey={showKey}
+          onShowPasswords={() => setTab("passwords")}
           onEditHost={p.onEditHost}
-          onDelete={deleteSecret}
           onChanged={async () => {
             await refresh();
             notify();
@@ -1001,40 +1048,47 @@ function kindMismatch(auth: AuthMethod, kind: SecretKind): string {
   return "";
 }
 
-function IdentitiesTab(p: {
-  hosts: Host[];
-  secrets: SecretMeta[];
-  keys: SecretMeta[];
-  passwords: SecretMeta[];
-  identities: Identity[];
-  allIds: string[];
-  onShowKey(id: string): void;
-  onEditHost?(h: Host): void;
-  onDelete(id: string): Promise<void>;
-  onChanged(): Promise<void>;
-}) {
+function Empty(p: { icon: ReactNode; text: string; children?: ReactNode }) {
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, borderTop: "1px solid var(--line)", padding: 24, textAlign: "center", color: "var(--text-2)" }}>
+      <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 40, height: 40, borderRadius: 10, background: "var(--bg-raised)", color: "var(--text-2)" }}>{p.icon}</span>
+      <span>{p.text}</span>
+      {p.children}
+    </div>
+  );
+}
+
+const tablePane: CSSProperties = { flex: 1, minHeight: 0, overflow: "auto", borderTop: "1px solid var(--line)", padding: "12px 28px 24px" };
+const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+
+type AddProps = { adding: boolean; onAdd(): void; onAddEnd(): void; onNotice(n: Notice): void };
+
+function PasswordsTab(
+  p: AddProps & {
+    hosts: Host[];
+    passwords: SecretMeta[];
+    identities: Identity[];
+    allIds: string[];
+    onShowIdentities(): void;
+    onEditHost?(h: Host): void;
+    onDelete(id: string): Promise<void>;
+    onChanged(): Promise<void>;
+  },
+) {
   const alive = useAlive();
-  const [pwDialog, setPwDialog] = useState<{ secret: SecretMeta | null } | null>(null);
-  const [idDialog, setIdDialog] = useState<{ identity: Identity | null } | null>(null);
+  const [editing, setEditing] = useState<SecretMeta | null>(null);
   const [toDelete, setToDelete] = useState<SecretMeta | null>(null);
-  const [identityToDelete, setIdentityToDelete] = useState<Identity | null>(null);
-  const [notice, setNotice] = useNotice();
-  const [idNotice, setIdNotice] = useNotice();
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
-  const idMenu = useMenu();
-  const pwMenu = useMenu();
+  const menu = useMenu();
 
-  const hosts = useMemo(() => [...p.hosts].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })), [p.hosts]);
-  const identities = useMemo(() => [...p.identities].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })), [p.identities]);
-  const kindOf = (id: string) => p.secrets.find((s) => s.id === id)?.kind ?? null;
+  const hosts = useMemo(() => [...p.hosts].sort(byName), [p.hosts]);
   const usersOf = (id: string) => hosts.filter((h) => secretOf(h.auth, p.identities) === id);
-  const identitiesOf = (id: string) => identities.filter((i) => directSecret(i.auth) === id);
-  const hostsOfIdentity = (id: string) => hosts.filter((h) => h.auth.kind === "identity" && h.auth.identity_id === id);
+  const identitiesOf = (id: string) => p.identities.filter((i) => directSecret(i.auth) === id).sort(byName);
 
   async function copyPassword(s: SecretMeta) {
-    setNotice(null);
+    p.onNotice(null);
     try {
       await clipWrite(await api.secretReveal(s.id));
       if (!alive.current) return;
@@ -1042,121 +1096,29 @@ function IdentitiesTab(p: {
       window.clearTimeout(copyTimer.current);
       copyTimer.current = window.setTimeout(() => alive.current && setCopiedId(null), 1400);
     } catch (e) {
-      if (alive.current) setNotice({ tone: "err", text: `Could not copy ${s.id}: ${errText(e)}` });
+      if (alive.current) p.onNotice({ tone: "err", text: `Could not copy ${s.id}: ${errText(e)}` });
     }
   }
 
-  function credential(auth: DirectAuth): ReactNode {
-    if (auth.kind === "agent") return <span>SSH agent on this computer</span>;
-    const sid = auth.secret_id;
-    const kind = kindOf(sid);
-    if (kind === null) {
-      return (
-        <span style={{ ...warnText, color: "var(--err)" }} title="This credential is not in your vault. Pick another one.">
-          <WarningIcon size={14} />
-          {sid} (missing)
-        </span>
-      );
-    }
-    const mismatch = kindMismatch(auth, kind);
-    if (mismatch) {
-      return (
-        <span style={warnText} title={`This sign-in expects ${auth.kind === "key" ? "a key" : "a password"}, so this credential cannot be used. Pick a matching one.`}>
-          <WarningIcon size={14} />
-          {sid} ({mismatch})
-        </span>
-      );
-    }
-    if (auth.kind === "key") {
-      return (
-        <button type="button" onClick={() => p.onShowKey(sid)} title="Show key" style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: 0, border: 0, background: "transparent", color: "var(--link)", cursor: "pointer" }}>
-          <KeyIcon size={14} />
-          {sid}
-        </button>
-      );
-    }
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-        <span style={{ display: "flex", color: "var(--text-2)" }}><LockIcon size={14} /></span>
-        {sid}
-      </span>
-    );
-  }
-
+  const dialog = editing ? { secret: editing } : p.adding ? { secret: null } : null;
+  const closeDialog = () => {
+    setEditing(null);
+    p.onAddEnd();
+  };
   const deleteUsers = toDelete ? usersOf(toDelete.id) : [];
   const deleteIdentities = toDelete ? identitiesOf(toDelete.id) : [];
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflow: "auto", borderTop: "1px solid var(--line)", padding: "20px 28px 24px", display: "flex", flexDirection: "column", gap: 28 }}>
-      <section aria-label="Identities" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h2 style={sectionTitle}>Identities</h2>
-          <span style={{ fontSize: 12, color: "var(--text-2)" }}>{identities.length}</span>
-          <StatusText notice={idNotice} style={{ flex: 1, textAlign: "right" }} />
-          <button type="button" onClick={() => setIdDialog({ identity: null })} style={outlineBtn}>
-            <PlusIcon size={14} />
-            Add identity
+    <>
+      {p.passwords.length === 0 ? (
+        <Empty icon={<LockIcon size={20} />} text="No passwords yet">
+          <button type="button" onClick={p.onAdd} style={primaryBtn}>
+            <PlusIcon size={14} sw={1.75} />
+            New password
           </button>
-        </div>
-        {identities.length === 0 ? (
-          <p style={{ margin: "8px 0", color: "var(--text-2)", lineHeight: 1.5 }}>No identities yet. An identity is a user and credential that several hosts share.</p>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr>
-                <th scope="col" style={th}>Name</th>
-                <th scope="col" style={th}>User</th>
-                <th scope="col" style={th}>Credential</th>
-                <th scope="col" style={th}>Used by</th>
-                <th scope="col" style={{ width: 42, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {identities.map((i) => {
-                const users = hostsOfIdentity(i.id);
-                return (
-                  <tr key={i.id} data-reveal onContextMenu={(e) => idMenu.openAt(e, i.id)}>
-                    <td style={{ ...cell, height: 40 }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 500 }}>
-                        <span style={{ display: "flex", color: "var(--text-2)" }}><ShieldIcon size={14} /></span>
-                        <span style={{ overflowWrap: "anywhere" }}>{i.name}</span>
-                      </span>
-                    </td>
-                    <td style={{ ...cell, fontFamily: MONO, fontSize: 12 }}>{i.username || <span style={{ fontFamily: "inherit", color: "var(--text-3)" }}>host's user</span>}</td>
-                    <td style={cell}>{credential(i.auth)}</td>
-                    <td style={cell}>
-                      {users.length === 0 ? (
-                        <span style={{ color: "var(--text-3)" }}>Not used by any host</span>
-                      ) : (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "6px 0" }}>
-                          {users.map((h) => <HostChip key={h.id} host={h} onEditHost={p.onEditHost} />)}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ ...cell, padding: "0 8px" }}>
-                      <MoreButton menu={idMenu} itemKey={i.id} label={`More actions for ${i.name}`} small hidden />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <section aria-label="Passwords" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h2 style={sectionTitle}>Passwords</h2>
-          <span style={{ fontSize: 12, color: "var(--text-2)" }}>{p.passwords.length}</span>
-          <StatusText notice={notice} style={{ flex: 1, textAlign: "right" }} />
-          <button type="button" onClick={() => setPwDialog({ secret: null })} style={outlineBtn}>
-            <PlusIcon size={14} />
-            Add password
-          </button>
-        </div>
-        {p.passwords.length === 0 ? (
-          <p style={{ margin: "8px 0", color: "var(--text-2)" }}>No passwords yet. Hosts that sign in with a password reference one stored here.</p>
-        ) : (
+        </Empty>
+      ) : (
+        <div style={tablePane}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr>
@@ -1170,7 +1132,7 @@ function IdentitiesTab(p: {
                 const users = usersOf(s.id);
                 const idents = identitiesOf(s.id);
                 return (
-                  <tr key={s.id} data-reveal onContextMenu={(e) => pwMenu.openAt(e, s.id)}>
+                  <tr key={s.id} data-reveal onContextMenu={(e) => menu.openAt(e, s.id)}>
                     <td style={{ ...cell, height: 40 }}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 500 }}>
                         <span style={{ display: "flex", color: "var(--text-2)" }}><LockIcon size={14} /></span>
@@ -1184,10 +1146,10 @@ function IdentitiesTab(p: {
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "6px 0" }}>
                           {users.map((h) => <HostChip key={h.id} host={h} onEditHost={p.onEditHost} />)}
                           {idents.map((i) => (
-                            <span key={i.id} style={chip} title="Identity">
+                            <button key={i.id} type="button" onClick={p.onShowIdentities} title="Show identities" style={{ ...chip, cursor: "pointer" }}>
                               <ShieldIcon size={12} />
                               {i.name}
-                            </span>
+                            </button>
                           ))}
                         </div>
                       )}
@@ -1197,7 +1159,7 @@ function IdentitiesTab(p: {
                         <button type="button" aria-label={`Copy password ${s.id}`} title={copiedId === s.id ? "Copied" : "Copy password to the clipboard"} onClick={() => copyPassword(s)} style={{ ...iconBtn, color: copiedId === s.id ? "var(--ok)" : "var(--text-2)" }}>
                           {copiedId === s.id ? <CheckIcon size={14} /> : <CopyIcon />}
                         </button>
-                        <MoreButton menu={pwMenu} itemKey={s.id} label={`More actions for ${s.id}`} small hidden />
+                        <MoreButton menu={menu} itemKey={s.id} label={`More actions for ${s.id}`} small hidden />
                       </div>
                     </td>
                   </tr>
@@ -1205,78 +1167,30 @@ function IdentitiesTab(p: {
               })}
             </tbody>
           </table>
-        )}
-      </section>
-
+        </div>
+      )}
       <ItemMenu
-        menu={idMenu}
-        label="Identity actions"
-        items={(key) => {
-          const i = identities.find((x) => x.id === key);
-          if (!i) return [];
-          const users = hostsOfIdentity(i.id);
-          return [
-            { label: "Edit…", onSelect: () => setIdDialog({ identity: i }) },
-            null,
-            { label: "Delete", danger: true, disabled: users.length > 0, title: users.length > 0 ? `Used by ${names(users)}. Pick another sign-in method there first.` : undefined, onSelect: () => setIdentityToDelete(i) },
-          ];
-        }}
-      />
-      <ItemMenu
-        menu={pwMenu}
+        menu={menu}
         label="Password actions"
         items={(key, fromButton) => {
           const s = p.passwords.find((x) => x.id === key);
           if (!s) return [];
           return [
             !fromButton && { label: "Copy password", onSelect: () => copyPassword(s) },
-            { label: "Change…", onSelect: () => setPwDialog({ secret: s }) },
+            { label: "Change…", onSelect: () => setEditing(s) },
             null,
             { label: "Delete", danger: true, onSelect: () => setToDelete(s) },
           ];
         }}
       />
-      {idDialog && (
-        <IdentityDialog
-          identity={idDialog.identity}
-          identities={p.identities}
-          keys={p.keys}
-          passwords={p.passwords}
-          allIds={p.allIds}
-          onClose={() => setIdDialog(null)}
-          onDone={async (msg) => {
-            setIdDialog(null);
-            setIdNotice({ tone: "ok", text: msg });
-            await p.onChanged();
-          }}
-        />
-      )}
-      {identityToDelete && (
-        <RichConfirm
-          title="Delete identity"
-          confirmLabel="Delete"
-          busyLabel="Deleting…"
-          onConfirm={async () => {
-            await api.identityRemove(identityToDelete.id);
-            if (alive.current) setIdNotice({ tone: "ok", text: `Deleted ${identityToDelete.name}.` });
-            await p.onChanged();
-          }}
-          onClose={() => setIdentityToDelete(null)}
-          message={
-            <>
-              Delete the identity <strong style={{ color: "var(--text)" }}>{identityToDelete.name}</strong>? Its key or password stays in your vault.
-            </>
-          }
-        />
-      )}
-      {pwDialog && (
+      {dialog && (
         <PasswordDialog
-          secret={pwDialog.secret}
+          secret={dialog.secret}
           taken={p.allIds}
-          onClose={() => setPwDialog(null)}
+          onClose={closeDialog}
           onDone={async (msg) => {
-            setPwDialog(null);
-            setNotice({ tone: "ok", text: msg });
+            closeDialog();
+            p.onNotice({ tone: "ok", text: msg });
             await p.onChanged();
           }}
         />
@@ -1305,7 +1219,172 @@ function IdentitiesTab(p: {
           }
         />
       )}
-    </div>
+    </>
+  );
+}
+
+function IdentitiesTab(
+  p: AddProps & {
+    hosts: Host[];
+    secrets: SecretMeta[];
+    keys: SecretMeta[];
+    passwords: SecretMeta[];
+    identities: Identity[];
+    allIds: string[];
+    onShowKey(id: string): void;
+    onShowPasswords(): void;
+    onEditHost?(h: Host): void;
+    onChanged(): Promise<void>;
+  },
+) {
+  const alive = useAlive();
+  const [editing, setEditing] = useState<Identity | null>(null);
+  const [toDelete, setToDelete] = useState<Identity | null>(null);
+  const menu = useMenu();
+
+  const hosts = useMemo(() => [...p.hosts].sort(byName), [p.hosts]);
+  const identities = useMemo(() => [...p.identities].sort(byName), [p.identities]);
+  const kindOf = (id: string) => p.secrets.find((s) => s.id === id)?.kind ?? null;
+  const hostsOf = (id: string) => hosts.filter((h) => h.auth.kind === "identity" && h.auth.identity_id === id);
+
+  function credential(auth: DirectAuth): ReactNode {
+    if (auth.kind === "agent") return <span>SSH agent on this computer</span>;
+    const sid = auth.secret_id;
+    const kind = kindOf(sid);
+    if (kind === null) {
+      return (
+        <span style={{ ...warnText, color: "var(--err)" }} title="This credential is not in your vault. Pick another one.">
+          <WarningIcon size={14} />
+          {sid} (missing)
+        </span>
+      );
+    }
+    const mismatch = kindMismatch(auth, kind);
+    if (mismatch) {
+      return (
+        <span style={warnText} title={`This sign-in expects ${auth.kind === "key" ? "a key" : "a password"}, so this credential cannot be used. Pick a matching one.`}>
+          <WarningIcon size={14} />
+          {sid} ({mismatch})
+        </span>
+      );
+    }
+    const key = auth.kind === "key";
+    return (
+      <button type="button" onClick={() => (key ? p.onShowKey(sid) : p.onShowPasswords())} title={key ? "Show key" : "Show passwords"} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: 0, border: 0, background: "transparent", color: "var(--link)", cursor: "pointer" }}>
+        {key ? <KeyIcon size={14} /> : <LockIcon size={14} />}
+        {sid}
+      </button>
+    );
+  }
+
+  const dialog = editing ? { identity: editing } : p.adding ? { identity: null } : null;
+  const closeDialog = () => {
+    setEditing(null);
+    p.onAddEnd();
+  };
+
+  return (
+    <>
+      {identities.length === 0 ? (
+        <Empty icon={<ShieldIcon size={20} />} text="No identities yet">
+          <p style={{ margin: "-6px 0 0", maxWidth: 320, fontSize: 12, lineHeight: 1.5 }}>An identity is a user and credential that several hosts share.</p>
+          <button type="button" onClick={p.onAdd} style={primaryBtn}>
+            <PlusIcon size={14} sw={1.75} />
+            New identity
+          </button>
+        </Empty>
+      ) : (
+        <div style={tablePane}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th scope="col" style={th}>Name</th>
+                <th scope="col" style={th}>User</th>
+                <th scope="col" style={th}>Credential</th>
+                <th scope="col" style={th}>Used by</th>
+                <th scope="col" style={{ width: 42, borderBottom: "1px solid var(--line)" }}><span style={srOnly}>Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {identities.map((i) => {
+                const users = hostsOf(i.id);
+                return (
+                  <tr key={i.id} data-reveal onContextMenu={(e) => menu.openAt(e, i.id)}>
+                    <td style={{ ...cell, height: 40 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 500 }}>
+                        <span style={{ display: "flex", color: "var(--text-2)" }}><ShieldIcon size={14} /></span>
+                        <span style={{ overflowWrap: "anywhere" }}>{i.name}</span>
+                      </span>
+                    </td>
+                    <td style={{ ...cell, fontFamily: MONO, fontSize: 12 }}>{i.username || <span style={{ fontFamily: "inherit", color: "var(--text-3)" }}>host's user</span>}</td>
+                    <td style={cell}>{credential(i.auth)}</td>
+                    <td style={cell}>
+                      {users.length === 0 ? (
+                        <span style={{ color: "var(--text-3)" }}>Not used by any host</span>
+                      ) : (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "6px 0" }}>
+                          {users.map((h) => <HostChip key={h.id} host={h} onEditHost={p.onEditHost} />)}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ ...cell, padding: "0 8px" }}>
+                      <MoreButton menu={menu} itemKey={i.id} label={`More actions for ${i.name}`} small hidden />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <ItemMenu
+        menu={menu}
+        label="Identity actions"
+        items={(key) => {
+          const i = identities.find((x) => x.id === key);
+          if (!i) return [];
+          const users = hostsOf(i.id);
+          return [
+            { label: "Edit…", onSelect: () => setEditing(i) },
+            null,
+            { label: "Delete", danger: true, disabled: users.length > 0, title: users.length > 0 ? `Used by ${names(users)}. Pick another sign-in method there first.` : undefined, onSelect: () => setToDelete(i) },
+          ];
+        }}
+      />
+      {dialog && (
+        <IdentityDialog
+          identity={dialog.identity}
+          identities={p.identities}
+          keys={p.keys}
+          passwords={p.passwords}
+          allIds={p.allIds}
+          onClose={closeDialog}
+          onDone={async (msg) => {
+            closeDialog();
+            p.onNotice({ tone: "ok", text: msg });
+            await p.onChanged();
+          }}
+        />
+      )}
+      {toDelete && (
+        <RichConfirm
+          title="Delete identity"
+          confirmLabel="Delete"
+          busyLabel="Deleting…"
+          onConfirm={async () => {
+            await api.identityRemove(toDelete.id);
+            if (alive.current) p.onNotice({ tone: "ok", text: `Deleted ${toDelete.name}.` });
+            await p.onChanged();
+          }}
+          onClose={() => setToDelete(null)}
+          message={
+            <>
+              Delete the identity <strong style={{ color: "var(--text)" }}>{toDelete.name}</strong>? Its key or password stays in your vault.
+            </>
+          }
+        />
+      )}
+    </>
   );
 }
 

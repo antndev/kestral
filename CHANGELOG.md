@@ -3,6 +3,12 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.31 - 2026-11-10
+
+### Changed
+- Keychain has its own Passwords tab next to Keys and Identities, so passwords no longer sit under Identities. Each tab adds new items from the same place at the top right.
+- The main buttons at the top of every screen have one width and line up on the right.
+
 ## 0.2.30 - 2026-11-09
 
 ### Fixed

@@ -56,6 +56,10 @@ code,
 button[style*="var(--btn)"]:hover:not(:disabled):not([aria-disabled="true"]) {
   --btn: var(--btn-hover);
 }
+[data-screen-head] > button[style*="var(--btn)"] {
+  min-width: 136px;
+  justify-content: center;
+}
 
 input,
 progress,
