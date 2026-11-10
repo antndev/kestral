@@ -218,32 +218,46 @@ impl HostStore {
     /// Merge imported hosts in additively. A host is skipped when its id or its
     /// name (case-insensitive) already exists, so an import never clobbers or
     /// duplicates. Returns (added, skipped).
-    pub fn import(&self, incoming: Vec<Host>) -> Result<(Vec<Uuid>, usize)> {
+    /// Returns the ids of the hosts added, how many were skipped and how many
+    /// port forwards came in. A host that is already here is skipped, but gains
+    /// the forwards it lacks.
+    pub fn import(&self, incoming: Vec<Host>) -> Result<(Vec<Uuid>, usize, usize)> {
         let mut hosts = self.hosts.lock().unwrap();
         let mut next = hosts.clone();
+        let offered: Vec<Uuid> = incoming.iter().map(|h| h.id).collect();
         let mut added = Vec::new();
         let mut skipped = 0;
+        let mut forwards = 0;
         for host in incoming {
-            let clash = next.iter().any(|h| h.id == host.id)
-                || name_taken(&next, &host.name, host.id)
-                || check_address(&host).is_err();
-            if clash {
+            if let Some(cur) = next.iter_mut().find(|h| h.id == host.id) {
+                for f in host.forwards {
+                    if !cur.forwards.iter().any(|c| c.id == f.id || c.same_tunnel(&f)) {
+                        cur.forwards.push(f);
+                        forwards += 1;
+                    }
+                }
                 skipped += 1;
                 continue;
             }
+            if name_taken(&next, &host.name, host.id) || check_address(&host).is_err() {
+                skipped += 1;
+                continue;
+            }
+            forwards += host.forwards.len();
             added.push(host.id);
             next.push(host);
         }
+        let known: Vec<Uuid> = next.iter().map(|h| h.id).filter(|id| offered.contains(id)).collect();
         for h in next.iter_mut().filter(|h| added.contains(&h.id)) {
-            if h.jump_host_id.is_some_and(|j| !added.contains(&j)) {
+            if h.jump_host_id.is_some_and(|j| !known.contains(&j)) {
                 h.jump_host_id = None;
             }
         }
-        if !added.is_empty() {
+        if !added.is_empty() || forwards > 0 {
             self.save(&next)?;
             *hosts = next;
         }
-        Ok((added, skipped))
+        Ok((added, skipped, forwards))
     }
 
     pub fn update(&self, host: Host) -> Result<()> {
@@ -525,7 +539,7 @@ mod tests {
         let clash = host("EXISTING", None);
         let d = host("d", Some(clash.id));
 
-        let (added, skipped) = store
+        let (added, skipped, _) = store
             .import(vec![a.clone(), b.clone(), c.clone(), clash.clone(), d.clone()])
             .unwrap();
         assert_eq!(added, vec![a.id, b.id, c.id, d.id]);
@@ -534,6 +548,42 @@ mod tests {
         assert_eq!(store.get(c.id).unwrap().jump_host_id, None);
         assert_eq!(store.get(d.id).unwrap().jump_host_id, None);
         assert!(store.get(clash.id).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_gives_a_known_host_only_the_forwards_it_lacks() {
+        let (dir, _vault, store) = open_store("import-forwards");
+        let fwd = |port: u16| crate::model::PortForward {
+            id: Uuid::new_v4(),
+            name: String::new(),
+            local_host: "127.0.0.1".into(),
+            local_port: port,
+            remote_host: "localhost".into(),
+            remote_port: 80,
+            autostart: true,
+            kind: Default::default(),
+            start_on_connect: false,
+            ai_edited: false,
+        };
+        let mut mine = host("mine", None);
+        mine.forwards = vec![fwd(8080)];
+        let mine = store.add_host(mine).unwrap();
+
+        let mut newer = mine.clone();
+        newer.name = "renamed elsewhere".into();
+        newer.forwards.push(fwd(8080));
+        newer.forwards.push(fwd(9090));
+        let via = host("via", Some(mine.id));
+
+        let (added, skipped, forwards) = store.import(vec![newer, via.clone()]).unwrap();
+        assert_eq!((added, skipped, forwards), (vec![via.id], 1, 1));
+        let stored = store.get(mine.id).unwrap();
+        assert_eq!(stored.name, "mine");
+        assert_eq!(stored.forwards.iter().map(|f| f.local_port).collect::<Vec<_>>(), vec![8080, 9090]);
+        assert!(stored.forwards[1].autostart);
+        assert_eq!(store.get(via.id).unwrap().jump_host_id, Some(mine.id));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

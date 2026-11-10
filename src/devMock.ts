@@ -379,8 +379,19 @@ export function installDevMock() {
       case "vault_create": master = p.master; vaultExists = true; unlocked = true; return null;
       case "vault_lock": unlocked = false; shells.clear(); return null;
       case "vault_change_master": if (p.current !== master) throw "Current password is wrong"; master = p.new; return null;
+      case "vault_reset":
+        await sleep(600);
+        unlocked = false; vaultExists = false; helloOn = false; aiActive = false; identities = []; folders = [];
+        hosts.length = 0; secrets.length = 0; snippets.length = 0; knownHosts = []; shells.clear();
+        return null;
       case "vault_export": await sleep(300); return null;
-      case "vault_import": await sleep(300); return { hosts_added: 2, hosts_skipped: 1, secrets_added: 1, secrets_skipped: 0, snippets_added: 3, snippets_skipped: 0, identities_added: 0, identities_skipped: 0 };
+      case "vault_import":
+        await sleep(300);
+        return {
+          hosts_added: p.parts.hosts ? 2 : 0, hosts_skipped: p.parts.hosts ? 1 : 0, forwards_added: p.parts.hosts ? 3 : 0, secrets_added: p.parts.hosts ? 1 : 0, secrets_skipped: 0,
+          snippets_added: p.parts.snippets ? 3 : 0, snippets_skipped: 0, identities_added: 0, identities_skipped: 0,
+          settings: p.parts.settings ? { prefs: {} } : null,
+        };
       // settings
       case "settings_get": return settings;
       case "settings_set_minimize_to_tray": settings = { ...settings, minimizeToTray: p.enabled }; return null;

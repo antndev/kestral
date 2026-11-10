@@ -4,7 +4,7 @@ import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
 import * as api from "../../api";
 import type { ImportReport } from "../../api";
-import { usePrefs, THEMES } from "../../lib/prefs";
+import { exportPrefs, usePrefs, THEMES } from "../../lib/prefs";
 import type { BellMode, CursorStyle, RightClickMode, Theme } from "../../lib/prefs";
 import { TERMINAL_THEMES, resolveTerminalTheme } from "../../lib/terminal-themes";
 import { IS_MAC, MOD, MONO, SANS, errText, fontInstalled, readJson, termFontStack, writeJson } from "../mock";
@@ -12,11 +12,11 @@ import { CheckIcon, SearchIcon } from "../icons";
 import { Markdown } from "../Markdown";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
-import { HELLO_AUTO_KEY } from "../LockScreen";
+import { HELLO_AUTO_KEY, RESET_WORD, dangerBtn, useVaultReset } from "../LockScreen";
 import { RELEASES_URL, friendlyUpdateError, installUpdate, knownUpdate, rememberUpdate, updateLock } from "../../lib/updateLock";
 import type { PendingUpdate, UpdatePhase } from "../../lib/updateLock";
 import { SegGroup, segItem } from "../SegGroup";
-import { useAlive } from "../kit";
+import { useAlive, useNotice } from "../kit";
 
 /* ---------- shared bits (also used by WelcomeScreen) ---------- */
 
@@ -141,7 +141,8 @@ const field: CSSProperties = { width: 240, height: 32, padding: "0 8px", border:
 const ctlBox: CSSProperties = { width: 240, display: "flex", alignItems: "center", gap: 10 };
 const sub: CSSProperties = { margin: "2px 0 0", fontSize: 12, color: "var(--text-2)" };
 const oneLine: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-const rowBtn: CSSProperties = { height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
+const ROW_BTN_W = 144;
+const rowBtn: CSSProperties = { width: ROW_BTN_W, height: 32, padding: "0 12px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
 const groupHead: CSSProperties = { margin: "18px 0 8px", fontSize: 12, fontWeight: 500, color: "var(--text-2)" };
 const kbd: CSSProperties = { display: "inline-block", minWidth: 10, padding: "0 5px", border: "1px solid var(--line)", borderRadius: 4, fontFamily: "inherit", fontSize: 11, lineHeight: "18px", color: "var(--text-2)", textAlign: "center" };
 const linkBtn: CSSProperties = { padding: 0, border: 0, background: "transparent", color: "var(--link)", textDecoration: "underline", textUnderlineOffset: 2, fontSize: 12, cursor: "pointer" };
@@ -362,7 +363,7 @@ type UpdateState =
   | { kind: "ready" }
   | { kind: "error"; message: string };
 
-const updateBtn: CSSProperties = { ...btnPrimary, position: "relative", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" };
+const updateBtn: CSSProperties = { ...btnPrimary, width: ROW_BTN_W, padding: "0 12px", position: "relative", overflow: "hidden", display: "inline-flex", alignItems: "center", justifyContent: "center" };
 const updateFill: CSSProperties = { position: "absolute", top: 0, bottom: 0, left: 0, background: "color-mix(in srgb, var(--btn-text) 14%, var(--btn))", transition: "width 200ms" };
 
 function UpdateButton({ phase, onClick }: { phase: UpdatePhase; onClick(): void }) {
@@ -384,17 +385,55 @@ function plural(n: number, w: string, many = `${w}s`) {
 }
 
 function importSummary(r: ImportReport): string {
+  const got = [
+    r.hosts_added && plural(r.hosts_added, "host"),
+    r.forwards_added && plural(r.forwards_added, "port forward"),
+    r.secrets_added && plural(r.secrets_added, "key or password", "keys and passwords"),
+    r.identities_added && plural(r.identities_added, "identity", "identities"),
+    r.snippets_added && plural(r.snippets_added, "snippet"),
+    r.settings && "the settings",
+  ].filter((x): x is string => !!x);
   const skipped = r.hosts_skipped + r.secrets_skipped + r.snippets_skipped + r.identities_skipped;
-  return `Imported ${plural(r.hosts_added, "host")}, ${plural(r.secrets_added, "secret")}, ${plural(r.snippets_added, "snippet")} and ${plural(r.identities_added, "identity", "identities")}.${skipped > 0 ? ` Skipped ${skipped} already present.` : ""}`;
+  const kept = skipped > 0 ? ` ${skipped} already here.` : "";
+  if (!got.length) return skipped > 0 ? "Nothing new, everything in this file is already here." : "Nothing in this file to import.";
+  return `Imported ${got.length > 1 ? `${got.slice(0, -1).join(", ")} and ${got[got.length - 1]}` : got[0]}.${kept}`;
 }
+
+const ALL_PARTS: api.TransferParts = { hosts: true, snippets: true, settings: true };
+const PARTS: { key: keyof api.TransferParts; label: string; hint: string }[] = [
+  { key: "hosts", label: "Hosts and keychain", hint: "Hosts, port forwards, keys, passwords, identities and known hosts" },
+  { key: "snippets", label: "Snippets", hint: "Snippets and their folders" },
+  { key: "settings", label: "Settings", hint: "Appearance, terminal and AI options" },
+];
+const checkRow: CSSProperties = { display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" };
+
+function PartsField({ value, disabled, onChange }: { value: api.TransferParts; disabled: boolean; onChange(v: api.TransferParts): void }) {
+  const id = useId();
+  return (
+    <div role="group" aria-labelledby={id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <span id={id} style={{ fontSize: 12, fontWeight: 500, color: "var(--text-2)" }}>Include</span>
+      {PARTS.map((p) => (
+        <label key={p.key} style={checkRow}>
+          <input type="checkbox" checked={value[p.key]} disabled={disabled} onChange={(e) => onChange({ ...value, [p.key]: e.target.checked })} style={{ marginTop: 2 }} />
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: "block" }}>{p.label}</span>
+            <span style={{ display: "block", fontSize: 12, color: "var(--text-2)" }}>{p.hint}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+const anyPart = (v: api.TransferParts) => v.hosts || v.snippets || v.settings;
 
 function ExportDialog({ onClose, onDone }: { onClose: () => void; onDone: (path: string) => void }) {
   const alive = useAlive();
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
+  const [parts, setParts] = useState(ALL_PARTS);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const can = !!pw && !!pw2 && !busy;
+  const can = !!pw && !!pw2 && anyPart(parts) && !busy;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -415,7 +454,7 @@ function ExportDialog({ onClose, onDone }: { onClose: () => void; onDone: (path:
         if (alive.current) setBusy(false);
         return;
       }
-      await api.vaultExport(path, pw);
+      await api.vaultExport(path, pw, parts, parts.settings ? exportPrefs() : {});
       onDone(path);
     } catch (x) {
       if (alive.current) {
@@ -426,8 +465,9 @@ function ExportDialog({ onClose, onDone }: { onClose: () => void; onDone: (path:
   }
 
   return (
-    <Modal title="Export vault" description="Every host, key, password and snippet, encrypted with this password. Keep the file safe." busy={busy} onClose={onClose}>
+    <Modal title="Export vault" description="One file, encrypted with this password. Keep it safe." busy={busy} onClose={onClose}>
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <PartsField value={parts} disabled={busy} onChange={setParts} />
         <Field label="Export password">
           <input type="password" autoComplete="new-password" value={pw} onChange={(e) => { setPw(e.target.value); setErr(""); }} style={inputStyle} />
         </Field>
@@ -447,9 +487,10 @@ function ExportDialog({ onClose, onDone }: { onClose: () => void; onDone: (path:
 function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (r: ImportReport) => void }) {
   const alive = useAlive();
   const [pw, setPw] = useState("");
+  const [parts, setParts] = useState(ALL_PARTS);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const can = !!pw && !busy;
+  const can = !!pw && anyPart(parts) && !busy;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -463,7 +504,7 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (r: Im
         if (alive.current) setBusy(false);
         return;
       }
-      const report = await api.vaultImport(path, pw);
+      const report = await api.vaultImport(path, pw, parts);
       onDone(report);
     } catch (x) {
       if (alive.current) {
@@ -474,8 +515,9 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (r: Im
   }
 
   return (
-    <Modal title="Import vault" description="Merges an exported file into this vault. Items you already have are skipped." busy={busy} onClose={onClose}>
+    <Modal title="Import vault" description="Merges an exported file into this vault. Items you already have stay as they are, settings are replaced." busy={busy} onClose={onClose}>
       <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <PartsField value={parts} disabled={busy} onChange={setParts} />
         <Field label="Password of the export file">
           <input type="password" autoComplete="off" value={pw} onChange={(e) => { setPw(e.target.value); setErr(""); }} style={inputStyle} />
         </Field>
@@ -483,6 +525,33 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: (r: Im
         <DialogActions
           primary={<button type="submit" disabled={!can} style={withDisabled(btnPrimary, !can)}><Stable text={busy ? "Importing…" : "Choose file and import"} alts={["Choose file and import", "Importing…"]} /></button>}
           cancel={<button type="button" disabled={busy} onClick={onClose} style={withDisabled(btnSecondary, busy)}>Cancel</button>}
+        />
+      </form>
+    </Modal>
+  );
+}
+
+function ResetDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void | Promise<void> }) {
+  const r = useVaultReset(onDone);
+  return (
+    <Modal title="Reset Kestral" description="Deletes every host, port forward, key, password, identity and snippet on this computer, and the logs. Export the vault first if you want to keep anything." busy={r.busy} onClose={onClose}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void r.run();
+        }}
+        style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <label style={{ ...checkRow, alignItems: "center" }}>
+          <input type="checkbox" checked={r.ack} disabled={r.busy} onChange={(e) => r.setAck(e.target.checked)} />
+          I understand that this cannot be undone
+        </label>
+        <Field label={`Type ${RESET_WORD} to confirm`}>
+          <input autoComplete="off" spellCheck={false} value={r.word} disabled={r.busy} onChange={(e) => r.setWord(e.target.value)} style={inputStyle} />
+        </Field>
+        <p role="alert" title={r.err || undefined} style={formErr}>{r.err}</p>
+        <DialogActions
+          primary={<button type="submit" disabled={!r.ready} style={withDisabled({ ...btnPrimary, ...dangerBtn }, !r.ready)}><Stable text={r.busy ? "Resetting…" : "Delete everything"} alts={["Delete everything", "Resetting…"]} /></button>}
+          cancel={<button type="button" disabled={r.busy} onClick={onClose} style={withDisabled(btnSecondary, r.busy)}>Cancel</button>}
         />
       </form>
     </Modal>
@@ -498,8 +567,9 @@ let helloCache: api.HelloStatus | null = null;
 
 /**
  * onVaultImported: refresh hosts, keys and snippets after a vault import.
+ * onVaultReset: the vault is gone, show the first start screen.
  */
-export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }) {
+export function SettingsScreen({ onVaultImported, onVaultReset }: { onVaultImported?(): void; onVaultReset(): void | Promise<void> }) {
   const p = usePrefs();
   useAppTone();
   const alive = useAlive();
@@ -509,7 +579,9 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
   });
   const [query, setQuery] = useState("");
   const [searchFocus, setSearchFocus] = useState(false);
-  const [dialog, setDialog] = useState<null | "password" | "export" | "import">(null);
+  const [dialog, setDialog] = useState<null | "password" | "export" | "import" | "reset">(null);
+  const [done, setDone] = useNotice<{ row: string; tone: "ok" | "err"; text: string }>();
+  const doneOf = (row: string): Note => (done?.row === row ? done : null);
 
   const [tray, setTray] = useState<boolean | null>(null);
   const [trayErr, setTrayErr] = useState("");
@@ -519,7 +591,6 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
   const [revealErr, setRevealErr] = useState("");
   const [hello, setHello] = useState<api.HelloStatus | null>(helloCache);
   const [helloBusy, setHelloBusy] = useState(false);
-  const [helloNote, setHelloNote] = useState<Note>(null);
   const [helloAuto, setHelloAuto] = useState(() => readJson(HELLO_AUTO_KEY, false));
 
   function refreshHello() {
@@ -533,22 +604,18 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
   async function toggleHello() {
     if (!hello || helloBusy) return;
     setHelloBusy(true);
-    setHelloNote(null);
+    setDone(null);
     try {
       if (hello.enabled) await api.helloDisable();
       else await api.helloEnable();
       const st = await refreshHello();
-      setHelloNote({ tone: "ok", text: st.enabled ? `${st.method} is set up.` : `${st.method} is off.` });
+      setDone({ row: "hello", tone: "ok", text: st.enabled ? `${st.method} is set up.` : `${st.method} is off.` });
     } catch (e) {
-      setHelloNote({ tone: "err", text: errText(e) });
+      setDone({ row: "hello", tone: "err", text: errText(e) });
     } finally {
       setHelloBusy(false);
     }
   }
-
-  const [pwOk, setPwOk] = useState(false);
-  const [exportedTo, setExportedTo] = useState("");
-  const [importMsg, setImportMsg] = useState("");
 
   const [version, setVersion] = useState("");
   const [changelog, setChangelog] = useState<string | null>(null);
@@ -897,8 +964,8 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
       id: "master", page: "Vault and security", label: "Master password", hint: "Unlocks the vault and encrypts all local data", keywords: "change password encryption unlock",
       node: (
         <div style={row}>
-          {noteHead("master", "Master password", "Unlocks the vault and encrypts all local data", pwOk ? { tone: "ok", text: "Master password changed." } : null)}
-          <div style={ctlBox}><button type="button" onClick={() => { setPwOk(false); setDialog("password"); }} style={rowBtn}>Change…</button></div>
+          {noteHead("master", "Master password", "Unlocks the vault and encrypts all local data", doneOf("master"))}
+          <div style={ctlBox}><button type="button" onClick={() => setDialog("password")} style={rowBtn}>Change…</button></div>
         </div>
       ),
     },
@@ -908,7 +975,7 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
             id: "hello", page: "Vault and security" as Page, label: helloMethod, hint: "Unlock without typing the master password. Changing the password turns it off", keywords: "windows hello touch id biometric pin quick unlock face fingerprint",
             node: (
               <div style={row}>
-                {noteHead("hello", helloMethod, "Unlock without typing the master password. Changing the password turns it off", helloNote)}
+                {noteHead("hello", helloMethod, "Unlock without typing the master password. Changing the password turns it off", doneOf("hello"))}
                 <div style={ctlBox}>
                   <button type="button" disabled={!hello || helloBusy} onClick={() => void toggleHello()} style={withDisabled(rowBtn, !hello || helloBusy)}>
                     <Stable text={helloBusy ? "Waiting…" : hello?.enabled ? "Turn off" : "Set up"} alts={["Set up", "Turn off", "Waiting…"]} />
@@ -951,11 +1018,11 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
       ),
     },
     {
-      id: "export", page: "Vault and security", group: "Backup", label: "Export vault", hint: "Every host, key, password and snippet in one encrypted file", keywords: "backup transfer move file kvault",
+      id: "export", page: "Vault and security", group: "Backup", label: "Export vault", hint: "Hosts, keychain, snippets and settings in one encrypted file", keywords: "backup transfer move file kvault port forward keys passwords",
       node: (
         <div style={row}>
-          {noteHead("export", "Export vault", "Every host, key, password and snippet in one encrypted file", exportedTo ? { tone: "ok", text: `Exported to ${exportedTo}` } : null)}
-          <div style={ctlBox}><button type="button" onClick={() => { setExportedTo(""); setDialog("export"); }} style={rowBtn}>Export…</button></div>
+          {noteHead("export", "Export vault", "Hosts, keychain, snippets and settings in one encrypted file", doneOf("export"))}
+          <div style={ctlBox}><button type="button" onClick={() => setDialog("export")} style={rowBtn}>Export…</button></div>
         </div>
       ),
     },
@@ -963,8 +1030,17 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
       id: "import", page: "Vault and security", group: "Backup", label: "Import vault", hint: "Merge an exported file into this vault", keywords: "restore transfer move file kvault",
       node: (
         <div style={row}>
-          {noteHead("import", "Import vault", "Merge an exported file into this vault", importMsg ? { tone: "ok", text: importMsg } : null)}
-          <div style={ctlBox}><button type="button" onClick={() => { setImportMsg(""); setDialog("import"); }} style={rowBtn}>Import…</button></div>
+          {noteHead("import", "Import vault", "Merge an exported file into this vault", doneOf("import"))}
+          <div style={ctlBox}><button type="button" onClick={() => setDialog("import")} style={rowBtn}>Import…</button></div>
+        </div>
+      ),
+    },
+    {
+      id: "reset", page: "Vault and security", group: "Reset", label: "Reset Kestral", hint: "Delete the vault with every host, key and snippet, and start over", keywords: "delete erase wipe clear empty forgot remove everything factory",
+      node: (
+        <div style={row}>
+          {head("reset", "Reset Kestral", "Delete the vault with every host, key and snippet, and start over")}
+          <div style={ctlBox}><button type="button" onClick={() => setDialog("reset")} style={{ ...rowBtn, color: "var(--err)" }}>Reset…</button></div>
         </div>
       ),
     },
@@ -1130,23 +1206,27 @@ export function SettingsScreen({ onVaultImported }: { onVaultImported?(): void }
           onClose={() => setDialog(null)}
           onChanged={() => {
             setDialog(null);
-            setPwOk(true);
-            setHelloNote(null);
+            setDone({ row: "master", tone: "ok", text: "Master password changed." });
             refreshHello().catch(() => {});
           }}
         />
       )}
-      {dialog === "export" && <ExportDialog onClose={() => setDialog(null)} onDone={(path) => { setDialog(null); setExportedTo(path); }} />}
+      {dialog === "export" && <ExportDialog onClose={() => setDialog(null)} onDone={(path) => { setDialog(null); setDone({ row: "export", tone: "ok", text: `Exported to ${path}` }); }} />}
       {dialog === "import" && (
         <ImportDialog
           onClose={() => setDialog(null)}
           onDone={(r) => {
             setDialog(null);
-            setImportMsg(importSummary(r));
+            setDone({ row: "import", tone: "ok", text: importSummary(r) });
+            if (r.settings) {
+              p.importPrefs(r.settings.prefs);
+              loadTray();
+            }
             onVaultImported?.();
           }}
         />
       )}
+      {dialog === "reset" && <ResetDialog onClose={() => setDialog(null)} onDone={onVaultReset} />}
     </main>
   );
 }

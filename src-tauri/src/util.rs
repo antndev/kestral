@@ -203,8 +203,8 @@ ai_caps.json          What the AI may do, only when you changed the defaults.
 protected_paths.json  Paths the AI must never touch.
 app_settings.json     Tray and first start preferences.
 
-To move Kestral to another computer, use Settings, Sync, Export vault
-instead of copying this folder.
+To move Kestral to another computer, use Settings, Vault and security,
+Export instead of copying this folder.
 ";
 
 /// Keeps the data directory tidy on start: drops the obsolete, empty AI transfer

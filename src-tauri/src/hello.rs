@@ -14,6 +14,7 @@ use crate::util::blocking;
 
 const AAD: &[u8] = b"kestral-hello-v1";
 
+#[derive(Clone)]
 pub struct Hello {
     path: PathBuf,
 }
@@ -23,8 +24,12 @@ impl Hello {
         Self { path }
     }
 
+    // The Windows key has one name per user, shared by every copy of Kestral, so
+    // it only goes when this data folder was the one using it.
     pub fn forget(&self) {
-        let _ = std::fs::remove_file(&self.path);
+        if std::fs::remove_file(&self.path).is_err() {
+            return;
+        }
         #[cfg(windows)]
         win::delete();
     }
@@ -197,7 +202,7 @@ pub async fn hello_enable(state: State<'_, AppState>, hello: State<'_, Hello>) -
 
 #[tauri::command]
 pub async fn hello_disable(hello: State<'_, Hello>) -> Result<()> {
-    let hello = Hello::new(hello.path.clone());
+    let hello = hello.inner().clone();
     blocking(move || {
         hello.forget();
         Ok(())

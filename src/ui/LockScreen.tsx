@@ -9,7 +9,8 @@ export const HELLO_AUTO_KEY = "kestral-hello-auto";
 
 const SHAKE_FRAMES = "{ 20%, 80% { transform: translateX(-2px) } 40% { transform: translateX(4px) } 60% { transform: translateX(-4px) } }";
 const LOCK_CSS = `@keyframes kst-shake-a ${SHAKE_FRAMES} @keyframes kst-shake-b ${SHAKE_FRAMES}
-.kst-lock-input::placeholder { color: var(--text-3) }`;
+.kst-lock-input::placeholder { color: var(--text-3) }
+.kst-lock-link { transition: color 120ms } .kst-lock-link:hover { color: var(--text) !important }`;
 const shakeAnim = (n: number) => (n ? `${n % 2 ? "kst-shake-a" : "kst-shake-b"} 300ms ease-in-out` : undefined);
 
 const title: CSSProperties = { margin: "0 0 10px", textAlign: "center", fontSize: 20, fontWeight: 600, letterSpacing: "-0.015em" };
@@ -17,6 +18,9 @@ const fieldBox: CSSProperties = { display: "flex", alignItems: "center", height:
 const wide: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 8, height: 40, width: "100%", borderRadius: 8, fontSize: 14, boxSizing: "border-box" };
 const primary: CSSProperties = { ...wide, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
 const secondary: CSSProperties = { ...wide, border: "1px solid var(--line)", background: "transparent", color: "var(--text)" };
+export const dangerBtn: CSSProperties = { border: "1px solid color-mix(in srgb, var(--err) 45%, transparent)", background: "color-mix(in srgb, var(--err) 14%, transparent)", color: "var(--err)", fontWeight: 500 };
+const footLink: CSSProperties = { position: "absolute", left: "50%", bottom: 20, transform: "translateX(-50%)", padding: "4px 8px", border: 0, borderRadius: 6, background: "transparent", color: "var(--text-3)", fontSize: 12, whiteSpace: "nowrap" };
+const FORGOT = "Forgot password?";
 const card: CSSProperties = { display: "flex", flexDirection: "column", gap: 16, padding: 24, border: "1px solid var(--line)", borderRadius: 12, background: "var(--bg)", boxShadow: "0 16px 48px rgba(0,0,0,.28)" };
 const smallBtn: CSSProperties = { display: "grid", placeItems: "center", height: 32, padding: "0 16px", border: "1px solid var(--btn-line)", borderRadius: 6, background: "var(--btn)", color: "var(--btn-text)", fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", boxSizing: "border-box" };
 
@@ -62,7 +66,7 @@ function Brand() {
   );
 }
 
-function LockFrame({ className, children }: { className: string; children: ReactNode }) {
+function LockFrame({ className, footer, children }: { className: string; footer?: ReactNode; children: ReactNode }) {
   return (
     <div
       className={className}
@@ -75,8 +79,81 @@ function LockFrame({ className, children }: { className: string; children: React
       </header>
       <main style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", justifyContent: "center", alignItems: "center", padding: "0 24px 64px", overflow: "auto" }}>
         <div style={{ width: "100%", maxWidth: 340 }}>{children}</div>
+        {footer}
       </main>
     </div>
+  );
+}
+
+export const RESET_WORD = "reset";
+
+/** The "delete everything" confirmation, shared by the lock screen and Settings. */
+export function useVaultReset(onDone: () => void | Promise<void>) {
+  const [ack, setAck] = useState(false);
+  const [word, setWord] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const ready = ack && word.trim().toLowerCase() === RESET_WORD && !busy;
+  async function run() {
+    if (!ready) return;
+    setBusy(true);
+    setErr("");
+    try {
+      localStorage.removeItem(HELLO_AUTO_KEY);
+      await api.vaultReset();
+      await onDone();
+    } catch (e) {
+      setErr(errText(e));
+      setBusy(false);
+    }
+  }
+  return { ack, setAck, word, setWord, busy, err, ready, run };
+}
+
+function ResetView({ onBack, onDone }: { onBack(): void; onDone(): void | Promise<void> }) {
+  const r = useVaultReset(onDone);
+  const [focus, setFocus] = useState(false);
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void r.run();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !r.busy) onBack();
+      }}
+      style={{ position: "relative", display: "flex", flexDirection: "column", gap: 10 }}>
+      <h1 style={{ ...title, margin: 0 }}>Reset Kestral</h1>
+      <p style={{ margin: "0 0 6px", textAlign: "center", color: "var(--text-2)" }}>A forgotten password cannot be recovered. Resetting deletes every host, key, password, snippet and port forward on this computer.</p>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, height: 24, cursor: "pointer" }}>
+        <input autoFocus type="checkbox" checked={r.ack} disabled={r.busy} onChange={(e) => r.setAck(e.target.checked)} />
+        I understand that this cannot be undone
+      </label>
+      <div style={{ ...fieldBox, borderColor: focus ? "color-mix(in srgb, var(--text) 26%, var(--line))" : "var(--line)" }}>
+        <input
+          className="kst-lock-input"
+          autoComplete="off"
+          spellCheck={false}
+          aria-label={`Type ${RESET_WORD} to confirm`}
+          placeholder={`Type ${RESET_WORD} to confirm`}
+          value={r.word}
+          disabled={r.busy}
+          onChange={(e) => r.setWord(e.target.value)}
+          onFocus={() => setFocus(true)}
+          onBlur={() => setFocus(false)}
+          style={{ flex: 1, minWidth: 0, height: "100%", padding: "0 13px", border: 0, background: "transparent", color: "var(--text)", fontSize: 14, outline: "none" }}
+        />
+      </div>
+      <button type="submit" disabled={!r.ready} style={{ ...wide, ...dangerBtn, opacity: r.ready || r.busy ? 1 : 0.5, cursor: r.ready ? "pointer" : "default" }}>
+        {r.busy ? <Spinner /> : "Delete everything"}
+      </button>
+      <button type="button" disabled={r.busy} onClick={onBack} style={{ ...secondary, cursor: r.busy ? "default" : "pointer" }}>
+        Back
+      </button>
+      <div role={r.err ? "alert" : undefined} title={r.err || undefined} style={{ position: "absolute", left: 0, right: 0, top: "100%", marginTop: 14, fontSize: 12, lineHeight: "18px", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: "var(--err)" }}>
+        {r.err}
+      </div>
+    </form>
   );
 }
 
@@ -93,6 +170,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
   const [hello, setHello] = useState<api.HelloStatus | null>(null);
   const [helloBusy, setHelloBusy] = useState(false);
   const [helloErr, setHelloErr] = useState("");
+  const [resetting, setResetting] = useState(false);
   const pwRef = useRef<HTMLInputElement | null>(null);
   const prompted = useRef(false);
 
@@ -224,8 +302,30 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
     </div>
   );
 
+  if (exists && resetting) {
+    return (
+      <LockFrame className={className}>
+        <ResetView
+          onBack={() => setResetting(false)}
+          onDone={async () => {
+            await onUnlocked();
+            setPw("");
+            setErr("");
+            setResetting(false);
+          }}
+        />
+      </LockFrame>
+    );
+  }
+
+  const forgot = exists && (
+    <button type="button" className="kst-lock-link" disabled={busy || helloBusy} onClick={() => setResetting(true)} style={{ ...footLink, cursor: "pointer" }}>
+      {FORGOT}
+    </button>
+  );
+
   return (
-    <LockFrame className={className}>
+    <LockFrame className={className} footer={forgot}>
       <form onSubmit={submit} style={{ position: "relative", display: "flex", flexDirection: "column", gap: 10 }}>
         <h1 style={title}>{exists ? "Welcome back!" : "Welcome!"}</h1>
         {exists ? (
@@ -258,7 +358,7 @@ export function LockScreen({ className, exists, error, autoHello, onUnlocked }: 
 /** Shown while the vault locks: the unlock screen fades in before the real one takes over at the same spot. */
 export function LockingScreen({ className }: { className: string }) {
   return (
-    <LockFrame className={className}>
+    <LockFrame className={className} footer={<span aria-hidden="true" style={footLink}>{FORGOT}</span>}>
       <div role="status" aria-label="Locking" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <h1 style={title}>Welcome back!</h1>
         <div style={{ ...fieldBox, padding: "0 13px", fontSize: 14, color: "var(--text-3)" }}>Password</div>

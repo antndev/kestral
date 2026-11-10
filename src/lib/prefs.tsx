@@ -32,6 +32,18 @@ export type RightClickMode = "paste" | "menu";
 
 export const THEMES: Theme[] = ["system", "light", "dark"];
 
+const PREF_KEYS = [THEME_KEY, ANIM_KEY, TERM_KEY, AI_MIN_KEY, SFTP_HIDDEN_KEY, SFTP_AUTOREFRESH_KEY, TERM_COLORS_KEY, TERM_FONT_KEY, TERM_FAMILY_KEY, TERM_LH_KEY, TERM_SCROLLBACK_KEY, TERM_CURSOR_KEY, TERM_BLINK_KEY, TERM_COPYSEL_KEY, TERM_BELL_KEY, TERM_RCLICK_KEY];
+
+/** The saved preferences as they go into a vault export. */
+export function exportPrefs(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of PREF_KEYS) {
+    const v = localStorage.getItem(key);
+    if (v !== null) out[key] = v;
+  }
+  return out;
+}
+
 function readNum(key: string, fallback: number, min: number, max: number): number {
   const raw = localStorage.getItem(key);
   if (raw === null || raw.trim() === "") return fallback;
@@ -73,7 +85,35 @@ function readEnum<T extends string>(key: string, allowed: readonly T[], fallback
   return v && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
 }
 
+const read = {
+  theme: () => readEnum(THEME_KEY, THEMES, "system"),
+  termTheme: (): TermThemeId => {
+    const v = localStorage.getItem(TERM_KEY);
+    return v && TERMINAL_THEMES[v] ? v : DEFAULT_TERM_THEME;
+  },
+  aiMinutes: () => {
+    const raw = localStorage.getItem(AI_MIN_KEY);
+    // 0 is a valid choice (no time limit); a missing key defaults to 30.
+    const v = raw == null ? 30 : Number(raw);
+    return Number.isFinite(v) && v >= 0 ? v : 30;
+  },
+  sftpShowHidden: () => localStorage.getItem(SFTP_HIDDEN_KEY) !== "false",
+  sftpAutoRefresh: () => localStorage.getItem(SFTP_AUTOREFRESH_KEY) !== "false",
+  termColors: () => localStorage.getItem(TERM_COLORS_KEY) !== "false",
+  termFontSize: () => readNum(TERM_FONT_KEY, 13, 8, 32),
+  termFontFamily: () => localStorage.getItem(TERM_FAMILY_KEY) ?? "",
+  termLineHeight: () => readNum(TERM_LH_KEY, 1.2, 1, 2.5),
+  termScrollback: () => readNum(TERM_SCROLLBACK_KEY, 5000, 0, 200000),
+  termCursor: (): CursorStyle => readEnum(TERM_CURSOR_KEY, ["block", "bar", "underline"] as const, "block"),
+  termCursorBlink: () => localStorage.getItem(TERM_BLINK_KEY) !== "false",
+  termCopyOnSelect: () => localStorage.getItem(TERM_COPYSEL_KEY) === "true",
+  termBell: (): BellMode => readEnum(TERM_BELL_KEY, ["flash", "sound", "off"] as const, "flash"),
+  termRightClick: (): RightClickMode => readEnum(TERM_RCLICK_KEY, ["paste", "menu"] as const, "paste"),
+};
+
 type Prefs = {
+  /** Takes the preferences of a vault import. Values that do not fit fall back to the default. */
+  importPrefs: (saved: Record<string, string>) => void;
   theme: Theme;
   setTheme: (t: Theme) => void;
   termTheme: TermThemeId;
@@ -117,36 +157,42 @@ export function usePrefs(): Prefs {
 }
 
 export function PrefsProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() => readEnum(THEME_KEY, THEMES, "system"));
-  const [animScale, setAnimScaleState] = useState<number>(() => readAnimScale());
-  const [termTheme, setTermThemeState] = useState<TermThemeId>(() => {
-    const v = localStorage.getItem(TERM_KEY);
-    return v && TERMINAL_THEMES[v] ? v : DEFAULT_TERM_THEME;
-  });
-  const [aiMinutes, setAiMinutesState] = useState<number>(() => {
-    const raw = localStorage.getItem(AI_MIN_KEY);
-    // 0 is a valid choice (no time limit); a missing key defaults to 30.
-    const v = raw == null ? 30 : Number(raw);
-    return Number.isFinite(v) && v >= 0 ? v : 30;
-  });
-  const [sftpShowHidden, setSftpShowHiddenState] = useState<boolean>(
-    () => localStorage.getItem(SFTP_HIDDEN_KEY) !== "false",
-  );
-  const [sftpAutoRefresh, setSftpAutoRefreshState] = useState<boolean>(
-    () => localStorage.getItem(SFTP_AUTOREFRESH_KEY) !== "false",
-  );
-  const [termColors, setTermColorsState] = useState<boolean>(
-    () => localStorage.getItem(TERM_COLORS_KEY) !== "false",
-  );
-  const [termFontSize, setTermFontSizeState] = useState<number>(() => readNum(TERM_FONT_KEY, 13, 8, 32));
-  const [termFontFamily, setTermFontFamilyState] = useState<string>(() => localStorage.getItem(TERM_FAMILY_KEY) ?? "");
-  const [termLineHeight, setTermLineHeightState] = useState<number>(() => readNum(TERM_LH_KEY, 1.2, 1, 2.5));
-  const [termScrollback, setTermScrollbackState] = useState<number>(() => readNum(TERM_SCROLLBACK_KEY, 5000, 0, 200000));
-  const [termCursor, setTermCursorState] = useState<CursorStyle>(() => readEnum(TERM_CURSOR_KEY, ["block", "bar", "underline"] as const, "block"));
-  const [termCursorBlink, setTermCursorBlinkState] = useState<boolean>(() => localStorage.getItem(TERM_BLINK_KEY) !== "false");
-  const [termCopyOnSelect, setTermCopyOnSelectState] = useState<boolean>(() => localStorage.getItem(TERM_COPYSEL_KEY) === "true");
-  const [termBell, setTermBellState] = useState<BellMode>(() => readEnum(TERM_BELL_KEY, ["flash", "sound", "off"] as const, "flash"));
-  const [termRightClick, setTermRightClickState] = useState<RightClickMode>(() => readEnum(TERM_RCLICK_KEY, ["paste", "menu"] as const, "paste"));
+  const [theme, setThemeState] = useState<Theme>(read.theme);
+  const [animScale, setAnimScaleState] = useState<number>(readAnimScale);
+  const [termTheme, setTermThemeState] = useState<TermThemeId>(read.termTheme);
+  const [aiMinutes, setAiMinutesState] = useState<number>(read.aiMinutes);
+  const [sftpShowHidden, setSftpShowHiddenState] = useState<boolean>(read.sftpShowHidden);
+  const [sftpAutoRefresh, setSftpAutoRefreshState] = useState<boolean>(read.sftpAutoRefresh);
+  const [termColors, setTermColorsState] = useState<boolean>(read.termColors);
+  const [termFontSize, setTermFontSizeState] = useState<number>(read.termFontSize);
+  const [termFontFamily, setTermFontFamilyState] = useState<string>(read.termFontFamily);
+  const [termLineHeight, setTermLineHeightState] = useState<number>(read.termLineHeight);
+  const [termScrollback, setTermScrollbackState] = useState<number>(read.termScrollback);
+  const [termCursor, setTermCursorState] = useState<CursorStyle>(read.termCursor);
+  const [termCursorBlink, setTermCursorBlinkState] = useState<boolean>(read.termCursorBlink);
+  const [termCopyOnSelect, setTermCopyOnSelectState] = useState<boolean>(read.termCopyOnSelect);
+  const [termBell, setTermBellState] = useState<BellMode>(read.termBell);
+  const [termRightClick, setTermRightClickState] = useState<RightClickMode>(read.termRightClick);
+
+  const importPrefs = (saved: Record<string, string>) => {
+    for (const key of PREF_KEYS) if (typeof saved[key] === "string") localStorage.setItem(key, saved[key]);
+    setThemeState(read.theme());
+    setAnimScaleState(readAnimScale());
+    setTermThemeState(read.termTheme());
+    setAiMinutesState(read.aiMinutes());
+    setSftpShowHiddenState(read.sftpShowHidden());
+    setSftpAutoRefreshState(read.sftpAutoRefresh());
+    setTermColorsState(read.termColors());
+    setTermFontSizeState(read.termFontSize());
+    setTermFontFamilyState(read.termFontFamily());
+    setTermLineHeightState(read.termLineHeight());
+    setTermScrollbackState(read.termScrollback());
+    setTermCursorState(read.termCursor());
+    setTermCursorBlinkState(read.termCursorBlink());
+    setTermCopyOnSelectState(read.termCopyOnSelect());
+    setTermBellState(read.termBell());
+    setTermRightClickState(read.termRightClick());
+  };
 
   useEffect(() => {
     void applyTheme(theme);
@@ -206,6 +252,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   return (
     <PrefsCtx.Provider
       value={{
+        importPrefs,
         theme,
         setTheme,
         animScale,

@@ -8,7 +8,8 @@ import { CheckIcon, CopyIcon, DownloadIcon, KeyIcon, LockIcon, PlusIcon, Refresh
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { Stable } from "../Stable";
 import { SegGroup, segItem } from "../SegGroup";
-import { ScreenHeader, useAlive } from "../kit";
+import { ScreenHeader, useAlive, useNotice } from "../kit";
+import type { Notice } from "../kit";
 import { ItemMenu, MoreButton, useMenu } from "../Menu";
 import type { MenuState } from "../Menu";
 
@@ -45,7 +46,6 @@ type PubInfo = { pub: string; fp: string; algo: string; comment: string; encrypt
  * `transient` marks a vault read failure (worth retrying) as opposed to a key that cannot be parsed.
  */
 type KeyInfo = ({ ok: true; gen: number } & PubInfo) | { ok: false; error: string; transient: boolean; gen: number };
-type Notice = { tone: "ok" | "err"; text: string } | null;
 
 type Family = "ed25519" | "ecdsa" | "rsa";
 const FAMILIES: { id: Family; label: string; sizes: { id: KeyAlgorithm; label: string }[] }[] = [
@@ -81,18 +81,6 @@ function useFlash(ms = 1400): [boolean, () => void] {
     timer.current = window.setTimeout(() => setOn(false), ms);
   }, [ms]);
   return [on, trigger];
-}
-
-function useNotice(): [Notice, (n: Notice) => void] {
-  const [notice, set] = useState<Notice>(null);
-  const timer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-  const show = useCallback((n: Notice) => {
-    window.clearTimeout(timer.current);
-    set(n);
-    if (n) timer.current = window.setTimeout(() => set(null), n.tone === "err" ? 8000 : 4000);
-  }, []);
-  return [notice, show];
 }
 
 function StatusText({ notice, style }: { notice: Notice; style?: CSSProperties }) {

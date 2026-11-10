@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, Ref } from "react";
 import { SearchIcon } from "./icons";
 import { MONO } from "./mock";
@@ -26,6 +26,21 @@ export function useAlive() {
     };
   }, []);
   return alive;
+}
+
+export type Notice = { tone: "ok" | "err"; text: string } | null;
+
+/** A notice that clears itself: after 4 seconds, an error after 8. */
+export function useNotice<N extends { tone: "ok" | "err" } = NonNullable<Notice>>(): [N | null, (n: N | null) => void] {
+  const [notice, set] = useState<N | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const show = useCallback((n: N | null) => {
+    window.clearTimeout(timer.current);
+    set(n);
+    if (n) timer.current = window.setTimeout(() => set(null), n.tone === "err" ? 8000 : 4000);
+  }, []);
+  return [notice, show];
 }
 
 let leaveFn: (() => Promise<boolean>) | null = null;

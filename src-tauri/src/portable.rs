@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -22,11 +22,33 @@ struct ExportedSecret {
     value: String,
 }
 
+#[derive(Clone, Copy, Deserialize)]
+pub struct Parts {
+    pub hosts: bool,
+    pub snippets: bool,
+    pub settings: bool,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+pub struct Settings {
+    #[serde(default)]
+    pub prefs: BTreeMap<String, String>,
+    #[serde(default)]
+    pub minimize_to_tray: bool,
+    #[serde(default)]
+    pub ai_caps: Option<crate::policy::AiCaps>,
+    #[serde(default)]
+    pub protected_paths: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct Bundle {
     version: u8,
+    #[serde(default)]
     secrets: Vec<ExportedSecret>,
+    #[serde(default)]
     hosts: Vec<Host>,
+    #[serde(default)]
     snippets: Vec<Snippet>,
     #[serde(default)]
     identities: Vec<Identity>,
@@ -34,66 +56,85 @@ struct Bundle {
     collections: crate::collections::Collections,
     #[serde(default)]
     known_hosts: String,
+    #[serde(default)]
+    settings: Option<Settings>,
 }
 
-#[derive(Serialize)]
+#[derive(Default, Serialize)]
 pub struct ImportReport {
     pub hosts_added: usize,
     pub hosts_skipped: usize,
+    pub forwards_added: usize,
     pub secrets_added: usize,
     pub secrets_skipped: usize,
     pub snippets_added: usize,
     pub snippets_skipped: usize,
     pub identities_added: usize,
     pub identities_skipped: usize,
+    pub settings: Option<Settings>,
 }
 
 fn b64() -> base64::engine::general_purpose::GeneralPurpose {
     base64::engine::general_purpose::STANDARD
 }
 
-/// Gather every host, snippet and secret from the unlocked vault into one bundle
-/// and encrypt it under a standalone password (independent of the vault's own).
-/// The result is a portable file the user can carry to another machine.
-pub fn export(services: &Services, password: &str) -> Result<Vec<u8>> {
+/// Gather the chosen parts of the unlocked vault into one bundle and encrypt it
+/// under a standalone password (independent of the vault's own). `local` brings
+/// the settings that live outside the vault; the AI options are added here.
+pub fn export(services: &Services, password: &str, parts: Parts, mut local: Settings) -> Result<Vec<u8>> {
     if !services.vault.is_unlocked() {
         return Err(AppError::VaultLocked);
     }
 
-    let mut secrets = Vec::new();
-    for meta in services.vault.list_secrets()? {
-        let value = services.vault.get_secret(&meta.id)?;
-        secrets.push(ExportedSecret {
-            id: meta.id,
-            kind: meta.kind,
-            value: b64().encode(value.as_slice()),
-        });
-    }
-
-    let bundle = Bundle {
+    let mut bundle = Bundle {
         version: BUNDLE_VERSION,
-        secrets,
-        hosts: services.hosts.list(),
-        snippets: services.snippets.list(),
-        identities: services.identities.list()?,
-        collections: services.collections.read()?,
-        known_hosts: String::from_utf8_lossy(&crate::known_hosts::export_content()?).into_owned(),
+        secrets: Vec::new(),
+        hosts: Vec::new(),
+        snippets: Vec::new(),
+        identities: Vec::new(),
+        collections: Default::default(),
+        known_hosts: String::new(),
+        settings: None,
     };
+    if parts.hosts {
+        for meta in services.vault.list_secrets()? {
+            let value = services.vault.get_secret(&meta.id)?;
+            bundle.secrets.push(ExportedSecret {
+                id: meta.id,
+                kind: meta.kind,
+                value: b64().encode(value.as_slice()),
+            });
+        }
+        bundle.hosts = services.hosts.list();
+        bundle.identities = services.identities.list()?;
+        bundle.known_hosts = String::from_utf8_lossy(&crate::known_hosts::export_content()?).into_owned();
+    }
+    if parts.snippets {
+        bundle.snippets = services.snippets.list();
+        bundle.collections = services.collections.read()?;
+    }
+    if parts.settings {
+        local.ai_caps = Some(services.policy.caps());
+        local.protected_paths = services.policy.protected_paths();
+        bundle.settings = Some(local);
+    }
 
     let plaintext = Zeroizing::new(serde_json::to_vec(&bundle)?);
     crate::vault::seal_with_password(&plaintext, password)
 }
 
-/// Decrypt a bundle and merge it into the unlocked target vault. Additive and
-/// non-destructive: existing entries are never overwritten. Everything ends up
-/// sealed under the target vault's own password.
+/// Decrypt a bundle and merge the chosen parts into the unlocked target vault.
+/// Additive: existing entries are never overwritten, a host that is already
+/// here only gains the port forwards it lacks. Hosts keep everything they were
+/// exported with (AI rules, agent forwarding, forwards and their autostart).
 ///
 /// Secret ids are user-chosen strings, so the same id can mean different things on
 /// two machines. When an incoming secret's id already exists in the target with a
 /// *different* value, the incoming one is given a fresh id and the hosts that
 /// referenced it are rewritten to match, so an imported host can never silently
-/// bind to the target's unrelated credential.
-pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<ImportReport> {
+/// bind to the target's unrelated credential. Agent keys follow the same rule: a
+/// host only keeps the ones that came in the same file.
+pub fn import(services: &Services, file_bytes: &[u8], password: &str, parts: Parts) -> Result<ImportReport> {
     if !services.vault.is_unlocked() {
         return Err(AppError::VaultLocked);
     }
@@ -110,6 +151,41 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
         )));
     }
 
+    let mut report = ImportReport::default();
+    if parts.hosts {
+        import_hosts(services, &bundle, &mut report)?;
+    }
+    if parts.snippets {
+        let known: HashSet<uuid::Uuid> = services.hosts.list().iter().map(|h| h.id).collect();
+        let snippets: Vec<Snippet> = bundle
+            .snippets
+            .iter()
+            .cloned()
+            .map(|mut s| {
+                s.target_host_ids.retain(|id| known.contains(id));
+                s
+            })
+            .collect();
+        (report.snippets_added, report.snippets_skipped) = services.snippets.import(snippets)?;
+        services.collections.import(bundle.collections.clone())?;
+    }
+    if let Some(settings) = bundle.settings.filter(|_| parts.settings) {
+        if let Some(caps) = settings.ai_caps {
+            services.policy.set_caps(caps)?;
+        }
+        let mut paths = services.policy.protected_paths();
+        for p in &settings.protected_paths {
+            if !paths.contains(p) {
+                paths.push(p.clone());
+            }
+        }
+        services.policy.set_protected_paths(paths)?;
+        report.settings = Some(settings);
+    }
+    Ok(report)
+}
+
+fn import_hosts(services: &Services, bundle: &Bundle, report: &mut ImportReport) -> Result<()> {
     // Snapshot the target's secrets so a genuine duplicate can be told apart from
     // an id that merely collides with a different value.
     let mut existing: HashMap<String, Zeroizing<Vec<u8>>> = HashMap::new();
@@ -117,7 +193,8 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
         existing.insert(meta.id.clone(), services.vault.get_secret(&meta.id)?);
     }
     let (to_add, remap, secrets_skipped) = plan_secrets(&bundle.secrets, &existing)?;
-    let secrets_added = to_add.len();
+    report.secrets_added = to_add.len();
+    report.secrets_skipped = secrets_skipped;
 
     let bundled: HashSet<&str> = bundle.secrets.iter().map(|s| s.id.as_str()).collect();
     let own_secrets = |auth: &AuthMethod| match auth {
@@ -165,49 +242,28 @@ pub fn import(services: &Services, file_bytes: &[u8], password: &str) -> Result<
         .cloned()
         .map(|mut h| {
             h.auth = remap_auth(h.auth, &remap, &identity_remap);
-            h.ai_policy = crate::model::AiPolicy::Locked;
-            h.ai_file_policy = crate::model::AiPolicy::Locked;
-            h.forward_agent = false;
-            h.agent_keys.clear();
-            for f in &mut h.forwards {
-                f.autostart = false;
-                f.start_on_connect = false;
-            }
+            h.agent_keys = bundled_keys(h.agent_keys, &bundled, &remap);
             h
         })
         .collect();
 
     services.vault.put_secrets(to_add)?;
-    let (identities_added, identities_skipped) = services.identities.import(identities)?;
-    let (imported, hosts_skipped) = services.hosts.import(hosts)?;
-    let hosts_added = imported.len();
-    let hosts_skipped = hosts_skipped + hosts_dropped;
-    let snippets: Vec<Snippet> = bundle
-        .snippets
-        .iter()
-        .cloned()
-        .map(|mut s| {
-            s.target_host_ids.retain(|id| imported.contains(id));
-            s.ai_edited = true;
-            s
-        })
-        .collect();
-    let (snippets_added, snippets_skipped) = services.snippets.import(snippets)?;
-    services.collections.import(bundle.collections.clone())?;
+    (report.identities_added, report.identities_skipped) = services.identities.import(identities)?;
+    let (added, skipped, forwards) = services.hosts.import(hosts)?;
+    report.hosts_added = added.len();
+    report.hosts_skipped = skipped + hosts_dropped;
+    report.forwards_added = forwards;
     if !bundle.known_hosts.is_empty() {
         crate::known_hosts::import_content(bundle.known_hosts.as_bytes())?;
     }
+    Ok(())
+}
 
-    Ok(ImportReport {
-        hosts_added,
-        hosts_skipped,
-        secrets_added,
-        secrets_skipped,
-        snippets_added,
-        snippets_skipped,
-        identities_added,
-        identities_skipped,
-    })
+fn bundled_keys(keys: Vec<String>, bundled: &HashSet<&str>, remap: &HashMap<String, String>) -> Vec<String> {
+    keys.into_iter()
+        .filter(|k| bundled.contains(k.as_str()))
+        .map(|k| remap.get(&k).cloned().unwrap_or(k))
+        .collect()
 }
 
 enum SecretAction {
@@ -290,6 +346,24 @@ mod tests {
 
     fn used_of(ids: &[&str]) -> HashSet<String> {
         ids.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_host_keeps_only_agent_keys_from_the_same_file() {
+        let bundled: HashSet<&str> = ["a", "b"].into_iter().collect();
+        let remap: HashMap<String, String> = [("b".to_string(), "b-2".to_string())].into_iter().collect();
+        let keys = vec!["a".to_string(), "b".to_string(), "mine".to_string()];
+        assert_eq!(bundled_keys(keys, &bundled, &remap), ["a", "b-2"]);
+    }
+
+    #[test]
+    fn a_file_without_some_parts_still_loads() {
+        let only_settings = br#"{"version":1,"settings":{"prefs":{"kestral-theme":"dark"},"minimize_to_tray":true,"protected_paths":["/etc/shadow"]}}"#;
+        let bundle: Bundle = serde_json::from_slice(only_settings).unwrap();
+        assert!(bundle.hosts.is_empty() && bundle.secrets.is_empty() && bundle.snippets.is_empty());
+        let settings = bundle.settings.unwrap();
+        assert_eq!(settings.prefs["kestral-theme"], "dark");
+        assert!(settings.minimize_to_tray && settings.ai_caps.is_none());
     }
 
     #[test]

@@ -3,6 +3,22 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.32 - 2026-11-10
+
+### Added
+- A way out of a forgotten master password: "Forgot password?" on the lock screen resets Kestral. It asks twice before it deletes the vault with every host, key, password, snippet and port forward. The same reset is in Settings under Vault and security.
+- Export and import let you choose what goes along: hosts with the keychain, snippets, settings.
+- Settings can travel in an export: appearance, terminal and AI options.
+
+### Changed
+- An import brings hosts over the way they were exported, with their port forwards and autostart, agent forwarding and AI rules. Before, these were switched off on import. A host you already have gains the port forwards it lacks.
+- Imported snippets keep their targets when the hosts are there, and no longer ask for a review first.
+- Notes in Settings such as "Exported to" go away after a few seconds.
+- The buttons in Settings have one width.
+
+### Fixed
+- A second copy of Kestral with its own data folder no longer removes the Windows Hello key of the first one.
+
 ## 0.2.31 - 2026-11-10
 
 ### Changed

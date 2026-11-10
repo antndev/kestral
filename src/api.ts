@@ -170,23 +170,32 @@ export const helloEnable = () => invoke<void>("hello_enable");
 export const helloDisable = () => invoke<void>("hello_disable");
 export const helloUnlock = () => invoke<void>("hello_unlock");
 export const vaultLock = () => invoke<void>("vault_lock");
+/** Deletes the vault and everything in it. The app restarts empty. */
+export const vaultReset = () => invoke<void>("vault_reset");
 export const vaultChangeMaster = (current: string, next: string) =>
   invoke<void>("vault_change_master", { current, new: next });
 
+export interface TransferParts {
+  hosts: boolean;
+  snippets: boolean;
+  settings: boolean;
+}
 export interface ImportReport {
   hosts_added: number;
   hosts_skipped: number;
+  forwards_added: number;
   secrets_added: number;
   secrets_skipped: number;
   snippets_added: number;
   snippets_skipped: number;
   identities_added: number;
   identities_skipped: number;
+  settings: { prefs: Record<string, string> } | null;
 }
-export const vaultExport = (path: string, password: string) =>
-  invoke<void>("vault_export", { path, password });
-export const vaultImport = (path: string, password: string) =>
-  invoke<ImportReport>("vault_import", { path, password });
+export const vaultExport = (path: string, password: string, parts: TransferParts, prefs: Record<string, string>) =>
+  invoke<void>("vault_export", { path, password, parts, prefs });
+export const vaultImport = (path: string, password: string, parts: TransferParts) =>
+  invoke<ImportReport>("vault_import", { path, password, parts });
 
 interface AppSettings {
   minimizeToTray: boolean;

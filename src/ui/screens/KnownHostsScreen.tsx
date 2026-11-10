@@ -8,7 +8,8 @@ import { CheckIcon, TrashIcon, WarningIcon } from "../icons";
 import { Overlay, useModalLayer } from "../overlays/Dialogs";
 import { ItemMenu, MoreButton, useMenu } from "../Menu";
 import { Stable } from "../Stable";
-import { EmptyState, ListFilter, ScreenHeader, errLine, pageBtn, smallBtn, srOnly, td, th } from "../kit";
+import { EmptyState, ListFilter, ScreenHeader, errLine, pageBtn, smallBtn, srOnly, td, th, useNotice } from "../kit";
+import type { Notice } from "../kit";
 
 const dangerOutlineBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--err)", background: "transparent", color: "var(--err)" };
 const checkbox: CSSProperties = { width: 14, height: 14, margin: 0, accentColor: "var(--accent)", cursor: "pointer" };
@@ -17,20 +18,7 @@ function disabledLook(disabled: boolean): CSSProperties {
   return disabled ? { opacity: 0.55, cursor: "default" } : {};
 }
 
-type Notice = { tone: "ok" | "err"; text: string } | null;
 type Bar = { kind: "selection"; count: number } | { kind: "notice"; notice: NonNullable<Notice> };
-
-function useNotice(): [Notice, (n: Notice) => void] {
-  const [notice, set] = useState<Notice>(null);
-  const timer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-  const show = useCallback((n: Notice) => {
-    window.clearTimeout(timer.current);
-    set(n);
-    if (n) timer.current = window.setTimeout(() => set(null), n.tone === "err" ? 8000 : 4000);
-  }, []);
-  return [notice, show];
-}
 
 async function sshPath(file?: string): Promise<string | undefined> {
   try {

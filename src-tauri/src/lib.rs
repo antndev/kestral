@@ -344,6 +344,7 @@ pub fn run() {
             commands::vault_create,
             commands::vault_unlock,
             commands::vault_lock,
+            commands::vault_reset,
             commands::vault_change_master,
             commands::vault_export,
             commands::vault_import,

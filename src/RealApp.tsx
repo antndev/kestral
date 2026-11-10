@@ -1258,7 +1258,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
         setAiActive(on);
         setAiPoke((n) => n + 1);
       }} />;
-  else if (section === "settings") sectionBody = <SettingsScreen key={settingsKey} onVaultImported={refreshAll} />;
+  else if (section === "settings") sectionBody = <SettingsScreen key={settingsKey} onVaultImported={refreshAll} onVaultReset={onLocked} />;
   else sectionBody = <LogsScreen />;
 
   const box = (visible: boolean): CSSProperties => ({ position: "absolute", inset: 0, display: visible ? "flex" : "none", flexDirection: "column", minHeight: 0, minWidth: 0 });

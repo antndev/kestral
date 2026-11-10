@@ -74,23 +74,77 @@ pub async fn vault_unlock(state: State<'_, AppState>, master: String) -> Result<
     .map_err(|e| AppError::Other(e.to_string()))?
 }
 
+fn lock_everything(services: &crate::state::Services, sessions: &SftpSessions, transfers: &crate::sftp::Transfers) {
+    for stop in STREAM_RUNS.lock().unwrap().values() {
+        stop.cancel();
+    }
+    transfers.cancel_all();
+    sessions.clear();
+    services.ai_pool.clear();
+    services.vault.lock();
+    services.hosts.clear();
+    services.snippets.clear();
+    services.audit.clear();
+}
+
 #[tauri::command]
 pub async fn vault_lock(
     state: State<'_, AppState>,
     sessions: State<'_, SftpSessions>,
     transfers: State<'_, crate::sftp::Transfers>,
 ) -> Result<()> {
-    for stop in STREAM_RUNS.lock().unwrap().values() {
-        stop.cancel();
-    }
-    transfers.cancel_all();
-    sessions.clear();
-    state.services.ai_pool.clear();
-    state.services.vault.lock();
-    state.services.hosts.clear();
-    state.services.snippets.clear();
-    state.services.audit.clear();
+    lock_everything(&state.services, &sessions, &transfers);
     Ok(())
+}
+
+const RESET_FILES: [&str; 7] = [
+    "vault.json",
+    "audit.log",
+    "ai_state",
+    "ai_caps.json",
+    "protected_paths.json",
+    "hosts.json",
+    "snippets.json",
+];
+
+// The vault goes first: if it cannot be deleted nothing else is touched. The
+// rest is useless without it, so a leftover there is only logged.
+fn wipe_data(dir: &std::path::Path) -> Result<()> {
+    for name in RESET_FILES {
+        match std::fs::remove_file(dir.join(name)) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) if name == RESET_FILES[0] => {
+                return Err(AppError::Other(format!("The vault could not be deleted ({e}). Nothing was removed.")));
+            }
+            Err(e) => tracing::warn!("{name} not deleted on reset: {e}"),
+            Ok(()) => {}
+        }
+    }
+    Ok(())
+}
+
+/// Deletes the vault and everything that belongs to it, then restarts the app,
+/// which comes back empty and asks for a new master password. Works locked too:
+/// this is the only way out of a forgotten password.
+#[tauri::command]
+pub async fn vault_reset(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    sessions: State<'_, SftpSessions>,
+    transfers: State<'_, crate::sftp::Transfers>,
+    hello: State<'_, crate::hello::Hello>,
+) -> Result<()> {
+    lock_everything(&state.services, &sessions, &transfers);
+    state.services.policy.disable();
+    let dir = state.mcp_token_path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let hello = hello.inner().clone();
+    crate::util::blocking(move || {
+        wipe_data(&dir)?;
+        hello.forget();
+        Ok(())
+    })
+    .await?;
+    app.restart()
 }
 
 #[tauri::command]
@@ -115,34 +169,46 @@ pub async fn vault_change_master(
 #[tauri::command]
 pub async fn vault_export(
     state: State<'_, AppState>,
+    settings: State<'_, Arc<crate::settings::SettingsStore>>,
     path: String,
     password: String,
+    parts: crate::portable::Parts,
+    prefs: std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     let services = state.services.clone();
     let password = Zeroizing::new(password);
-    tokio::task::spawn_blocking(move || -> Result<()> {
-        let bytes = crate::portable::export(&services, password.as_str())?;
+    let local = crate::portable::Settings {
+        prefs,
+        minimize_to_tray: settings.get().minimize_to_tray,
+        ..Default::default()
+    };
+    crate::util::blocking(move || {
+        let bytes = crate::portable::export(&services, password.as_str(), parts, local)?;
         crate::util::replace_file(std::path::Path::new(&path), &bytes)?;
         Ok(())
     })
     .await
-    .map_err(|e| AppError::Other(e.to_string()))?
 }
 
 #[tauri::command]
 pub async fn vault_import(
     state: State<'_, AppState>,
+    settings: State<'_, Arc<crate::settings::SettingsStore>>,
     path: String,
     password: String,
+    parts: crate::portable::Parts,
 ) -> Result<crate::portable::ImportReport> {
     let services = state.services.clone();
     let password = Zeroizing::new(password);
-    tokio::task::spawn_blocking(move || -> Result<crate::portable::ImportReport> {
+    let report = crate::util::blocking(move || {
         let bytes = std::fs::read(&path)?;
-        crate::portable::import(&services, &bytes, password.as_str())
+        crate::portable::import(&services, &bytes, password.as_str(), parts)
     })
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
+    .await?;
+    if let Some(s) = &report.settings {
+        settings.set_minimize_to_tray(s.minimize_to_tray);
+    }
+    Ok(report)
 }
 
 #[tauri::command]
@@ -1206,6 +1272,22 @@ mod tests {
         hosts.update(Host { ai_changed: false, ..jump }).unwrap();
         assert!(ensure_chain_reviewed(&ssh, &leaf).is_ok());
         assert!(ensure_chain_reviewed(&ssh, &Host { ai_changed: true, ..leaf }).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reset_removes_the_vault_and_keeps_what_is_not_part_of_it() {
+        let dir = std::env::temp_dir().join(format!("kestral-reset-{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["vault.json", "audit.log", "ai_caps.json", "mcp_token", "app_settings.json"] {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        wipe_data(&dir).unwrap();
+        let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, ["app_settings.json", "mcp_token"]);
+        wipe_data(&dir).unwrap();
 
         let _ = std::fs::remove_dir_all(&dir);
     }
