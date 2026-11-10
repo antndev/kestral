@@ -965,7 +965,7 @@ export function SettingsScreen({ onVaultImported, onVaultReset }: { onVaultImpor
       node: (
         <div style={row}>
           {noteHead("master", "Master password", "Unlocks the vault and encrypts all local data", doneOf("master"))}
-          <div style={ctlBox}><button type="button" onClick={() => setDialog("password")} style={rowBtn}>Change…</button></div>
+          <div style={ctlBox}><button type="button" onClick={() => setDialog("password")} style={rowBtn}>Change</button></div>
         </div>
       ),
     },
@@ -1022,7 +1022,7 @@ export function SettingsScreen({ onVaultImported, onVaultReset }: { onVaultImpor
       node: (
         <div style={row}>
           {noteHead("export", "Export vault", "Hosts, keychain, snippets and settings in one encrypted file", doneOf("export"))}
-          <div style={ctlBox}><button type="button" onClick={() => setDialog("export")} style={rowBtn}>Export…</button></div>
+          <div style={ctlBox}><button type="button" onClick={() => setDialog("export")} style={rowBtn}>Export</button></div>
         </div>
       ),
     },
@@ -1031,7 +1031,7 @@ export function SettingsScreen({ onVaultImported, onVaultReset }: { onVaultImpor
       node: (
         <div style={row}>
           {noteHead("import", "Import vault", "Merge an exported file into this vault", doneOf("import"))}
-          <div style={ctlBox}><button type="button" onClick={() => setDialog("import")} style={rowBtn}>Import…</button></div>
+          <div style={ctlBox}><button type="button" onClick={() => setDialog("import")} style={rowBtn}>Import</button></div>
         </div>
       ),
     },
@@ -1040,7 +1040,7 @@ export function SettingsScreen({ onVaultImported, onVaultReset }: { onVaultImpor
       node: (
         <div style={row}>
           {head("reset", "Reset Kestral", "Delete the vault with every host, key and snippet, and start over")}
-          <div style={ctlBox}><button type="button" onClick={() => setDialog("reset")} style={{ ...rowBtn, color: "var(--err)" }}>Reset…</button></div>
+          <div style={ctlBox}><button type="button" onClick={() => setDialog("reset")} style={{ ...rowBtn, color: "var(--err)" }}>Reset</button></div>
         </div>
       ),
     },

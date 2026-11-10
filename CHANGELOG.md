@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.35 - 2026-11-10
+
+### Changed
+- Settings buttons drop the trailing dots: Change, Export, Import, Reset.
+
 ## 0.2.34 - 2026-11-10
 
 ### Changed
