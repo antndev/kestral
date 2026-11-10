@@ -3,6 +3,11 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.36 - 2026-11-10
+
+### Fixed
+- The connecting spinners really turn now. The installed app blocked the styles React adds at runtime, so their animation never existed there. The same hid the shake on a wrong password and the hover on the lock screen links.
+
 ## 0.2.35 - 2026-11-10
 
 ### Changed

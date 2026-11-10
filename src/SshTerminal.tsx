@@ -201,7 +201,7 @@ function Spinner({ size, color, track }: { size: number; color: string; track: s
   const r = (size - w) / 2;
   const c = 2 * Math.PI * r;
   return (
-    <svg aria-hidden="true" width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flex: "none", animation: "kestral-spin 0.8s linear infinite" }}>
+    <svg aria-hidden="true" width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flex: "none", animation: "kst-spin 0.8s linear infinite" }}>
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={track} strokeWidth={w} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round" strokeDasharray={`${c * 0.3} ${c}`} />
     </svg>
@@ -898,7 +898,6 @@ export function SshTerminal(props: SshTerminalProps) {
 
   return (
     <div style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%", width: "100%", background: bg, overflow: "hidden" }}>
-      <style>{"@keyframes kestral-spin { to { transform: rotate(360deg) } }"}</style>
       <div
         onMouseDown={(e) => {
           if (e.target !== e.currentTarget) return;

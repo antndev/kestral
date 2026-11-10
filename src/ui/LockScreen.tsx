@@ -7,10 +7,6 @@ import bird from "../assets/bird.png";
 
 export const HELLO_AUTO_KEY = "kestral-hello-auto";
 
-const SHAKE_FRAMES = "{ 20%, 80% { transform: translateX(-2px) } 40% { transform: translateX(4px) } 60% { transform: translateX(-4px) } }";
-const LOCK_CSS = `@keyframes kst-shake-a ${SHAKE_FRAMES} @keyframes kst-shake-b ${SHAKE_FRAMES}
-.kst-lock-input::placeholder { color: var(--text-3) }
-.kst-lock-link { transition: color 120ms } .kst-lock-link:hover { color: var(--text) !important }`;
 const shakeAnim = (n: number) => (n ? `${n % 2 ? "kst-shake-a" : "kst-shake-b"} 300ms ease-in-out` : undefined);
 
 const title: CSSProperties = { margin: "0 0 10px", textAlign: "center", fontSize: 20, fontWeight: 600, letterSpacing: "-0.015em" };
@@ -71,7 +67,6 @@ function LockFrame({ className, footer, children }: { className: string; footer?
     <div
       className={className}
       style={{ position: "relative", width: "100%", height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: SANS, fontSize: 13, lineHeight: 1.4 }}>
-      <style>{LOCK_CSS}</style>
       <header data-tauri-drag-region style={{ display: "flex", alignItems: "center", height: 40, flex: "none", padding: IS_MAC ? "0 14px 0 0" : "0 0 0 12px" }}>
         {!IS_MAC && <Brand />}
         <span data-tauri-drag-region style={{ flex: 1, alignSelf: "stretch" }} />
