@@ -292,7 +292,7 @@ function ConfigImportDialog({ entries, existingNames, secrets, onProgress, onClo
                   <span style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.alias}</span>
                   {already && <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-3)", whiteSpace: "nowrap" }}>Already added</span>}
                 </span>
-                <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span style={{ fontSize: 12, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {h.user ? `${h.user}@` : ""}{h.hostname || h.alias}:{h.port || 22}
                 </span>
                 {!h.user && <span style={{ fontSize: 12, color: "var(--warn)" }}>No user set. Add one in the host editor after importing.</span>}

@@ -39,7 +39,7 @@ import {
   arrowNav,
   chip as hostChip,
   errLine,
-  mono,
+  tabular,
   muted as quiet,
   oneLine,
   pageBtn,
@@ -1448,11 +1448,11 @@ function varFact(name: string, setting: VarSetting | undefined): Fact {
     return [
       name,
       <span title={`${setting.value}, asked when run`}>
-        <span style={mono}>{setting.value}</span>
+        <span style={tabular}>{setting.value}</span>
         <span style={quiet}>, asked when run</span>
       </span>,
     ];
-  return [name, <span title={setting.value} style={mono}>{setting.value}</span>];
+  return [name, <span title={setting.value} style={tabular}>{setting.value}</span>];
 }
 
 function CommandEditor({ value, onChange, labelledBy }: { value: string; onChange(v: string): void; labelledBy: string }) {

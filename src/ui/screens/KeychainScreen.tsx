@@ -1304,7 +1304,7 @@ function IdentitiesTab(
                         <span style={{ overflowWrap: "anywhere" }}>{i.name}</span>
                       </span>
                     </td>
-                    <td style={{ ...cell, fontFamily: MONO, fontSize: 12 }}>{i.username || <span style={{ fontFamily: "inherit", color: "var(--text-3)" }}>host's user</span>}</td>
+                    <td style={cell}>{i.username || <span style={{ color: "var(--text-3)" }}>host's user</span>}</td>
                     <td style={cell}>{credential(i.auth)}</td>
                     <td style={cell}>
                       {users.length === 0 ? (
@@ -1533,7 +1533,7 @@ function AgentTab(p: { hosts: Host[]; secrets: SecretMeta[]; identities: Identit
                 <tr key={h.id} data-reveal onContextMenu={(e) => hostMenu.openAt(e, h.id)}>
                   <td style={{ ...cell, height: 48, width: "35%" }}>
                     <HostName host={h} onEditHost={p.onEditHost} />
-                    <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--text-2)", overflowWrap: "anywhere" }}>{h.username ? `${h.username}@` : ""}{h.hostname}</div>
+                    <div style={{ fontSize: 12, color: "var(--text-2)", overflowWrap: "anywhere" }}>{h.username ? `${h.username}@` : ""}{h.hostname}</div>
                   </td>
                   <td style={cell}>
                     {h.agent_keys.length === 0 ? (

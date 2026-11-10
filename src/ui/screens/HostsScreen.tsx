@@ -7,7 +7,7 @@ import { CheckIcon, HostsIcon, PlusIcon, WarningIcon } from "../icons";
 import { ItemMenu, MoreButton, useMenu, type MenuEntry, type MenuState } from "../Menu";
 import type { DragHost } from "../Shell";
 import { parseTarget, type QuickConnect, type Target } from "../target";
-import { Block, Blocks, DetailHead, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, chip, mono, muted, oneLine, pageBtn, primaryBtn, srOnly, useAlive, whenLeft, type Fact } from "../kit";
+import { Block, Blocks, DetailHead, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, chip, muted, oneLine, pageBtn, primaryBtn, srOnly, tabular, useAlive, whenLeft, type Fact } from "../kit";
 
 export type { QuickConnect } from "../target";
 
@@ -97,7 +97,7 @@ function HostDetail({ host, user, via, identity, identities, status, note, menu,
         title={host.name}
         sub={
           <>
-            <span title={via ? `${addr} via ${via}` : addr} style={{ ...oneLine, ...mono }}>{addr}</span>
+            <span title={via ? `${addr} via ${via}` : addr} style={{ ...oneLine, ...tabular }}>{addr}</span>
             {status !== "idle" && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flex: "none", fontSize: 12, color: statusColor(status) }}>
                 <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor" }} />
@@ -132,7 +132,7 @@ function HostDetail({ host, user, via, identity, identities, status, note, menu,
         <Block title="Connection">
           <Facts
             rows={[
-              ["Address", <span title={host.hostname} style={mono}>{host.hostname}</span>],
+              ["Address", <span title={host.hostname} style={tabular}>{host.hostname}</span>],
               ["Port", String(host.port)],
               ["User", user || <span style={muted}>None</span>],
               ["Jump host", via ?? <span style={muted}>None</span>],
@@ -158,7 +158,7 @@ function HostDetail({ host, user, via, identity, identities, status, note, menu,
 
       <Block title="Port forwards">
         {host.forwards.length > 0 ? (
-          <Facts rows={host.forwards.map((f): Fact => [(f.name ?? "").trim() || KIND_LABEL[f.kind ?? "local"], <span title={forwardLabel(f)} style={mono}>{forwardLabel(f)}</span>])} />
+          <Facts rows={host.forwards.map((f): Fact => [(f.name ?? "").trim() || KIND_LABEL[f.kind ?? "local"], <span title={forwardLabel(f)} style={tabular}>{forwardLabel(f)}</span>])} />
         ) : (
           <p style={{ ...muted, margin: 0 }}>No port forwards</p>
         )}

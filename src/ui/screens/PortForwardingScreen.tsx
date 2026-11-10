@@ -2,17 +2,16 @@ import { CSSProperties, ReactNode, RefObject, useCallback, useEffect, useMemo, u
 import { openUrl } from "@tauri-apps/plugin-opener";
 import * as api from "../../api";
 import type { ForwardKind, Host, PortForward } from "../../api";
-import { MONO, errText } from "../mock";
+import { errText } from "../mock";
 import { ForwardIcon, PlusIcon, TrashIcon } from "../icons";
 import { ConfirmDialog as SharedConfirm } from "../overlays/Dialogs";
 import { ItemMenu, MoreButton, useMenu, type MenuState } from "../Menu";
 import { Stable } from "../Stable";
 import { SegGroup, segItem } from "../SegGroup";
-import { Block, Blocks, DetailHead, EditFooter, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, mono, muted, oneLine, pageBtn, primaryBtn, useLeave, whenLeft, type Fact } from "../kit";
+import { Block, Blocks, DetailHead, EditFooter, EmptyState, Facts, List, ListFilter, ListItem, ScreenHeader, SplitView, arrowNav, muted, oneLine, pageBtn, primaryBtn, tabular, useLeave, whenLeft, type Fact } from "../kit";
 
 const fieldLabel: CSSProperties = { display: "block", marginBottom: 6, fontSize: 12, fontWeight: 500, color: "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const input: CSSProperties = { width: "100%", height: 32, padding: "0 10px", borderWidth: 1, borderStyle: "solid", borderColor: "var(--line)", borderRadius: 6, background: "var(--bg-sunken)", color: "var(--text)", boxSizing: "border-box" };
-const monoField: CSSProperties = { ...input, fontFamily: MONO, fontSize: 12 };
 const dangerBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--err)", background: "transparent", color: "var(--err)" };
 const linkBtn: CSSProperties = { flex: "none", height: 18, padding: 0, border: 0, background: "transparent", color: "var(--link)", fontSize: 12, lineHeight: "18px", textDecoration: "underline", textUnderlineOffset: 2, cursor: "pointer", whiteSpace: "nowrap" };
 const formGrid: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 };
@@ -161,7 +160,7 @@ function Toggle({ on, busy, disabled, label, title, onClick }: { on: boolean; bu
 
 const At = ({ addr, where }: { addr: string; where: string }) => (
   <span title={`${addr} on ${where}`}>
-    <span style={mono}>{addr}</span>
+    <span style={tabular}>{addr}</span>
     <span style={muted}> on {where}</span>
   </span>
 );
@@ -176,7 +175,7 @@ function routeFacts(d: Draft, hostName: string): Fact[] {
     ["Type", <span title={KIND_HINT[k]}>{KIND_LABEL[k]}</span>],
     ["Listen on", <At addr={listenAddr} where={k === "remote" ? hostName : "this computer"} />],
     ["Through host", hostName],
-    ["Destination", k === "dynamic" ? <span style={muted}>Any (SOCKS proxy)</span> : k === "remote" ? <At addr={destAddr} where="this computer" /> : <span title={destAddr} style={mono}>{destAddr}</span>],
+    ["Destination", k === "dynamic" ? <span style={muted}>Any (SOCKS proxy)</span> : k === "remote" ? <At addr={destAddr} where="this computer" /> : <span title={destAddr} style={tabular}>{destAddr}</span>],
   ];
 }
 
@@ -958,11 +957,11 @@ function RuleDetail({
         <div style={addrPair}>
           <div style={{ minWidth: 0 }}>
             <label htmlFor="pf-listen" style={fieldLabel}>{kind === "remote" ? `Listen on ${throughHost?.name ?? "the host"}` : "Listen on this computer"}</label>
-            <input id="pf-listen" type="text" value={draft.listenHost} onChange={(e) => set({ listenHost: e.target.value })} placeholder={listenDefault} spellCheck={false} aria-invalid={bad.listenHost || undefined} style={field("listenHost", monoField)} />
+            <input id="pf-listen" type="text" value={draft.listenHost} onChange={(e) => set({ listenHost: e.target.value })} placeholder={listenDefault} spellCheck={false} aria-invalid={bad.listenHost || undefined} style={field("listenHost", input)} />
           </div>
           <div>
             <label htmlFor="pf-lport" style={fieldLabel}>Port</label>
-            <input id="pf-lport" type="text" inputMode="numeric" value={draft.listenPort} onChange={(e) => set({ listenPort: e.target.value })} aria-invalid={bad.listenPort || undefined} style={field("listenPort", monoField)} />
+            <input id="pf-lport" type="text" inputMode="numeric" value={draft.listenPort} onChange={(e) => set({ listenPort: e.target.value })} aria-invalid={bad.listenPort || undefined} style={field("listenPort", input)} />
           </div>
         </div>
         <div style={addrPair}>
@@ -977,12 +976,12 @@ function RuleDetail({
               placeholder={dynamic ? "Any (SOCKS proxy)" : kind === "remote" ? "127.0.0.1" : "localhost"}
               spellCheck={false}
               aria-invalid={bad.destHost || undefined}
-              style={field("destHost", dynamic ? { ...monoField, opacity: 0.6 } : monoField)}
+              style={field("destHost", dynamic ? { ...input, opacity: 0.6 } : input)}
             />
           </div>
           <div>
             <label htmlFor="pf-dport" style={fieldLabel}>Port</label>
-            <input id="pf-dport" type="text" inputMode="numeric" disabled={dynamic} value={dynamic ? "" : draft.destPort} onChange={(e) => set({ destPort: e.target.value })} aria-invalid={bad.destPort || undefined} style={field("destPort", dynamic ? { ...monoField, opacity: 0.6 } : monoField)} />
+            <input id="pf-dport" type="text" inputMode="numeric" disabled={dynamic} value={dynamic ? "" : draft.destPort} onChange={(e) => set({ destPort: e.target.value })} aria-invalid={bad.destPort || undefined} style={field("destPort", dynamic ? { ...input, opacity: 0.6 } : input)} />
           </div>
         </div>
       </div>

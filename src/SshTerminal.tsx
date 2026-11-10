@@ -12,7 +12,7 @@ import type { PaneInput, PaneStage } from "./ui/termBus";
 import { Menu } from "./ui/Menu";
 import type { MenuEntry } from "./ui/Menu";
 import { CheckIcon, WarningIcon } from "./ui/icons";
-import { IS_MAC, KEYS, MONO, errText, termFontStack } from "./ui/mock";
+import { IS_MAC, KEYS, errText, termFontStack } from "./ui/mock";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -127,12 +127,14 @@ interface SshTerminalProps {
   onAuth?(summary: string): void;
   onNote?(note: ConnNote): void;
   onClosePane?(): void;
+  /** The only pane in its tab, so closing it closes the tab. */
+  alone?: boolean;
   onEditHost?(): void;
 }
 
 type ConnNote = { attempt: number; of: number; at: number | null; text: string };
 
-type Step = { id: string; text: string; doneText: string; done: boolean };
+type Step = { id: string; text: string; doneText: string; done: boolean; at: number };
 type Conn =
   | { kind: "connecting"; steps: Step[]; quiet: boolean; attempt: number }
   | { kind: "connected" }
@@ -194,6 +196,29 @@ function encodeSingleByte(text: string, enc: string): number[] {
   return out;
 }
 
+function Spinner({ size, color, track }: { size: number; color: string; track: string }) {
+  const w = size > 16 ? 2.5 : 2;
+  const r = (size - w) / 2;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flex: "none", animation: "kestral-spin 0.8s linear infinite" }}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={track} strokeWidth={w} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={w} strokeLinecap="round" strokeDasharray={`${c * 0.3} ${c}`} />
+    </svg>
+  );
+}
+
+/** Seconds spent on the current step, so a slow server never looks like a frozen app. Shown from 2 s on, in a slot that is always there. */
+function Elapsed({ since, color }: { since: number; color: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(t);
+  }, []);
+  const s = Math.floor((now - since) / 1000);
+  return <span style={{ minWidth: 30, fontVariantNumeric: "tabular-nums", color }}>{s >= 2 ? `${s} s` : ""}</span>;
+}
+
 export function SshTerminal(props: SshTerminalProps) {
   const { hostId, tabId, paneId, focused, themeOverride } = props;
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -242,6 +267,9 @@ export function SshTerminal(props: SshTerminalProps) {
     propsRef.current.onProcess?.(name);
   }, []);
 
+  // Cancel on a pane that never got a shell closes it; once it had one, the
+  // scrollback is worth keeping.
+  const everConnected = useRef(false);
   const reconnect = useCallback((opts: { quiet?: boolean; attempt?: number; password?: string } = {}) => {
     attemptRef.current = { quiet: !!opts.quiet, attempt: opts.attempt ?? 0, password: opts.password };
     setPwOpen(false);
@@ -627,7 +655,7 @@ export function SshTerminal(props: SshTerminalProps) {
       const c = connRef.current;
       if (c.kind !== "connecting") return;
       const steps = c.steps.map((s) => (s.done ? s : { ...s, done: true, text: s.doneText }));
-      setConn({ ...c, steps: [...steps.filter((s) => s.id !== id), { id, text, doneText, done: false }] });
+      setConn({ ...c, steps: [...steps.filter((s) => s.id !== id), { id, text, doneText, done: false, at: Date.now() }] });
     };
     const finish = (id: string, doneText: string) => {
       const c = connRef.current;
@@ -638,12 +666,12 @@ export function SshTerminal(props: SshTerminalProps) {
     const statusSub = listen<{ id: string; stage: string; detail: string; data?: { user?: string; method?: string; credential?: string } }>("session-status", (e) => {
       if (cancelled || e.payload.id !== sessionId) return;
       const { stage, detail, data } = e.payload;
-      if (stage === "jumping") step(`jump:${detail}`, `Connecting to ${detail}`, `Connected through ${detail}`);
-      else if (stage === "jumped") finish(`jump:${detail}`, `Connected through ${detail}`);
-      else if (stage === "resolving") step("resolve", `Looking up ${detail}`, `Looked up ${detail}`);
-      else if (stage === "resolved") finish("resolve", `Resolved ${detail}`);
-      else if (stage === "connecting") step("connect", `Connecting to ${detail}`, `Connected to ${detail}`);
-      else if (stage === "authenticating") step("auth", `Authenticating with ${detail}`, `Authenticated with ${detail}`);
+      if (stage === "jumping") step(`jump:${detail}`, `Going through ${detail}`, `Went through ${detail}`);
+      else if (stage === "jumped") finish(`jump:${detail}`, `Went through ${detail}`);
+      else if (stage === "resolving") step("resolve", "Looking up the address", "Address found");
+      else if (stage === "resolved") finish("resolve", `Found ${detail}`);
+      else if (stage === "connecting") step("connect", "Waiting for the server", "Server answered");
+      else if (stage === "authenticating") step("auth", `Signing in with ${detail}`, `Signed in with ${detail}`);
       else if (stage === "opening-shell") step("shell", "Opening the shell", "Shell opened");
       else if (stage === "connected") propsRef.current.onAuth?.(detail);
       else if (stage === "auth-failed") {
@@ -701,6 +729,7 @@ export function SshTerminal(props: SshTerminalProps) {
           propsRef.current.onProcess?.(shellRef.current);
           if (password) passwordRef.current = password;
           if (paneId) termBus.dropPassword(paneId);
+          everConnected.current = true;
           setConn({ kind: "connected" });
           requestAnimationFrame(() => refitRef.current?.());
           const startup = propsRef.current.startupCommand?.trim();
@@ -857,7 +886,6 @@ export function SshTerminal(props: SshTerminalProps) {
   const outline: CSSProperties = { display: "flex", alignItems: "center", height: 28, padding: "0 12px", border: `1px solid ${line}`, borderRadius: 6, background: "transparent", color: fg, fontSize: 12, cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
   const primary: CSSProperties = { ...outline, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
   const card: CSSProperties = { position: "absolute", inset: 0, zIndex: 20, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "safe center", gap: 12, padding: 20, overflow: "auto", background: bg, color: fg, fontSize: 13, textAlign: "center", boxSizing: "border-box" };
-  const ring = (size: number, width: number): CSSProperties => ({ width: size, height: size, flex: "none", borderRadius: "50%", borderStyle: "solid", borderWidth: width, borderTopColor: "var(--focus)", borderRightColor: line, borderBottomColor: line, borderLeftColor: line, boxSizing: "border-box", animation: "kestral-spin 0.8s linear infinite" });
 
   const name = props.hostName;
   const credentialText = (c: Extract<Conn, { kind: "auth-failed" }>) => {
@@ -884,7 +912,7 @@ export function SshTerminal(props: SshTerminalProps) {
 
       {conn.kind === "connecting" && !conn.quiet && (
         <div role="status" aria-live="polite" style={{ ...card, gap: 14 }}>
-          <span aria-hidden="true" style={ring(28, 2.5)} />
+          <Spinner size={28} color={fg} track={line} />
           <div style={{ fontWeight: 500 }}>Connecting to {name}</div>
           {conn.steps.length > 0 && (
             <ol aria-label="Connection progress" style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: dim, textAlign: "left" }}>
@@ -895,9 +923,12 @@ export function SshTerminal(props: SshTerminalProps) {
                       <CheckIcon size={14} />
                     </span>
                   ) : (
-                    <span aria-hidden="true" style={{ ...ring(12, 2), margin: "0 1px" }} />
+                    <span style={{ display: "flex", margin: "0 1px" }}>
+                      <Spinner size={12} color={fg} track={line} />
+                    </span>
                   )}
                   {s.text}
+                  {!s.done && <Elapsed since={s.at} color={dim} />}
                 </li>
               ))}
             </ol>
@@ -905,6 +936,7 @@ export function SshTerminal(props: SshTerminalProps) {
           <button
             type="button"
             onClick={() => {
+              if (!everConnected.current && props.onClosePane) return props.onClosePane();
               const id = sessionRef.current;
               if (id) void invoke("ssh_close", { id }).catch(() => {});
             }}
@@ -921,7 +953,7 @@ export function SshTerminal(props: SshTerminalProps) {
             <WarningIcon size={18} />
           </span>
           <div style={{ fontWeight: 500 }}>Authentication failed</div>
-          <code style={{ fontFamily: MONO, fontSize: 12, color: dim }}>{conn.message}</code>
+          <p style={{ margin: 0, maxWidth: 420, fontSize: 12, color: dim, overflowWrap: "anywhere" }}>{conn.message}</p>
           <p style={{ margin: 0, maxWidth: 340, fontSize: 12, color: dim }}>{credentialText(conn)}</p>
           {pwOpen ? (
             <form
@@ -976,7 +1008,7 @@ export function SshTerminal(props: SshTerminalProps) {
               )}
               {props.onClosePane && (
                 <button type="button" onClick={props.onClosePane} style={outline}>
-                  Close pane
+                  {props.alone ? "Close tab" : "Close pane"}
                 </button>
               )}
             </div>
@@ -990,7 +1022,7 @@ export function SshTerminal(props: SshTerminalProps) {
             <WarningIcon size={18} />
           </span>
           <div style={{ fontWeight: 500 }}>{errorKey ? "Host key not trusted" : "Connection failed"}</div>
-          <code style={{ maxWidth: 420, fontFamily: MONO, fontSize: 12, color: dim, overflowWrap: "anywhere" }}>{errorKey ?? conn.message.replace(/^SSH: /, "")}</code>
+          <p style={{ margin: 0, maxWidth: 420, fontSize: 12, color: dim, overflowWrap: "anywhere" }}>{errorKey ?? conn.message.replace(/^SSH: /, "")}</p>
           <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 8 }}>
             <button type="button" onClick={() => reconnect()} style={primary}>
               Retry
@@ -1002,7 +1034,7 @@ export function SshTerminal(props: SshTerminalProps) {
             )}
             {props.onClosePane && (
               <button type="button" onClick={props.onClosePane} style={outline}>
-                Close pane
+                {props.alone ? "Close tab" : "Close pane"}
               </button>
             )}
           </div>

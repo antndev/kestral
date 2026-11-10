@@ -3,6 +3,18 @@
 All notable changes to Kestral are documented here. This project follows
 [Keep a Changelog](https://keepachangelog.com) and semantic versioning.
 
+## 0.2.34 - 2026-11-10
+
+### Changed
+- Connecting looks alive: a clearer spinner, and the step you are waiting on counts the seconds. The steps no longer repeat "Connecting to" under the title.
+- Errors say what happened in plain words: a server that does not answer, a port that refuses, a name that does not exist.
+- A host with several addresses tries them side by side, so a dead IPv6 route no longer costs the whole timeout before IPv4 gets a turn.
+- Cancel while connecting closes the tab or pane, instead of leaving an empty one behind. A session that already had a shell keeps its scrollback.
+- A host given as an IP address skips the lookup step, since there is nothing to look up.
+- One font for everything you read: addresses, users and messages use the app font. Monospace stays for commands, scripts, keys, fingerprints and paths.
+- Section headings in the host, snippet and port forward details stand out from the rows below them.
+- The close button under a failed connection says "Close tab" when the pane is the only one.
+
 ## 0.2.33 - 2026-11-10
 
 ### Fixed

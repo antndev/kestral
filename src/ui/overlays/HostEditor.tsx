@@ -1006,7 +1006,7 @@ export function HostEditor(p: {
                     onKeyDown={(e) => {
                       if (e.key === "Enter") flushSync(onAddressBlur);
                     }}
-                    style={inputStyle({ error: !!fe("hostname"), mono: true })}
+                    style={inputStyle({ error: !!fe("hostname") })}
                   />
                 </Field>
                 <Field id={fid("port")} label="Port" error={fe("port")}>
@@ -1024,7 +1024,7 @@ export function HostEditor(p: {
                       clearErr("port");
                     }}
                     onBlur={() => setPort((v) => clampPortText(v))}
-                    style={inputStyle({ error: !!fe("port"), mono: true })}
+                    style={inputStyle({ error: !!fe("port") })}
                   />
                 </Field>
               </div>
@@ -1184,7 +1184,7 @@ export function HostEditor(p: {
                             setPwName(cleanText(e.target.value));
                             clearErr("pwname");
                           }}
-                          style={inputStyle({ error: !!fe("pwname"), mono: true })}
+                          style={inputStyle({ error: !!fe("pwname") })}
                         />
                       </Field>
                     )}
@@ -1417,7 +1417,7 @@ export function HostEditor(p: {
                                   patchForward(f.id, { remote_host: cleanText(e.target.value) });
                                   clearErr(k("remote_host"));
                                 }}
-                                style={inputStyle({ mono: true, error: !!fe(k("remote_host")) })}
+                                style={inputStyle({ error: !!fe(k("remote_host")) })}
                               />
                             </Field>
                             <Field id={id("rport")} label="Port">
@@ -1434,7 +1434,7 @@ export function HostEditor(p: {
                                   clearErr(k("remote_port"));
                                 }}
                                 onBlur={() => patchForward(f.id, { remote_port: clampPortText(f.remote_port) })}
-                                style={inputStyle({ mono: true, error: !!fe(k("remote_port")) })}
+                                style={inputStyle({ error: !!fe(k("remote_port")) })}
                               />
                             </Field>
                             <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 32, marginTop: 20, color: "var(--text-2)" }}>
@@ -1456,7 +1456,7 @@ export function HostEditor(p: {
                                   patchForward(f.id, { local_host: cleanText(e.target.value) });
                                   clearErr(k("local_host"));
                                 }}
-                                style={inputStyle({ mono: true, error: !!fe(k("local_host")) })}
+                                style={inputStyle({ error: !!fe(k("local_host")) })}
                               />
                             </Field>
                             <Field id={id("lport")} label="Port">
@@ -1473,7 +1473,7 @@ export function HostEditor(p: {
                                   clearErr(k("local_port"));
                                 }}
                                 onBlur={() => patchForward(f.id, { local_port: clampPortText(f.local_port) })}
-                                style={inputStyle({ mono: true, error: !!fe(k("local_port")) })}
+                                style={inputStyle({ error: !!fe(k("local_port")) })}
                               />
                             </Field>
                           </div>
@@ -1494,7 +1494,7 @@ export function HostEditor(p: {
                                   clearErr(k("local_host"), k("local_port"));
                                 }}
                                 onPaste={(e) => pasteClean(e, (v) => patchForward(f.id, { local_host: v }))}
-                                style={inputStyle({ mono: true, error: !!fe(k("local_host")) })}
+                                style={inputStyle({ error: !!fe(k("local_host")) })}
                               />
                             </Field>
                             <Field id={id("lport")} label="Port">
@@ -1511,7 +1511,7 @@ export function HostEditor(p: {
                                   clearErr(k("local_port"));
                                 }}
                                 onBlur={() => patchForward(f.id, { local_port: clampPortText(f.local_port) })}
-                                style={inputStyle({ mono: true, error: !!fe(k("local_port")) })}
+                                style={inputStyle({ error: !!fe(k("local_port")) })}
                               />
                             </Field>
                             {f.kind === "local" && (
@@ -1536,7 +1536,7 @@ export function HostEditor(p: {
                                   clearErr(k("remote_host"));
                                 }}
                                 onPaste={(e) => pasteClean(e, (v) => patchForward(f.id, { remote_host: v }))}
-                                style={inputStyle({ mono: true, error: !!fe(k("remote_host")) })}
+                                style={inputStyle({ error: !!fe(k("remote_host")) })}
                               />
                             </Field>
                             <Field id={id("rport")} label="Port">
@@ -1553,7 +1553,7 @@ export function HostEditor(p: {
                                   clearErr(k("remote_port"));
                                 }}
                                 onBlur={() => patchForward(f.id, { remote_port: clampPortText(f.remote_port) })}
-                                style={inputStyle({ mono: true, error: !!fe(k("remote_port")) })}
+                                style={inputStyle({ error: !!fe(k("remote_port")) })}
                               />
                             </Field>
                             </>

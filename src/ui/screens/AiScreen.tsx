@@ -794,7 +794,7 @@ function PolicyCard({ hosts, onHostsChanged }: { hosts: Host[]; onHostsChanged()
                     <tr key={h.id}>
                       <td style={{ ...c, height: 48, paddingLeft: 0, maxWidth: 0, width: "100%" }}>
                         <div style={{ fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</div>
-                        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <div style={{ fontSize: 12, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {h.username}@{h.hostname}
                           {h.port !== 22 ? `:${h.port}` : ""}
                         </div>

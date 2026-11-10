@@ -249,6 +249,55 @@ impl client::Handler for ClientHandler {
     }
 }
 
+const NEXT_ADDRESS_AFTER: std::time::Duration = std::time::Duration::from_millis(250);
+
+// Alternates the address families, starting with the one the resolver put first.
+fn connect_order(addrs: &[std::net::SocketAddr]) -> Vec<std::net::SocketAddr> {
+    let first_v6 = addrs.first().is_some_and(std::net::SocketAddr::is_ipv6);
+    let (same, other): (Vec<_>, Vec<_>) = addrs.iter().copied().partition(|a| a.is_ipv6() == first_v6);
+    let (mut same, mut other) = (same.into_iter(), other.into_iter());
+    let mut out = Vec::with_capacity(addrs.len());
+    loop {
+        match (same.next(), other.next()) {
+            (None, None) => return out,
+            (a, b) => out.extend(a.into_iter().chain(b)),
+        }
+    }
+}
+
+// Happy Eyeballs (RFC 8305), in short: each turn of the loop (a failure, or 250 ms
+// without an answer) starts the next address, they all share one time budget,
+// and the first connection wins. A dead IPv6 route then costs a quarter second instead
+// of the whole budget.
+async fn race_connect(addrs: &[std::net::SocketAddr], budget: std::time::Duration, label: &str) -> Result<tokio::net::TcpStream> {
+    let deadline = tokio::time::Instant::now() + budget;
+    let mut queue = connect_order(addrs).into_iter().peekable();
+    let mut tries = tokio::task::JoinSet::new();
+    let mut failed = None;
+    loop {
+        if let Some(addr) = queue.next() {
+            tries.spawn(async move { (addr, tokio::net::TcpStream::connect(addr).await) });
+        }
+        if tries.is_empty() {
+            return Err(failed.unwrap_or_else(|| AppError::Ssh(format!("No address found for {label}"))));
+        }
+        tokio::select! {
+            Some(done) = tries.join_next() => match done {
+                Ok((_, Ok(stream))) => return Ok(stream),
+                Ok((addr, Err(e))) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
+                    failed = Some(AppError::Ssh(format!("{addr} refused the connection. Nothing listens on port {}, or a firewall rejects it.", addr.port())));
+                }
+                Ok((addr, Err(e))) => failed = Some(AppError::Ssh(format!("Could not connect to {addr}: {e}"))),
+                Err(e) => failed = Some(AppError::Ssh(format!("Could not connect to {label}: {e}"))),
+            },
+            _ = tokio::time::sleep(NEXT_ADDRESS_AFTER), if queue.peek().is_some() => {}
+            _ = tokio::time::sleep_until(deadline) => {
+                return Err(AppError::Ssh(format!("{label} did not answer within {} s. The server may be off, or a firewall drops the connection.", budget.as_secs())));
+            }
+        }
+    }
+}
+
 pub struct SshManager {
     audit: Arc<AuditLog>,
     hosts: Arc<HostStore>,
@@ -451,30 +500,25 @@ impl SshManager {
                 Box::pin(client::connect_stream(config, channel.into_stream(), handler))
             }
             None => {
-                on_stage("resolving", &host.hostname);
+                let literal = host.hostname.parse::<std::net::IpAddr>().is_ok();
+                if !literal {
+                    on_stage("resolving", &host.hostname);
+                }
                 let addrs: Vec<std::net::SocketAddr> = tokio::time::timeout(budget, tokio::net::lookup_host((host.hostname.as_str(), host.port)))
                     .await
                     .map_err(|_| AppError::Ssh(format!("Looking up {} took too long", host.hostname)))?
-                    .map_err(|e| AppError::Ssh(format!("Could not find {}: {e}", host.hostname)))?
+                    .map_err(|_| AppError::Ssh(format!("No address found for {}. Check the spelling, or your network and DNS.", host.hostname)))?
                     .collect();
                 let first = addrs
                     .first()
                     .copied()
                     .ok_or_else(|| AppError::Ssh(format!("Could not find {}", host.hostname)))?;
-                on_stage("resolved", &first.ip().to_string());
-                let mut connected = Err(AppError::Ssh(format!("Could not find {}", host.hostname)));
-                for addr in &addrs {
-                    on_stage("connecting", &addr.to_string());
-                    connected = match tokio::time::timeout(budget, tokio::net::TcpStream::connect(addr)).await {
-                        Ok(Ok(s)) => Ok(s),
-                        Ok(Err(e)) => Err(AppError::Ssh(format!("Could not connect to {addr}: {e}"))),
-                        Err(_) => Err(AppError::Ssh(format!("Connection timed out after {}s", budget.as_secs()))),
-                    };
-                    if connected.is_ok() {
-                        break;
-                    }
+                if !literal {
+                    on_stage("resolved", &first.ip().to_string());
                 }
-                let stream = connected?;
+                on_stage("connecting", &first.to_string());
+                let label = if host.hostname.contains(':') { format!("[{}]:{}", host.hostname, host.port) } else { format!("{}:{}", host.hostname, host.port) };
+                let stream = race_connect(&addrs, budget, &label).await?;
                 let _ = stream.set_nodelay(true);
                 Box::pin(client::connect_stream(config, stream, handler))
             }
@@ -520,7 +564,7 @@ impl SshManager {
             }
             None => {
                 return Err(AppError::Ssh(format!(
-                    "Connection timed out after {}s",
+                    "{target} took the connection but did not finish the SSH handshake within {} s",
                     budget.as_secs()
                 )))
             }
@@ -786,5 +830,36 @@ fn append_capped(buf: &mut Vec<u8>, data: &[u8], cap: usize, truncated: &mut boo
     buf.extend_from_slice(&data[..take]);
     if take < data.len() {
         *truncated = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn address_families_take_turns_starting_with_the_first() {
+        let a: Vec<SocketAddr> = ["[::1]:22", "[::2]:22", "1.1.1.1:22", "[::3]:22", "2.2.2.2:22"].iter().map(|s| s.parse().unwrap()).collect();
+        let order: Vec<String> = connect_order(&a).iter().map(ToString::to_string).collect();
+        assert_eq!(order, ["[::1]:22", "1.1.1.1:22", "[::2]:22", "2.2.2.2:22", "[::3]:22"]);
+        assert!(connect_order(&[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_dead_first_address_does_not_hold_up_a_live_one() {
+        let live = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dead: SocketAddr = "192.0.2.1:22".parse().unwrap();
+        let started = std::time::Instant::now();
+        let stream = race_connect(&[dead, live.local_addr().unwrap()], std::time::Duration::from_secs(10), "test:22").await;
+        assert!(stream.is_ok());
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "{:?}", started.elapsed());
+    }
+
+    #[tokio::test]
+    async fn nobody_answering_ends_after_the_budget_with_the_host_named() {
+        let dead: SocketAddr = "192.0.2.1:22".parse().unwrap();
+        let err = race_connect(&[dead], std::time::Duration::from_millis(400), "example.com:22").await.unwrap_err();
+        assert!(err.to_string().contains("example.com:22 did not answer"), "{err}");
     }
 }

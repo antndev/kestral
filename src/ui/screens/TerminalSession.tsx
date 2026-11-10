@@ -3,7 +3,6 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, MouseEvent as 
 import type { Host } from "../../api";
 import { termBus } from "../termBus";
 import type { PaneStage, SessionStatus } from "../termBus";
-import { MONO } from "../mock";
 import { CloseIcon, CollapseIcon, DotsIcon, RefreshIcon } from "../icons";
 import { MAX_PANES, dnd, equalShare, leaves, paneHost, paneStore, shape } from "../panes";
 import type { Layout, PaneSpec, Side, Zone } from "../panes";
@@ -455,7 +454,7 @@ export function TerminalSession({
       {menu.open && ids.includes(menu.open.key) && <ItemMenu menu={menu} label="Pane actions" items={paneItems} />}
 
       <footer style={{ display: "flex", alignItems: "center", gap: 16, height: 28, flex: "none", padding: "0 6px 0 12px", borderTop: "1px solid var(--line)", background: "var(--bg-side)", color: "var(--text-2)", fontSize: 12, boxSizing: "border-box", whiteSpace: "nowrap", overflow: "hidden" }}>
-        <span title={`${focusHost.username}@${focusHost.hostname}${focusHost.port !== 22 ? `:${focusHost.port}` : ""}`} style={{ flex: "none", maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis", fontFamily: MONO, fontSize: 11 }}>
+        <span title={`${focusHost.username}@${focusHost.hostname}${focusHost.port !== 22 ? `:${focusHost.port}` : ""}`} style={{ flex: "none", maxWidth: "40%", overflow: "hidden", textOverflow: "ellipsis" }}>
           {focusHost.username}@{focusHost.hostname}
           {focusHost.port !== 22 ? `:${focusHost.port}` : ""}
         </span>

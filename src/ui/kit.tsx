@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode, Ref } from "react";
 import { SearchIcon } from "./icons";
-import { MONO } from "./mock";
 
 export const srOnly: CSSProperties = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" };
 export const oneLine: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
@@ -10,7 +9,8 @@ export const pageBtn: CSSProperties = { display: "flex", alignItems: "center", g
 export const primaryBtn: CSSProperties = { ...pageBtn, border: "1px solid var(--btn-line)", background: "var(--btn)", color: "var(--btn-text)", fontWeight: 500 };
 export const smallBtn: CSSProperties = { display: "flex", alignItems: "center", gap: 6, height: 28, padding: "0 10px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)", color: "var(--text)", fontSize: 12, cursor: "pointer", boxSizing: "border-box", whiteSpace: "nowrap" };
 export const sectionLabel: CSSProperties = { margin: "0 0 8px", fontSize: 12, fontWeight: 500, color: "var(--text-2)" };
-export const mono: CSSProperties = { fontFamily: MONO, fontSize: 12 };
+export const tabular: CSSProperties = { fontVariantNumeric: "tabular-nums" };
+const blockHead: CSSProperties = { margin: "0 0 10px", paddingBottom: 8, borderBottom: "1px solid var(--line)", fontSize: 13, fontWeight: 500, color: "var(--text)" };
 export const muted: CSSProperties = { color: "var(--text-3)" };
 export const chip: CSSProperties = { display: "inline-flex", alignItems: "center", maxWidth: 200, height: 24, padding: "0 10px", borderRadius: 12, background: "var(--bg-raised)", color: "var(--text)", fontSize: 12, boxSizing: "border-box", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 export const th: CSSProperties = { height: 32, padding: "0 12px", fontWeight: 500, textAlign: "left", color: "var(--text-2)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
@@ -216,7 +216,7 @@ export function Facts({ rows }: { rows: Fact[] }) {
 export function Block({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div style={{ minWidth: 0 }}>
-      <h3 style={sectionLabel}>{title}</h3>
+      <h3 style={blockHead}>{title}</h3>
       {children}
     </div>
   );

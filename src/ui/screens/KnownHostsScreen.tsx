@@ -521,7 +521,7 @@ export function KnownHostsScreen(p: {
                         </span>
                         {changed && <span style={{ display: "inline-flex", alignItems: "center", height: 18, padding: "0 6px", borderRadius: 9, background: "var(--warn-tint)", color: "var(--warn)", fontSize: 11, fontWeight: 500 }}>Changed</span>}
                       </div>
-                      {secondary && <div title={e.hosts} style={{ fontFamily: MONO, fontSize: 11, color: "var(--text-2)", overflowWrap: "anywhere" }}>{secondary}</div>}
+                      {secondary && <div title={e.hosts} style={{ fontSize: 12, color: "var(--text-2)", overflowWrap: "anywhere" }}>{secondary}</div>}
                     </td>
                     <td style={td}>
                       {!e.hashed ? e.port : matched ? [...new Set(matched.map((h) => h.port))].join(", ") : <span style={{ color: "var(--text-3)" }} title="The port is part of the hashed name, so it cannot be shown.">unknown</span>}

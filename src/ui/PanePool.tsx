@@ -8,7 +8,7 @@ import { paneHost, paneStore } from "./panes";
 // of with the app.
 const SshTerminal = lazy(() => import("../SshTerminal").then((m) => ({ default: m.SshTerminal })));
 
-export type PoolPane = { id: string; tabId: string; host: Host; focused: boolean; initialCommand?: string };
+export type PoolPane = { id: string; tabId: string; host: Host; focused: boolean; alone: boolean; initialCommand?: string };
 
 export function PanePool({ panes, onBell, onEditHost, onClosePane }: { panes: PoolPane[]; onBell(paneId: string): void; onEditHost(h: Host): void; onClosePane(paneId: string): void }) {
   const parkRef = useRef<HTMLDivElement | null>(null);
@@ -50,6 +50,7 @@ export function PanePool({ panes, onBell, onEditHost, onClosePane }: { panes: Po
               startupCommand={p.host.options?.startup_command}
               encoding={p.host.options?.encoding}
               themeOverride={p.host.options?.terminal_theme}
+              alone={p.alone}
               onClosePane={() => onClosePane(p.id)}
               onEditHost={() => onEditHost(p.host)}
               onProcess={(proc) => paneStore.patch(p.id, { proc })}

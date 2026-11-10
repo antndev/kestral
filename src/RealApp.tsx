@@ -1194,7 +1194,7 @@ function Workspace({ theme, onLocked }: { theme: "dark" | "light"; onLocked: () 
     const s = paneTabs.get(id);
     if (!s) return [];
     const host = hosts.find((h) => h.id === specs[id]?.hostId) ?? s.host;
-    return [{ id, tabId: s.tabId, host, focused: activeTab === s.tabId && s.focus === id, initialCommand: specs[id]?.initialCommand }];
+    return [{ id, tabId: s.tabId, host, focused: activeTab === s.tabId && s.focus === id, alone: !s.layout || leaves(s.layout).length === 1, initialCommand: specs[id]?.initialCommand }];
   });
 
   let sectionBody: ReactNode;
